@@ -28,7 +28,7 @@ def generate_launch_description():
     )
 
     world_arg = DeclareLaunchArgument(
-        'world', default_value='small_best_city.world',
+        'world', default_value='sidewalk.world',
         description='Path assoluto al world file'
     )
 
@@ -43,7 +43,7 @@ def generate_launch_description():
     )
 
     y_arg = DeclareLaunchArgument(
-        'y', default_value='1.5',
+        'y', default_value='2.8',
         description='y coordinate of spawned robot'
     )
 
@@ -110,7 +110,7 @@ def generate_launch_description():
             "-topic", "robot_description",
             "-x", LaunchConfiguration('x'), 
             "-y", LaunchConfiguration('y'), 
-            "-z", "0.5", 
+            "-z", "0.2", 
             "-Y", LaunchConfiguration('yaw')  # Initial spawn position
         ],
         output="screen",
