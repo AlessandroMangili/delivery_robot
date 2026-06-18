@@ -2,8 +2,8 @@ segmentation_node:
   ros__parameters:
     image_topic: /camera/image
     model_name: nvidia/segformer-b0-finetuned-cityscapes-1024-1024
-    infer_width: 1024
-    infer_height: 512
+    infer_width: 512
+    infer_height: 246
     publish_overlay: true
 
 semantic_costmap_node:
