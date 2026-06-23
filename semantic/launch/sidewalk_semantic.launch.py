@@ -1,14 +1,36 @@
 import os
-from ament_index_python.packages import get_package_share_directory
+from ament_index_python.packages import get_package_share_directory, get_package_prefix
 from launch import LaunchDescription
+from launch.actions import ExecuteProcess
 from launch_ros.actions import Node
+
 
 def generate_launch_description():
     params = os.path.join(
         get_package_share_directory('semantic'), 'config', 'params.yaml')
+
+    use_sim_time = {'use_sim_time': True}
+
+    costmap = Node(
+        package='semantic', executable='semantic_costmap_node',
+        name='semantic_costmap_node', output='screen',
+        parameters=[params, use_sim_time],
+    )
+
+    overlay = Node(
+        package='semantic', executable='semantic_overlay_node',
+        name='semantic_overlay_node', output='screen',
+        parameters=[use_sim_time],
+    )
+    
+    gt_relay = Node(
+        package='semantic', executable='gt_segmentation_node',
+        name='gt_segmentation_node', output='screen',
+        parameters=[params, use_sim_time],
+    )
+
     return LaunchDescription([
-        Node(package='semantic', executable='segmentation_node',
-             name='segmentation_node', output='screen', parameters=[params]),
-        Node(package='semantic', executable='semantic_costmap_node',
-             name='semantic_costmap_node', output='screen', parameters=[params]),
+        gt_relay,
+        costmap,
+        overlay
     ])
