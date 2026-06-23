@@ -1,0 +1,120 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://ros.org/wiki/xacro">
+     <xacro:arg name="namespace" default=""/>
+     <xacro:property name="namespace" value="$(arg namespace)"/>
+     <gazebo>
+          <plugin filename="gz-sim-diff-drive-system" name="gz::sim::systems::DiffDrive">
+               <topic>/cmd_vel</topic>
+               <left_joint>wheel_left_joint</left_joint>
+               <right_joint>wheel_right_joint</right_joint>
+               <wheel_separation>0.288</wheel_separation>
+               <wheel_radius>0.033</wheel_radius>
+               <max_velocity>3.0</max_velocity>
+               <max_linear_acceleration>1</max_linear_acceleration>
+               <min_linear_acceleration>-1</min_linear_acceleration>
+               <max_angular_acceleration>2</max_angular_acceleration>
+               <min_angular_acceleration>-2</min_angular_acceleration>
+               <max_linear_velocity>0.5</max_linear_velocity>
+               <min_linear_velocity>-0.5</min_linear_velocity>
+               <max_angular_velocity>1</max_angular_velocity>
+               <min_angular_velocity>-1</min_angular_velocity>
+               <odom_topic>/odom</odom_topic>
+               <tf_topic>/tf</tf_topic>
+               <frame_id>odom</frame_id>
+               <child_frame_id>base_footprint</child_frame_id>
+               <odom_publish_frequency>30</odom_publish_frequency>
+          </plugin>
+          <plugin filename="gz-sim-joint-state-publisher-system" name="gz::sim::systems::JointStatePublisher">
+               <topic>joint_states</topic>
+               <joint_name>wheel_left_joint</joint_name>
+               <joint_name>wheel_right_joint</joint_name>
+          </plugin>
+     </gazebo>
+     <gazebo reference="imu_link">
+          <sensor name="imu" type="imu">
+               <always_on>1</always_on>
+               <update_rate>50</update_rate>
+               <visualize>true</visualize>
+               <topic>imu</topic>
+               <enable_metrics>true</enable_metrics>
+               <gz_frame_id>imu_link</gz_frame_id>
+          </sensor>
+     </gazebo>
+     <gazebo reference="base_scan">
+          <sensor name="gpu_lidar" type="gpu_lidar">
+               <update_rate>10</update_rate>
+               <topic>scan</topic>
+               <gz_frame_id>base_scan</gz_frame_id>
+               <lidar>
+                    <scan>
+                         <horizontal>
+                              <samples>720</samples>
+                              <resolution>1</resolution>
+                              <min_angle>-3.14156</min_angle>
+                              <max_angle>3.14156</max_angle>
+                         </horizontal>
+                    </scan>
+                    <range>
+                         <min>0.05</min>
+                         <max>10.0</max>
+                         <resolution>0.01</resolution>
+                    </range>
+                    <noise>
+                         <type>gaussian</type>
+                         <mean>0.0</mean>
+                         <stddev>0.01</stddev>
+                    </noise>
+                    <frame_id>base_scan</frame_id>
+               </lidar>
+               <always_on>1</always_on>
+               <visualize>true</visualize>
+          </sensor>
+     </gazebo>
+     <gazebo reference="camera_link">
+          <sensor name="rgbd_camera" type="rgbd_camera">
+               <camera>
+                    <horizontal_fov>1.25</horizontal_fov>
+                    <image>
+                         <width>320</width>
+                         <height>240</height>
+                    </image>
+                    <clip>
+                         <near>0.3</near>
+                         <far>15</far>
+                    </clip>
+                    <optical_frame_id>camera_rgb_optical_frame</optical_frame_id>
+               </camera>
+               <always_on>1</always_on>
+               <update_rate>20</update_rate>
+               <visualize>true</visualize>
+               <topic>camera</topic>
+               <gz_frame_id>camera_link</gz_frame_id>
+          </sensor>
+
+          <!-- ===== Segmentation camera ground-truth =====
+          STESSA risoluzione / FOV / clip / optical_frame della rgbd_camera,
+          cosi' gli intrinseci (/camera/camera_info) e la TF coincidono e il
+          semantic_costmap_node funziona senza modifiche.
+          Pubblica i topic gz:  /semantic/labels_map  e  /semantic/colored_map -->
+          <sensor name="semantic_camera" type="segmentation">
+               <topic>semantic</topic>
+               <camera>
+                    <segmentation_type>semantic</segmentation_type>
+                    <horizontal_fov>1.25</horizontal_fov>
+                    <image>
+                         <width>320</width>
+                         <height>240</height>
+                    </image>
+                    <clip>
+                         <near>0.3</near>
+                         <far>15</far>
+                    </clip>
+                    <optical_frame_id>camera_rgb_optical_frame</optical_frame_id>
+               </camera>
+               <always_on>1</always_on>
+               <update_rate>20</update_rate>
+               <visualize>true</visualize>
+               <gz_frame_id>camera_link</gz_frame_id>
+          </sensor>
+     </gazebo>
+</robot>

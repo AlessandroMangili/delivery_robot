@@ -11,10 +11,10 @@ from launch_ros.parameter_descriptions import ParameterValue
 
 def generate_launch_description():
 
-    pkg_spawn = get_package_share_directory('spawn')
+    pkg_simulation = get_package_share_directory('simulation')
     pkg_ros_gz_sim = get_package_share_directory('ros_gz_sim')
 
-    gazebo_models_path, ignore_last_dir = os.path.split(pkg_spawn)
+    gazebo_models_path, ignore_last_dir = os.path.split(pkg_simulation)
     #gazebo_models_path = "/home/ubuntu/gazebo_models"
     os.environ["GZ_SIM_RESOURCE_PATH"] += os.pathsep + gazebo_models_path
 
@@ -59,7 +59,7 @@ def generate_launch_description():
     )
 
     urdf_file_path = PathJoinSubstitution([
-        pkg_spawn,
+        pkg_simulation,
         "urdf",
         LaunchConfiguration('model')
     ])
@@ -69,7 +69,7 @@ def generate_launch_description():
             os.path.join(pkg_ros_gz_sim, 'launch', 'gz_sim.launch.py'),
         ),
         launch_arguments={'gz_args': [PathJoinSubstitution([
-            pkg_spawn,
+            pkg_simulation,
             'worlds',
             LaunchConfiguration('world')
         ]),
@@ -81,7 +81,7 @@ def generate_launch_description():
     rviz_node = Node(
         package='rviz2',
         executable='rviz2',
-        arguments=['-d', PathJoinSubstitution([pkg_spawn, 'rviz', LaunchConfiguration('rviz_config')])],
+        arguments=['-d', PathJoinSubstitution([pkg_simulation, 'rviz', LaunchConfiguration('rviz_config')])],
         condition=IfCondition(LaunchConfiguration('rviz')),
         parameters=[
             {'use_sim_time': LaunchConfiguration('use_sim_time')},
