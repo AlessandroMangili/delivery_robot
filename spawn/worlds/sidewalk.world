@@ -94,7 +94,9 @@
             <specular>0.050 0.050 0.050 1.000</specular>
           </material>
         </visual>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>1</label>
+      </plugin>
     </model>
     <model name="sidewalk_surface">
       <pose>70.000 -2.500 0.030 0.000 0.000 0.000</pose>
@@ -127,7 +129,9 @@
             </pbr>
           </material>
         </visual>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>2</label>
+      </plugin>
     </model>
     <model name="curb">
       <pose>70.000 0.000 0.040 0.000 0.000 0.000</pose>
@@ -152,7 +156,9 @@
             <specular>0.050 0.050 0.050 1.000</specular>
           </material>
         </visual>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>1</label>
+      </plugin>
     </model>
     <model name="grass_strip">
       <pose>70.000 -9.500 0.015 0.000 0.000 0.000</pose>
@@ -177,7 +183,9 @@
             <specular>0.050 0.050 0.050 1.000</specular>
           </material>
         </visual>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>10</label>
+      </plugin>
     </model>
     
 
@@ -268,7 +276,9 @@
             </sphere>
           </geometry>
         </collision>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>9</label>
+      </plugin>
     </model>
     <model name="tree_2">
       <pose>18.000 -3.850 0.000 0.000 0.000 0.000</pose>
@@ -357,7 +367,9 @@
             </sphere>
           </geometry>
         </collision>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>9</label>
+      </plugin>
     </model>
     <model name="tree_3">
       <pose>30.000 -4.250 0.000 0.000 0.000 0.000</pose>
@@ -446,7 +458,9 @@
             </sphere>
           </geometry>
         </collision>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>9</label>
+      </plugin>
     </model>
     <model name="tree_4">
       <pose>43.000 -3.850 0.000 0.000 0.000 0.000</pose>
@@ -535,7 +549,9 @@
             </sphere>
           </geometry>
         </collision>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>9</label>
+      </plugin>
     </model>
     <model name="tree_5">
       <pose>56.000 -4.250 0.000 0.000 0.000 0.000</pose>
@@ -624,7 +640,9 @@
             </sphere>
           </geometry>
         </collision>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>9</label>
+      </plugin>
     </model>
     <model name="tree_6">
       <pose>69.000 -3.850 0.000 0.000 0.000 0.000</pose>
@@ -713,7 +731,9 @@
             </sphere>
           </geometry>
         </collision>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>9</label>
+      </plugin>
     </model>
     <model name="tree_7">
       <pose>82.000 -4.250 0.000 0.000 0.000 0.000</pose>
@@ -802,7 +822,9 @@
             </sphere>
           </geometry>
         </collision>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>9</label>
+      </plugin>
     </model>
     <model name="tree_8">
       <pose>96.000 -3.850 0.000 0.000 0.000 0.000</pose>
@@ -891,7 +913,9 @@
             </sphere>
           </geometry>
         </collision>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>9</label>
+      </plugin>
     </model>
     <model name="tree_9">
       <pose>110.000 -4.250 0.000 0.000 0.000 0.000</pose>
@@ -980,7 +1004,9 @@
             </sphere>
           </geometry>
         </collision>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>9</label>
+      </plugin>
     </model>
     <model name="tree_10">
       <pose>124.000 -3.850 0.000 0.000 0.000 0.000</pose>
@@ -1069,7 +1095,9 @@
             </sphere>
           </geometry>
         </collision>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>9</label>
+      </plugin>
     </model>
     <model name="lamp_1">
       <pose>15.000 2.200 0.000 0.000 0.000 0.000</pose>
@@ -1124,7 +1152,9 @@
             <specular>0.050 0.050 0.050 1.000</specular>
           </material>
         </visual>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>6</label>
+      </plugin>
     </model>
     <model name="lamp_2">
       <pose>40.000 2.200 0.000 0.000 0.000 0.000</pose>
@@ -1179,7 +1209,9 @@
             <specular>0.050 0.050 0.050 1.000</specular>
           </material>
         </visual>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>6</label>
+      </plugin>
     </model>
     <model name="lamp_3">
       <pose>65.000 2.200 0.000 0.000 0.000 0.000</pose>
@@ -1234,7 +1266,9 @@
             <specular>0.050 0.050 0.050 1.000</specular>
           </material>
         </visual>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>6</label>
+      </plugin>
     </model>
     <model name="lamp_4">
       <pose>90.000 2.200 0.000 0.000 0.000 0.000</pose>
@@ -1289,7 +1323,9 @@
             <specular>0.050 0.050 0.050 1.000</specular>
           </material>
         </visual>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>6</label>
+      </plugin>
     </model>
     <model name="lamp_5">
       <pose>115.000 2.200 0.000 0.000 0.000 0.000</pose>
@@ -1344,7 +1380,9 @@
             <specular>0.050 0.050 0.050 1.000</specular>
           </material>
         </visual>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>6</label>
+      </plugin>
     </model>
     <model name="bench_1">
       <pose>26.000 -3.400 0.000 0.000 0.000 0.000</pose>
@@ -1434,7 +1472,9 @@
             <specular>0.050 0.050 0.050 1.000</specular>
           </material>
         </visual>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>3</label>
+      </plugin>
     </model>
     <model name="bench_2">
       <pose>72.000 -3.450 0.000 0.000 0.000 3.142</pose>
@@ -1524,7 +1564,9 @@
             <specular>0.050 0.050 0.050 1.000</specular>
           </material>
         </visual>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>3</label>
+      </plugin>
     </model>
     <model name="bench_3">
       <pose>108.000 -3.300 0.000 0.000 0.000 0.000</pose>
@@ -1614,7 +1656,9 @@
             <specular>0.050 0.050 0.050 1.000</specular>
           </material>
         </visual>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>3</label>
+      </plugin>
     </model>
     <model name="trash_1">
       <pose>12.000 -3.000 0.000 0.000 0.000 0.000</pose>
@@ -1643,7 +1687,9 @@
             <specular>0.050 0.050 0.050 1.000</specular>
           </material>
         </visual>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>3</label>
+      </plugin>
     </model>
     <model name="trash_2">
       <pose>47.000 -3.000 0.000 0.000 0.000 0.000</pose>
@@ -1672,7 +1718,9 @@
             <specular>0.050 0.050 0.050 1.000</specular>
           </material>
         </visual>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>3</label>
+      </plugin>
     </model>
     <model name="trash_3">
       <pose>88.000 -3.000 0.000 0.000 0.000 0.000</pose>
@@ -1701,7 +1749,9 @@
             <specular>0.050 0.050 0.050 1.000</specular>
           </material>
         </visual>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>3</label>
+      </plugin>
     </model>
     <model name="trash_4">
       <pose>128.000 -3.000 0.000 0.000 0.000 0.000</pose>
@@ -1730,7 +1780,9 @@
             <specular>0.050 0.050 0.050 1.000</specular>
           </material>
         </visual>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>3</label>
+      </plugin>
     </model>
     <model name="awning_1">
       <pose>21.000 -9.000 3.400 0.000 0.000 0.000</pose>
@@ -1749,7 +1801,9 @@
             <specular>0.050 0.050 0.050 1.000</specular>
           </material>
         </visual>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>3</label>
+      </plugin>
     </model>
     <model name="awning_2">
       <pose>60.000 -8.500 3.400 0.000 0.000 0.000</pose>
@@ -1768,7 +1822,9 @@
             <specular>0.050 0.050 0.050 1.000</specular>
           </material>
         </visual>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>3</label>
+      </plugin>
     </model>
     <model name="awning_3">
       <pose>100.000 -9.000 3.400 0.000 0.000 0.000</pose>
@@ -1787,7 +1843,9 @@
             <specular>0.050 0.050 0.050 1.000</specular>
           </material>
         </visual>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>3</label>
+      </plugin>
     </model>
     <model name="person_1">
       <pose>18.000 -2.300 0.000 0.000 0.000 0.150</pose>
@@ -1929,7 +1987,9 @@
             <specular>0.050 0.050 0.050 1.000</specular>
           </material>
         </visual>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>12</label>
+      </plugin>
     </model>
     <model name="person_2">
       <pose>49.000 -2.000 0.000 0.000 0.000 2.300</pose>
@@ -2071,7 +2131,9 @@
             <specular>0.050 0.050 0.050 1.000</specular>
           </material>
         </visual>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>12</label>
+      </plugin>
     </model>
     <model name="person_3">
       <pose>77.000 -2.500 0.000 0.000 0.000 -1.000</pose>
@@ -2213,7 +2275,9 @@
             <specular>0.050 0.050 0.050 1.000</specular>
           </material>
         </visual>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>12</label>
+      </plugin>
     </model>
     <model name="person_4">
       <pose>114.000 -2.150 0.000 0.000 0.000 1.200</pose>
@@ -2355,7 +2419,9 @@
             <specular>0.050 0.050 0.050 1.000</specular>
           </material>
         </visual>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>12</label>
+      </plugin>
     </model>
     <model name="pothole_1">
       <pose>14.000 -1.400 0.000 0.000 0.000 0.000</pose>
@@ -2389,7 +2455,9 @@
             <specular>0.050 0.050 0.050 1.000</specular>
           </material>
         </visual>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>1</label>
+      </plugin>
     </model>
     <model name="pothole_2">
       <pose>31.000 -2.900 0.000 0.000 0.000 0.000</pose>
@@ -2423,7 +2491,9 @@
             <specular>0.050 0.050 0.050 1.000</specular>
           </material>
         </visual>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>1</label>
+      </plugin>
     </model>
     <model name="pothole_3">
       <pose>52.000 -1.800 0.000 0.000 0.000 0.000</pose>
@@ -2457,7 +2527,9 @@
             <specular>0.050 0.050 0.050 1.000</specular>
           </material>
         </visual>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>1</label>
+      </plugin>
     </model>
     <model name="pothole_4">
       <pose>67.000 -2.500 0.000 0.000 0.000 0.000</pose>
@@ -2491,7 +2563,9 @@
             <specular>0.050 0.050 0.050 1.000</specular>
           </material>
         </visual>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>1</label>
+      </plugin>
     </model>
     <model name="pothole_5">
       <pose>93.000 -1.300 0.000 0.000 0.000 0.000</pose>
@@ -2525,7 +2599,9 @@
             <specular>0.050 0.050 0.050 1.000</specular>
           </material>
         </visual>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>1</label>
+      </plugin>
     </model>
     <model name="pothole_6">
       <pose>121.000 -2.600 0.000 0.000 0.000 0.000</pose>
@@ -2559,7 +2635,9 @@
             <specular>0.050 0.050 0.050 1.000</specular>
           </material>
         </visual>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>1</label>
+      </plugin>
     </model>
     <model name="pothole_7">
       <pose>132.000 -1.900 0.000 0.000 0.000 0.000</pose>
@@ -2593,7 +2671,9 @@
             <specular>0.050 0.050 0.050 1.000</specular>
           </material>
         </visual>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>1</label>
+      </plugin>
     </model>
     <model name="planter_1">
       <pose>7.000 -2.700 0.160 0.000 0.000 0.000</pose>
@@ -2618,7 +2698,9 @@
             <specular>0.050 0.050 0.050 1.000</specular>
           </material>
         </visual>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>3</label>
+      </plugin>
     </model>
     <model name="shrub_1">
       <pose>7.000 -2.700 0.550 0.000 0.000 0.000</pose>
@@ -2643,7 +2725,9 @@
             <specular>0.050 0.050 0.050 1.000</specular>
           </material>
         </visual>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>9</label>
+      </plugin>
     </model>
     <model name="planter_2">
       <pose>36.000 -2.700 0.160 0.000 0.000 0.000</pose>
@@ -2668,7 +2752,9 @@
             <specular>0.050 0.050 0.050 1.000</specular>
           </material>
         </visual>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>3</label>
+      </plugin>
     </model>
     <model name="shrub_2">
       <pose>36.000 -2.700 0.550 0.000 0.000 0.000</pose>
@@ -2693,7 +2779,9 @@
             <specular>0.050 0.050 0.050 1.000</specular>
           </material>
         </visual>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>9</label>
+      </plugin>
     </model>
     <model name="planter_3">
       <pose>80.000 -2.700 0.160 0.000 0.000 0.000</pose>
@@ -2718,7 +2806,9 @@
             <specular>0.050 0.050 0.050 1.000</specular>
           </material>
         </visual>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>3</label>
+      </plugin>
     </model>
     <model name="shrub_3">
       <pose>80.000 -2.700 0.550 0.000 0.000 0.000</pose>
@@ -2743,7 +2833,9 @@
             <specular>0.050 0.050 0.050 1.000</specular>
           </material>
         </visual>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>9</label>
+      </plugin>
     </model>
     <model name="planter_4">
       <pose>104.000 -2.700 0.160 0.000 0.000 0.000</pose>
@@ -2768,7 +2860,9 @@
             <specular>0.050 0.050 0.050 1.000</specular>
           </material>
         </visual>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>3</label>
+      </plugin>
     </model>
     <model name="shrub_4">
       <pose>104.000 -2.700 0.550 0.000 0.000 0.000</pose>
@@ -2793,7 +2887,9 @@
             <specular>0.050 0.050 0.050 1.000</specular>
           </material>
         </visual>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>9</label>
+      </plugin>
     </model>
     <model name="planter_5">
       <pose>134.000 -2.700 0.160 0.000 0.000 0.000</pose>
@@ -2818,7 +2914,9 @@
             <specular>0.050 0.050 0.050 1.000</specular>
           </material>
         </visual>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>3</label>
+      </plugin>
     </model>
     <model name="shrub_5">
       <pose>134.000 -2.700 0.550 0.000 0.000 0.000</pose>
@@ -2843,7 +2941,9 @@
             <specular>0.050 0.050 0.050 1.000</specular>
           </material>
         </visual>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>9</label>
+      </plugin>
     </model>
     <model name="crosswalk_1">
       <pose>132.000 7.500 0.011 0.000 0.000 0.000</pose>
@@ -2868,7 +2968,9 @@
             <specular>0.050 0.050 0.050 1.000</specular>
           </material>
         </visual>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>1</label>
+      </plugin>
     </model>
     <model name="crosswalk_2">
       <pose>133.100 7.500 0.011 0.000 0.000 0.000</pose>
@@ -2893,7 +2995,9 @@
             <specular>0.050 0.050 0.050 1.000</specular>
           </material>
         </visual>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>1</label>
+      </plugin>
     </model>
     <model name="crosswalk_3">
       <pose>134.200 7.500 0.011 0.000 0.000 0.000</pose>
@@ -2918,7 +3022,9 @@
             <specular>0.050 0.050 0.050 1.000</specular>
           </material>
         </visual>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>1</label>
+      </plugin>
     </model>
     <model name="crosswalk_4">
       <pose>135.300 7.500 0.011 0.000 0.000 0.000</pose>
@@ -2943,7 +3049,9 @@
             <specular>0.050 0.050 0.050 1.000</specular>
           </material>
         </visual>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>1</label>
+      </plugin>
     </model>
     <model name="crosswalk_5">
       <pose>136.400 7.500 0.011 0.000 0.000 0.000</pose>
@@ -2968,7 +3076,9 @@
             <specular>0.050 0.050 0.050 1.000</specular>
           </material>
         </visual>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>1</label>
+      </plugin>
     </model>
     <model name="crosswalk_6">
       <pose>137.500 7.500 0.011 0.000 0.000 0.000</pose>
@@ -2993,7 +3103,9 @@
             <specular>0.050 0.050 0.050 1.000</specular>
           </material>
         </visual>
-      </link>      
+      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>1</label>
+      </plugin>
     </model>
   </world>
 </sdf>
