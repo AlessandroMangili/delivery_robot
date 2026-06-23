@@ -1,20 +1,13 @@
 #!/usr/bin/env python3
 """
 Proiezione semantica -> costmap del marciapiede.
-Mappa PERSISTENTE nel frame target (es. 'map') con FUSIONE robusta:
-
-  - inerzia (media esponenziale): ogni cella tiene una stima che si aggiorna
-    verso le nuove osservazioni invece di sovrascrivere -> osservazioni multiple
-    convergono al valore vero e gli errori isolati vengono lavati via.
-  - peso per distanza: un pixel proiettato vicino e' molto piu' affidabile di uno
-    lontano (l'IPM si stira vicino all'orizzonte). Le osservazioni vicine pesano
-    molto, quelle lontane quasi nulla.
-  - soglia di commit: una cella MAI vista viene "creata" solo se l'osservazione e'
-    abbastanza vicina. Cosi' le bave lontane non scrivono mai celle nuove, e quando
-    il robot ci ripassa vicino le celle sbagliate vengono corrette.
-
-Risultato: mappi vicino e accurato, e la mappa lunga si costruisce nel tempo
-mentre ti muovi, autocorreggendosi al ripasso.
+Mappa PERSISTENTE nel frame target ('map') con:
+  - fusione robusta (inerzia + peso per distanza + soglia di commit);
+  - OCCLUSION MASKING: i pixel delle classi verticali (ostacoli, costo alto)
+    non descrivono il suolo, quindi NON si proiettano lontano sul piano. Si
+    tengono solo entro 'obstacle_max_range' (la base reale dell'oggetto) e si
+    scartano le proiezioni piu' lontane (lo smearing). Cosi' un ostacolo non
+    sporca piu' le celle di suolo gia' mappate quando lo si guarda di lato.
 """
 
 import rclpy
@@ -29,8 +22,8 @@ from rclpy.duration import Duration
 
 
 CLASS_COST = {
-    1: 0,     # sidewalk -> preferito
-    9: 70,    # terrain (erba/aiuola)
+    1: 0,     # sidewalk
+    9: 70,    # terrain
     8: 80,    # vegetation
     0: 90,    # road
     2: 100,   # building
@@ -38,7 +31,7 @@ CLASS_COST = {
     4: 100,   # fence
     5: 100,   # pole
     7: 100,   # traffic sign
-    11: 100,  # person (poi: sottosistema dinamico)
+    11: 100,  # person
     12: 100,  # rider
     13: 100,  # car
     14: 100, 15: 100, 16: 100, 17: 100, 18: 100,
@@ -77,6 +70,9 @@ class SemanticCostmapNode(Node):
         self.declare_parameter('fuse_alpha_near', 0.45)
         self.declare_parameter('fuse_alpha_far', 0.03)
         self.declare_parameter('fuse_commit_w', 0.20)
+        # --- occlusion masking ---
+        self.declare_parameter('obstacle_cost_min', 95)    # >= -> classe "verticale" (ostacolo)
+        self.declare_parameter('obstacle_max_range', 3.0)  # gli ostacoli si proiettano solo entro qui
 
         self.target = self.get_parameter('target_frame').value
         self.cam_frame = self.get_parameter('camera_optical_frame').value
@@ -91,6 +87,8 @@ class SemanticCostmapNode(Node):
         self.a_near = self.get_parameter('fuse_alpha_near').value
         self.a_far = self.get_parameter('fuse_alpha_far').value
         self.w_commit = self.get_parameter('fuse_commit_w').value
+        self.obs_cost_min = self.get_parameter('obstacle_cost_min').value
+        self.obs_max_range = self.get_parameter('obstacle_max_range').value
 
         self.gn = int(self.global_size_m / self.res)
         self.gox = -self.global_size_m / 2.0
@@ -115,8 +113,8 @@ class SemanticCostmapNode(Node):
             self.cost_lut[cls] = c
 
         self.get_logger().info(
-            f'Semantic costmap (persistente, fusione pesata) pronto. '
-            f'frame={self.target}, mappa {self.global_size_m}m.')
+            f'Semantic costmap (persistente, fusione pesata, occlusion masking) pronto. '
+            f'frame={self.target}.')
 
     def info_cb(self, msg: CameraInfo):
         self.K = np.array(msg.k).reshape(3, 3)
@@ -163,16 +161,25 @@ class SemanticCostmapNode(Node):
         ok = valid & (t > 0)
         pts = origin[None, :] + t[:, None] * dir_world
         X, Y = pts[:, 0], pts[:, 1]
-
         dist = np.hypot(X - bx, Y - by)
-        ok = ok & (dist < self.max_range)
+
+        # costo per pixel
+        classes = seg[vv, uu]
+        costs = self.cost_lut[classes]
+
+        # --- OCCLUSION MASKING ---
+        # suolo (costo < soglia): fino a max_range.
+        # ostacoli verticali (costo >= soglia): solo entro obstacle_max_range
+        # (la base reale). Cosi' la parte alta dell'oggetto non si spalma sul suolo.
+        is_obs = costs >= self.obs_cost_min
+        within = np.where(is_obs,
+                          dist < self.obs_max_range,
+                          dist < self.max_range)
+        ok = ok & within
 
         gi = ((X - self.gox) / self.res).astype(int)
         gj = ((Y - self.goy) / self.res).astype(int)
         inside = ok & (gi >= 0) & (gi < self.gn) & (gj >= 0) & (gj < self.gn)
-
-        classes = seg[vv, uu]
-        costs = self.cost_lut[classes]
         use = inside & (costs >= 0)
 
         gi_u = gi[use]; gj_u = gj[use]

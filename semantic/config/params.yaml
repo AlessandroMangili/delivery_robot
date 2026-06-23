@@ -11,20 +11,22 @@
 
 gt_segmentation_relay:
   ros__parameters:
-    labels_topic: /semantic/labels_map        # bridge dalla segmentation camera
-    out_topic: /semantic/segmentation         # cosa consuma il costmap
-    publish_overlay: true                     # /semantic/overlay (debug RViz)
+    labels_topic: /semantic/labels_map      # bridge dalla segmentation camera
+    out_topic: /semantic/segmentation        # cosa consuma il costmap
+    publish_overlay: true                    # /semantic/overlay (debug RViz)
 
 semantic_costmap_node:
   ros__parameters:
-    target_frame: map                         # frame FISSO -> la mappa resta ferma nel mondo
+    target_frame: map                       # frame FISSO -> la mappa resta ferma nel mondo
     camera_optical_frame: camera_rgb_optical_frame
     base_frame: base_footprint
-    resolution: 0.05                          # m / cella
-    size_m: 8.0                               # lato finestra mobile (m)
-    pixel_stride: 4                           # sottocampionamento pixel
-    max_range: 6.0                            # m, oltre si ignora
-    min_row_frac: 0.6                         # usa solo la parte bassa dell'immagine (suolo)
-    fuse_alpha_near: 0.45                     # peso osservazione vicina
-    fuse_alpha_far: 0.03                      # peso osservazione lontana
-    fuse_commit_w: 0.20                       # soglia per creare una cella nuova
+    resolution: 0.05                         # m / cella
+    size_m: 8.0                              # lato finestra mobile (m)
+    pixel_stride: 4                          # sottocampionamento pixel
+    max_range: 5.0                           # m, oltre si ignora
+    min_row_frac: 0.55                       # usa solo la parte bassa dell'immagine (suolo)
+    fuse_alpha_near: 0.45    # peso osservazione vicina
+    fuse_alpha_far: 0.03     # peso osservazione lontana
+    fuse_commit_w: 0.20      # soglia per creare una cella nuova
+    obstacle_cost_min: 95    # classi >= -> ostacolo verticale
+    obstacle_max_range: 3.0  # ostacoli proiettati solo entro questa distanza (no smearing)
