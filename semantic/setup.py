@@ -30,6 +30,7 @@ setup(
         'console_scripts': [
             'segmentation_node = semantic.segmentation_node:main',
             'semantic_costmap_node = semantic.semantic_costmap_node:main',
+            'gt_segmentation_node = semantic.gt_segmentation_relay:main',
         ],
     },
 )

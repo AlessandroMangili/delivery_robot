@@ -1,11 +1,17 @@
 segmentation_node:
   ros__parameters:
+    # topic camera: deve combaciare con il bridge gz (vedi nota).
+    #  - RAW       -> /camera/image            (use_compressed: false)
+    #  - COMPRESSED-> /camera/image/compressed (use_compressed: true)
     image_topic: /camera/image
+    use_compressed: false
+    # SegFormer-B0 addestrato su Cityscapes: leggero e con la classe sidewalk.
     model_name: nvidia/segformer-b0-finetuned-cityscapes-1024-1024
-    infer_width: 512
-    infer_height: 246
+    infer_width: 1024
+    infer_height: 512
     publish_overlay: true
-
+    device: auto          # auto | cuda | cpu
+ 
 semantic_costmap_node:
   ros__parameters:
     target_frame: odom

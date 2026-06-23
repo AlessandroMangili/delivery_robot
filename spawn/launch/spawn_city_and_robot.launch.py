@@ -38,12 +38,12 @@ def generate_launch_description():
     )
 
     x_arg = DeclareLaunchArgument(
-        'x', default_value='0',
+        'x', default_value='1',
         description='x coordinate of spawned robot'
     )
 
     y_arg = DeclareLaunchArgument(
-        'y', default_value='2.8',
+        'y', default_value='-1',
         description='y coordinate of spawned robot'
     )
 
@@ -136,6 +136,7 @@ def generate_launch_description():
             "/scan/points@sensor_msgs/msg/PointCloud2@gz.msgs.PointCloudPacked",
             "/camera/depth_image@sensor_msgs/msg/Image@gz.msgs.Image",
             "/camera/points@sensor_msgs/msg/PointCloud2@gz.msgs.PointCloudPacked",
+            "/semantic/labels_map@sensor_msgs/msg/Image[gz.msgs.Image",
 
         ],
         output="screen",
