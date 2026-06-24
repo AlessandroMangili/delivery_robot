@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
 Proiezione semantica -> costmap del marciapiede.
-Mappa PERSISTENTE nel frame target ('map') con:
-  - fusione robusta (inerzia + peso per distanza + soglia di commit);
-  - OCCLUSION MASKING: i pixel delle classi verticali (ostacoli, costo alto)
-    non descrivono il suolo, quindi NON si proiettano lontano sul piano. Si
-    tengono solo entro 'obstacle_max_range' (la base reale dell'oggetto) e si
-    scartano le proiezioni piu' lontane (lo smearing). Cosi' un ostacolo non
-    sporca piu' le celle di suolo gia' mappate quando lo si guarda di lato.
+Mappa PERSISTENTE (frame 'map') con:
+  - fusione a confidenza (peso = vicinanza x non-occlusione; gate stabilita'/plasticita');
+  - GESTIONE DINAMICI: gli oggetti di classi dinamiche (persona, veicoli...) vengono
+    tracciati frame-per-frame e ne viene stimata la VELOCITA' nel mondo. Se si muovono
+    (sopra soglia) i loro pixel sono ESCLUSI dalla mappa statica; se sono fermi/
+    parcheggiati entrano come ostacoli. Un dinamico non ancora confermato fermo viene
+    escluso in via cautelativa (evita scie di chi e' in movimento).
 """
 
 import rclpy
@@ -16,26 +16,19 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from sensor_msgs.msg import Image, CameraInfo
 from nav_msgs.msg import OccupancyGrid
 import numpy as np
+import cv2
 from cv_bridge import CvBridge
 import tf2_ros
 from rclpy.duration import Duration
 
 
 CLASS_COST = {
-    1: 0,     # sidewalk
-    9: 70,    # terrain
-    8: 80,    # vegetation
-    0: 90,    # road
-    2: 100,   # building
-    3: 100,   # wall
-    4: 100,   # fence
-    5: 100,   # pole
-    7: 100,   # traffic sign
-    11: 100,  # person
-    12: 100,  # rider
-    13: 100,  # car
-    14: 100, 15: 100, 16: 100, 17: 100, 18: 100,
+    1: 0, 9: 70, 8: 80, 0: 90,
+    2: 100, 3: 100, 4: 100, 5: 100, 7: 100,
+    11: 100, 12: 100, 13: 100, 14: 100, 15: 100, 16: 100, 17: 100, 18: 100,
 }
+DEFAULT_BLOCKERS = [2, 3, 4, 5, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18]
+DEFAULT_DYNAMIC = [11, 12, 13, 14, 15, 16, 17, 18]   # persona, rider, veicoli
 
 
 def transform_to_matrix(t):
@@ -47,10 +40,46 @@ def transform_to_matrix(t):
         [    2*(x*y + z*w), 1 - 2*(x*x + z*z),     2*(y*z - x*w)],
         [    2*(x*z - y*w),     2*(y*z + x*w), 1 - 2*(x*x + y*y)],
     ])
-    M = np.eye(4)
-    M[:3, :3] = R
-    M[:3, 3] = [tr.x, tr.y, tr.z]
+    M = np.eye(4); M[:3, :3] = R; M[:3, 3] = [tr.x, tr.y, tr.z]
     return M
+
+
+class Tracker:
+    """Tracking NN in coordinate mondo + stima velocita' + classificazione moving/static."""
+    def __init__(self, gate=1.0, v_thresh=0.3, min_obs=3, timeout=1.0, beta=0.6):
+        self.gate = gate; self.v_thresh = v_thresh; self.min_obs = min_obs
+        self.timeout = timeout; self.beta = beta
+        self.tracks = []; self.next_id = 0
+
+    def update(self, dets, t):
+        """dets: lista (x,y) nel mondo. Ritorna lista di track allineata a dets."""
+        assign = [None] * len(dets)
+        used = set()
+        for tr in self.tracks:
+            best = None; bd = self.gate
+            for i, (x, y) in enumerate(dets):
+                if i in used:
+                    continue
+                d = np.hypot(x - tr['x'], y - tr['y'])
+                if d < bd:
+                    bd = d; best = i
+            if best is not None:
+                x, y = dets[best]; dt = max(1e-3, t - tr['t'])
+                vx = (x - tr['x']) / dt; vy = (y - tr['y']) / dt
+                tr['vx'] = self.beta * tr['vx'] + (1 - self.beta) * vx
+                tr['vy'] = self.beta * tr['vy'] + (1 - self.beta) * vy
+                tr['x'] = x; tr['y'] = y; tr['t'] = t; tr['n'] += 1
+                used.add(best); assign[best] = tr
+        for i, (x, y) in enumerate(dets):
+            if i in used:
+                continue
+            tr = dict(id=self.next_id, x=x, y=y, vx=0.0, vy=0.0, n=1, t=t)
+            self.next_id += 1; self.tracks.append(tr); assign[i] = tr
+        self.tracks = [tr for tr in self.tracks if t - tr['t'] <= self.timeout]
+        return assign
+
+    def confirmed_static(self, tr):
+        return tr['n'] >= self.min_obs and np.hypot(tr['vx'], tr['vy']) <= self.v_thresh
 
 
 class SemanticCostmapNode(Node):
@@ -67,33 +96,56 @@ class SemanticCostmapNode(Node):
         self.declare_parameter('max_range', 5.0)
         self.declare_parameter('min_row_frac', 0.62)
         self.declare_parameter('publish_window', True)
-        self.declare_parameter('fuse_alpha_near', 0.45)
-        self.declare_parameter('fuse_alpha_far', 0.03)
-        self.declare_parameter('fuse_commit_w', 0.20)
-        # --- occlusion masking ---
-        self.declare_parameter('obstacle_cost_min', 95)    # >= -> classe "verticale" (ostacolo)
-        self.declare_parameter('obstacle_max_range', 3.0)  # gli ostacoli si proiettano solo entro qui
+        self.declare_parameter('occ_sector_deg', 2.0)
+        self.declare_parameter('occ_margin', 0.15)
+        self.declare_parameter('occ_weak', 0.10)
+        self.declare_parameter('w_dist_min', 0.03)
+        self.declare_parameter('gate_ratio', 0.5)
+        self.declare_parameter('blocker_classes', DEFAULT_BLOCKERS)
+        # --- dinamici ---
+        self.declare_parameter('dynamic_classes', DEFAULT_DYNAMIC)
+        self.declare_parameter('dyn_v_thresh', 0.3)   # m/s sopra cui = in movimento
+        self.declare_parameter('dyn_gate', 1.0)       # m, associazione tracce
+        self.declare_parameter('dyn_min_obs', 3)      # frame prima di fidarsi della velocita'
+        self.declare_parameter('dyn_timeout', 1.0)    # s prima di scartare una traccia
+        self.declare_parameter('dyn_vel_beta', 0.6)   # smoothing velocita'
 
-        self.target = self.get_parameter('target_frame').value
-        self.cam_frame = self.get_parameter('camera_optical_frame').value
-        self.base_frame = self.get_parameter('base_frame').value
-        self.res = self.get_parameter('resolution').value
-        self.size_m = self.get_parameter('size_m').value
-        self.global_size_m = self.get_parameter('global_size_m').value
-        self.stride = self.get_parameter('pixel_stride').value
-        self.max_range = self.get_parameter('max_range').value
-        self.min_row_frac = self.get_parameter('min_row_frac').value
-        self.publish_window = self.get_parameter('publish_window').value
-        self.a_near = self.get_parameter('fuse_alpha_near').value
-        self.a_far = self.get_parameter('fuse_alpha_far').value
-        self.w_commit = self.get_parameter('fuse_commit_w').value
-        self.obs_cost_min = self.get_parameter('obstacle_cost_min').value
-        self.obs_max_range = self.get_parameter('obstacle_max_range').value
+        gp = self.get_parameter
+        self.target = gp('target_frame').value
+        self.cam_frame = gp('camera_optical_frame').value
+        self.base_frame = gp('base_frame').value
+        self.res = gp('resolution').value
+        self.size_m = gp('size_m').value
+        self.global_size_m = gp('global_size_m').value
+        self.stride = gp('pixel_stride').value
+        self.max_range = gp('max_range').value
+        self.min_row_frac = gp('min_row_frac').value
+        self.publish_window = gp('publish_window').value
+        self.occ_dth = np.deg2rad(gp('occ_sector_deg').value)
+        self.occ_nsec = int(np.ceil(2 * np.pi / self.occ_dth))
+        self.occ_margin = gp('occ_margin').value
+        self.occ_weak = gp('occ_weak').value
+        self.w_dist_min = gp('w_dist_min').value
+        self.gate_ratio = gp('gate_ratio').value
+        blockers = gp('blocker_classes').value
+        dynamic = gp('dynamic_classes').value
+
+        self.block_lut = np.zeros(256, dtype=bool)
+        for c in blockers:
+            self.block_lut[int(c)] = True
+        self.dyn_lut = np.zeros(256, dtype=bool)
+        for c in dynamic:
+            self.dyn_lut[int(c)] = True
+
+        self.tracker = Tracker(gate=gp('dyn_gate').value, v_thresh=gp('dyn_v_thresh').value,
+                               min_obs=gp('dyn_min_obs').value, timeout=gp('dyn_timeout').value,
+                               beta=gp('dyn_vel_beta').value)
 
         self.gn = int(self.global_size_m / self.res)
         self.gox = -self.global_size_m / 2.0
         self.goy = -self.global_size_m / 2.0
-        self.global_grid = np.full((self.gn, self.gn), -1.0, dtype=np.float32)
+        self.grid = np.full((self.gn, self.gn), -1.0, dtype=np.float32)
+        self.conf = np.zeros((self.gn, self.gn), dtype=np.float32)
 
         self.win = int(self.size_m / self.res)
         self.bridge = CvBridge()
@@ -113,8 +165,7 @@ class SemanticCostmapNode(Node):
             self.cost_lut[cls] = c
 
         self.get_logger().info(
-            f'Semantic costmap (persistente, fusione pesata, occlusion masking) pronto. '
-            f'frame={self.target}.')
+            f'Semantic costmap (confidenza + dinamici) pronto. frame={self.target}.')
 
     def info_cb(self, msg: CameraInfo):
         self.K = np.array(msg.k).reshape(3, 3)
@@ -139,8 +190,7 @@ class SemanticCostmapNode(Node):
         if T_cam is None or T_base is None:
             return
         M = transform_to_matrix(T_cam)
-        origin = M[:3, 3]
-        R = M[:3, :3]
+        origin = M[:3, 3]; R = M[:3, :3]
         bx, by = T_base.transform.translation.x, T_base.transform.translation.y
 
         r0 = int(h * self.min_row_frac)
@@ -162,55 +212,83 @@ class SemanticCostmapNode(Node):
         pts = origin[None, :] + t[:, None] * dir_world
         X, Y = pts[:, 0], pts[:, 1]
         dist = np.hypot(X - bx, Y - by)
+        ok = ok & (dist < self.max_range)
 
-        # costo per pixel
         classes = seg[vv, uu]
         costs = self.cost_lut[classes]
+        ok = ok & (costs >= 0)
 
-        # --- OCCLUSION MASKING ---
-        # suolo (costo < soglia): fino a max_range.
-        # ostacoli verticali (costo >= soglia): solo entro obstacle_max_range
-        # (la base reale). Cosi' la parte alta dell'oggetto non si spalma sul suolo.
-        is_obs = costs >= self.obs_cost_min
-        within = np.where(is_obs,
-                          dist < self.obs_max_range,
-                          dist < self.max_range)
-        ok = ok & within
+        # ---------- DINAMICI: traccia, stima velocita', escludi quelli in movimento ----------
+        stamp_sec = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        dyn_pix = self.dyn_lut[classes] & ok
+        if dyn_pix.any():
+            full_dyn = self.dyn_lut[seg].astype(np.uint8)
+            _, lbl = cv2.connectedComponents(full_dyn)
+            comp_s = lbl[vv, uu]                       # id componente per pixel campionato
+            dets = []; det_cids = []
+            for cid in np.unique(comp_s[dyn_pix]):
+                if cid == 0:
+                    continue
+                m = (comp_s == cid) & ok
+                if not m.any():
+                    continue
+                idx = np.where(m)[0]
+                base_i = idx[np.argmax(vv[idx])]       # pixel piu' basso = base a terra
+                dets.append((float(X[base_i]), float(Y[base_i]))); det_cids.append(cid)
+            assign = self.tracker.update(dets, stamp_sec)
+            exclude_cids = [cid for cid, tr in zip(det_cids, assign)
+                            if not self.tracker.confirmed_static(tr)]
+            if exclude_cids:
+                excl = np.isin(comp_s, exclude_cids) & dyn_pix
+                ok = ok & (~excl)
+
+        # ---------- OCCLUSIONE -> peso ----------
+        camx, camy = origin[0], origin[1]
+        ang = np.arctan2(Y - camy, X - camx)
+        rad = np.hypot(X - camx, Y - camy)
+        sec = np.clip(((ang + np.pi) / self.occ_dth).astype(int), 0, self.occ_nsec - 1)
+        is_block = self.block_lut[classes] & ok
+        occ_r = np.full(self.occ_nsec, np.inf, dtype=np.float64)
+        if is_block.any():
+            np.minimum.at(occ_r, sec[is_block], rad[is_block])
+        occluded = rad > (occ_r[sec] + self.occ_margin)
+
+        w_dist = np.clip(1.0 - dist / self.max_range, self.w_dist_min, 1.0)
+        w_occ = np.where(occluded, self.occ_weak, 1.0)
+        wpix = w_dist * w_occ
 
         gi = ((X - self.gox) / self.res).astype(int)
         gj = ((Y - self.goy) / self.res).astype(int)
         inside = ok & (gi >= 0) & (gi < self.gn) & (gj >= 0) & (gj < self.gn)
-        use = inside & (costs >= 0)
 
-        gi_u = gi[use]; gj_u = gj[use]
-        co_u = costs[use].astype(np.float32)
-        di_u = dist[use].astype(np.float32)
+        gi_u = gi[inside]; gj_u = gj[inside]
+        co_u = costs[inside].astype(np.float32)
+        w_u = wpix[inside].astype(np.float32)
         if gi_u.size == 0:
             self.publish_map(bx, by, msg.header.stamp)
             return
 
         flat = gj_u * self.gn + gi_u
         N = self.gn * self.gn
-
+        order = np.argsort(w_u)
+        flat_s = flat[order]
         frame_cost = np.full(N, -1.0, dtype=np.float32)
-        frame_mind = np.full(N, np.inf, dtype=np.float32)
-        np.maximum.at(frame_cost, flat, co_u)
-        np.minimum.at(frame_mind, flat, di_u)
-        seen = frame_mind < np.inf
+        frame_w = np.full(N, -1.0, dtype=np.float32)
+        frame_cost[flat_s] = co_u[order]
+        frame_w[flat_s] = w_u[order]
+        seen = frame_w >= 0.0
 
-        near = np.clip(1.0 - frame_mind / self.max_range, 0.0, 1.0)
-        wgt = self.a_far + (self.a_near - self.a_far) * near
+        V = self.grid.ravel(); C = self.conf.ravel()
+        accept = seen & (frame_w >= self.gate_ratio * C)
+        unknown = accept & (V < 0)
+        knownup = accept & (V >= 0)
+        V[unknown] = frame_cost[unknown]
+        fa = frame_w[knownup] / (frame_w[knownup] + C[knownup])
+        V[knownup] = (1.0 - fa) * V[knownup] + fa * frame_cost[knownup]
+        C[accept] = np.maximum(C[accept], frame_w[accept])
 
-        g = self.global_grid.ravel()
-        known = g >= 0.0
-
-        first = seen & (~known) & (wgt >= self.w_commit)
-        g[first] = frame_cost[first]
-
-        upd = seen & known
-        g[upd] = wgt[upd] * frame_cost[upd] + (1.0 - wgt[upd]) * g[upd]
-
-        self.global_grid = g.reshape(self.gn, self.gn)
+        self.grid = V.reshape(self.gn, self.gn)
+        self.conf = C.reshape(self.gn, self.gn)
         self.publish_map(bx, by, msg.header.stamp)
 
     def publish_map(self, bx, by, stamp):
@@ -220,21 +298,18 @@ class SemanticCostmapNode(Node):
             half = self.win // 2
             i0 = max(0, ci - half); i1 = min(self.gn, ci + half)
             j0 = max(0, cj - half); j1 = min(self.gn, cj + half)
-            sub = self.global_grid[j0:j1, i0:i1]
-            ox = self.gox + i0 * self.res
-            oy = self.goy + j0 * self.res
+            sub = self.grid[j0:j1, i0:i1]
+            ox = self.gox + i0 * self.res; oy = self.goy + j0 * self.res
             width = i1 - i0; height = j1 - j0
         else:
-            sub = self.global_grid
-            ox, oy = self.gox, self.goy
+            sub = self.grid; ox, oy = self.gox, self.goy
             width = self.gn; height = self.gn
 
         msg = OccupancyGrid()
         msg.header.stamp = stamp
         msg.header.frame_id = self.target
         msg.info.resolution = self.res
-        msg.info.width = width
-        msg.info.height = height
+        msg.info.width = width; msg.info.height = height
         msg.info.origin.position.x = float(ox)
         msg.info.origin.position.y = float(oy)
         msg.info.origin.orientation.w = 1.0

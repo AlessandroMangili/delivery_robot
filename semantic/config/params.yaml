@@ -1,32 +1,45 @@
 # ============================================================
 #  Pipeline SEGMENTAZIONE GROUND-TRUTH (Gazebo) -> COSTMAP
-#  Niente rete neurale: la segmentation camera di Gazebo
-#  produce le etichette, gt_segmentation_relay le converte,
-#  semantic_costmap_node le proietta a terra.
-#
-#  Nodi da lanciare (NON segmentation_node):
-#    ros2 run semantic gt_segmentation_relay --ros-args -p use_sim_time:=true -p publish_overlay:=true
-#    ros2 run semantic semantic_costmap_node --ros-args --params-file <questo file> -p use_sim_time:=true
+#  Nodi:
+#    ros2 run semantic gt_segmentation_relay  --ros-args -p use_sim_time:=true -p publish_overlay:=true
+#    ros2 run semantic semantic_costmap_node  --ros-args --params-file <questo file> -p use_sim_time:=true
 # ============================================================
 
 gt_segmentation_relay:
   ros__parameters:
-    labels_topic: /semantic/labels_map      # bridge dalla segmentation camera
-    out_topic: /semantic/segmentation        # cosa consuma il costmap
-    publish_overlay: true                    # /semantic/overlay (debug RViz)
+    labels_topic: /semantic/labels_map
+    out_topic: /semantic/segmentation
+    publish_overlay: true
 
 semantic_costmap_node:
   ros__parameters:
-    target_frame: map                       # frame FISSO -> la mappa resta ferma nel mondo
+    target_frame: map
     camera_optical_frame: camera_rgb_optical_frame
     base_frame: base_footprint
-    resolution: 0.05                         # m / cella
-    size_m: 8.0                              # lato finestra mobile (m)
-    pixel_stride: 4                          # sottocampionamento pixel
-    max_range: 5.0                           # m, oltre si ignora
-    min_row_frac: 0.55                       # usa solo la parte bassa dell'immagine (suolo)
-    fuse_alpha_near: 0.45    # peso osservazione vicina
-    fuse_alpha_far: 0.03     # peso osservazione lontana
-    fuse_commit_w: 0.20      # soglia per creare una cella nuova
-    obstacle_cost_min: 95    # classi >= -> ostacolo verticale
-    obstacle_max_range: 3.0  # ostacoli proiettati solo entro questa distanza (no smearing)
+    resolution: 0.05
+    size_m: 8.0
+    global_size_m: 80.0
+    pixel_stride: 4
+    max_range: 5.0
+    min_row_frac: 0.55
+    publish_window: true
+
+    # --- occlusione (z-buffer polare) -> abbassa il peso, non scarta ---
+    occ_sector_deg: 2.0      # ampiezza settore angolare
+    occ_margin: 0.15         # m oltre il primo ostacolo prima di considerare "occluso"
+    occ_weak: 0.10           # peso di un'osservazione occlusa (dietro un ostacolo)
+
+    # --- pesi e confidenza ---
+    w_dist_min: 0.03         # peso minimo a max_range (lontano)
+    gate_ratio: 0.7          # serve peso >= gate_ratio*confidenza per cambiare una cella
+
+    # classi che BLOCCANO la vista (verticali) -> usate solo per l'occlusione
+    blocker_classes: [2,3,4,5,7,8,11,12,13,14,15,16,17,18]
+
+    # --- oggetti dinamici (tracking + velocita') ---
+    dynamic_classes: [11,12,13,14,15,16,17,18]  # persona, rider, veicoli
+    dyn_v_thresh: 0.3        # m/s sopra cui l'oggetto e' 'in movimento' -> escluso
+    dyn_gate: 1.0            # m, distanza max per associare una traccia
+    dyn_min_obs: 3           # frame prima di fidarsi della velocita'
+    dyn_timeout: 1.0         # s prima di scartare una traccia non vista
+    dyn_vel_beta: 0.6        # smoothing della velocita'
