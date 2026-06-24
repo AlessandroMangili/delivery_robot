@@ -167,16 +167,56 @@ class SemanticCostmapNode(Node):
             self.cost_lut[cls] = c
 
         # --- persistenza mappa (salva/carica grid + confidenza) ---
-        self.declare_parameter('map_load_path', '')   # se esiste, carica all'avvio
-        self.declare_parameter('map_save_path', '')    # dove salva ~/save_map e l'autosave
-        self.map_load_path = self.get_parameter('map_load_path').value
-        self.map_save_path = self.get_parameter('map_save_path').value
-        if self.map_load_path and os.path.isfile(self.map_load_path):
-            self.load_map(self.map_load_path)
+        # Si indicano solo i NOMI dei file; vengono risolti nella cartella maps/
+        # del SORGENTE del pacchetto 'semantic' (persiste tra le colcon build).
+        self.declare_parameter('map_load_name', '')   # nome file da caricare all'avvio (vuoto = no)
+        self.declare_parameter('map_save_name', '')    # nome file per salvataggio/autosave (vuoto = no)
+        self.maps_dir = self.resolve_maps_dir()
+        load_name = self.get_parameter('map_load_name').value
+        save_name = self.get_parameter('map_save_name').value
+        self.map_save_path = os.path.join(self.maps_dir, save_name) if save_name else ''
+        load_path = os.path.join(self.maps_dir, load_name) if load_name else ''
+        if load_path:
+            if not load_path.endswith('.npz'):
+                load_path += '.npz'
+            if os.path.isfile(load_path):
+                self.load_map(load_path)
+            else:
+                self.get_logger().warn(f'Mappa da caricare non trovata: {load_path}')
         self.create_service(Trigger, '~/save_map', self.save_map_cb)
+        self.get_logger().info(f'Cartella mappe: {self.maps_dir}')
 
         self.get_logger().info(
             f'Semantic costmap (confidenza + dinamici) pronto. frame={self.target}.')
+
+    def resolve_maps_dir(self):
+        """Trova (o crea) la cartella maps/ nel SORGENTE del pacchetto semantic.
+        Cerca una cartella 'semantic' OVUNQUE sotto <ws>/src (anche in sottocartelle),
+        riconoscendola dal package.xml. Se non la trova, ripiega sulla share installata."""
+        try:
+            from ament_index_python.packages import get_package_share_directory
+            share = get_package_share_directory('semantic')  # .../install/.../share/semantic
+            # risali fino a trovare la radice del workspace (quella che contiene 'src')
+            ws = share
+            for _ in range(8):
+                ws = os.path.dirname(ws)
+                src = os.path.join(ws, 'src')
+                if os.path.isdir(src):
+                    # cammina sotto src/ cercando una cartella 'semantic' con package.xml
+                    for root, dirs, files in os.walk(src):
+                        if (os.path.basename(root) == 'semantic'
+                                and 'package.xml' in files):
+                            d = os.path.join(root, 'maps')
+                            os.makedirs(d, exist_ok=True)
+                            return d
+                    break
+            d = os.path.join(share, 'maps')          # ripiego: share installata
+            os.makedirs(d, exist_ok=True)
+            return d
+        except Exception:
+            d = os.path.join(os.path.expanduser('~'), '.semantic_maps')
+            os.makedirs(d, exist_ok=True)
+            return d
 
     def load_map(self, path):
         try:
@@ -206,7 +246,7 @@ class SemanticCostmapNode(Node):
             return None
 
     def save_map_cb(self, request, response):
-        path = self.map_save_path or '/tmp/semantic_map.npz'
+        path = self.map_save_path or os.path.join(self.maps_dir, 'semantic_map')
         saved = self.save_map(path)
         response.success = saved is not None
         response.message = (f'Mappa salvata in {saved}' if saved else 'Salvataggio fallito')
@@ -375,7 +415,8 @@ def main():
         if getattr(node, 'map_save_path', ''):
             node.save_map(node.map_save_path)
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':
