@@ -45,38 +45,6 @@
             </attenuation>
             <direction>-0.5 0.1 -0.9</direction>
         </light>
-
-    <!-- Dynamic obstacles -->
-    <actor name="pedestrian_walking">
-        <skin>
-            <filename>https://fuel.gazebosim.org/1.0/Mingfei/models/actor/tip/files/meshes/walk.dae</filename>
-            <scale>1.0</scale>
-        </skin>
-        <animation name="walk">
-            <filename>https://fuel.gazebosim.org/1.0/Mingfei/models/actor/tip/files/meshes/walk.dae</filename>
-            <interpolate_x>true</interpolate_x>
-        </animation>
-
-        <script>
-            <loop>true</loop>
-            <delay_start>0.0</delay_start>
-            <auto_start>true</auto_start>
-            <trajectory id="0" type="walk" tension="0.6">
-                <waypoint><time>0.0</time>  <pose>4  -2.5 1.0 0 0 0</pose></waypoint>
-                <waypoint><time>7.0</time>  <pose>11 -2.5 1.0 0 0 0</pose></waypoint>
-                <waypoint><time>7.5</time>  <pose>11 -2.5 1.0 0 0 3.1416</pose></waypoint>
-                <waypoint><time>14.5</time> <pose>4  -2.5 1.0 0 0 3.1416</pose></waypoint>
-                <waypoint><time>15.0</time> <pose>4  -2.5 1.0 0 0 0</pose></waypoint>
-            </trajectory>
-        </script>
-
-        <!-- etichetta per la segmentation camera: 12 (gz) -> 11 (person) -->
-        <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system">
-            <label>12</label>
-        </plugin>
-  </actor>
-
-    <!-- Static obstacles -->    
  
     <model name="base_ground">
       <pose>70.000 -2.500 -0.050 0.000 0.000 0.000</pose>
@@ -193,7 +161,7 @@
       </plugin>
     </model>
     <model name="grass_strip">
-      <pose>70.000 -9.500 0.015 0.000 0.000 0.000</pose>
+      <pose>70.000 -9.000 0.045 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="collision">
@@ -1132,7 +1100,7 @@
       </plugin>
     </model>
     <model name="lamp_1">
-      <pose>15.000 2.200 0.000 0.000 0.000 0.000</pose>
+      <pose>15.000 0.000 0.000 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="pole_collision">
@@ -1189,7 +1157,7 @@
       </plugin>
     </model>
     <model name="lamp_2">
-      <pose>40.000 2.200 0.000 0.000 0.000 0.000</pose>
+      <pose>40.000 0.000 0.000 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="pole_collision">
@@ -1246,7 +1214,7 @@
       </plugin>
     </model>
     <model name="lamp_3">
-      <pose>65.000 2.200 0.000 0.000 0.000 0.000</pose>
+      <pose>65.000 0.000 0.000 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="pole_collision">
@@ -1303,7 +1271,7 @@
       </plugin>
     </model>
     <model name="lamp_4">
-      <pose>90.000 2.200 0.000 0.000 0.000 0.000</pose>
+      <pose>90.000 0.000 0.000 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="pole_collision">
@@ -1360,7 +1328,7 @@
       </plugin>
     </model>
     <model name="lamp_5">
-      <pose>115.000 2.200 0.000 0.000 0.000 0.000</pose>
+      <pose>115.000 0.000 0.000 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="pole_collision">
@@ -1877,582 +1845,6 @@
         </visual>
       </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
         <label>3</label>
-      </plugin>
-    </model>
-    <model name="person_1">
-      <pose>18.000 -2.300 0.000 0.000 0.000 0.150</pose>
-      <static>true</static>
-      <link name="link">
-        <collision name="leg0_collision">
-          <pose>-0.110 0.000 0.430 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.060</radius>
-              <length>0.860</length>
-            </cylinder>
-          </geometry>
-        </collision>
-        <visual name="leg0_visual">
-          <pose>-0.110 0.000 0.430 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.060</radius>
-              <length>0.860</length>
-            </cylinder>
-          </geometry>
-          <material>
-            <ambient>0.120 0.120 0.144 1.000</ambient>
-            <diffuse>0.150 0.150 0.180 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <collision name="leg1_collision">
-          <pose>0.110 0.000 0.430 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.060</radius>
-              <length>0.860</length>
-            </cylinder>
-          </geometry>
-        </collision>
-        <visual name="leg1_visual">
-          <pose>0.110 0.000 0.430 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.060</radius>
-              <length>0.860</length>
-            </cylinder>
-          </geometry>
-          <material>
-            <ambient>0.120 0.120 0.144 1.000</ambient>
-            <diffuse>0.150 0.150 0.180 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <collision name="torso_collision">
-          <pose>0.000 0.000 1.150 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.160</radius>
-              <length>0.650</length>
-            </cylinder>
-          </geometry>
-        </collision>
-        <visual name="torso_visual">
-          <pose>0.000 0.000 1.150 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.160</radius>
-              <length>0.650</length>
-            </cylinder>
-          </geometry>
-          <material>
-            <ambient>0.160 0.200 0.280 1.000</ambient>
-            <diffuse>0.200 0.250 0.350 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <collision name="head_collision">
-          <pose>0.000 0.000 1.680 0.000 0.000 0.000</pose>
-          <geometry>
-            <sphere>
-              <radius>0.120</radius>
-            </sphere>
-          </geometry>
-        </collision>
-        <visual name="head_visual">
-          <pose>0.000 0.000 1.680 0.000 0.000 0.000</pose>
-          <geometry>
-            <sphere>
-              <radius>0.120</radius>
-            </sphere>
-          </geometry>
-          <material>
-            <ambient>0.760 0.640 0.520 1.000</ambient>
-            <diffuse>0.950 0.800 0.650 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <collision name="arm0_collision">
-          <pose>0.000 -0.220 1.160 0.000 1.571 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.045</radius>
-              <length>0.620</length>
-            </cylinder>
-          </geometry>
-        </collision>
-        <visual name="arm0_visual">
-          <pose>0.000 -0.220 1.160 0.000 1.571 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.045</radius>
-              <length>0.620</length>
-            </cylinder>
-          </geometry>
-          <material>
-            <ambient>0.160 0.200 0.280 1.000</ambient>
-            <diffuse>0.200 0.250 0.350 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <collision name="arm1_collision">
-          <pose>0.000 0.220 1.160 0.000 1.571 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.045</radius>
-              <length>0.620</length>
-            </cylinder>
-          </geometry>
-        </collision>
-        <visual name="arm1_visual">
-          <pose>0.000 0.220 1.160 0.000 1.571 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.045</radius>
-              <length>0.620</length>
-            </cylinder>
-          </geometry>
-          <material>
-            <ambient>0.160 0.200 0.280 1.000</ambient>
-            <diffuse>0.200 0.250 0.350 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
-        <label>12</label>
-      </plugin>
-    </model>
-    <model name="person_2">
-      <pose>49.000 -2.000 0.000 0.000 0.000 2.300</pose>
-      <static>true</static>
-      <link name="link">
-        <collision name="leg0_collision">
-          <pose>-0.110 0.000 0.430 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.060</radius>
-              <length>0.860</length>
-            </cylinder>
-          </geometry>
-        </collision>
-        <visual name="leg0_visual">
-          <pose>-0.110 0.000 0.430 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.060</radius>
-              <length>0.860</length>
-            </cylinder>
-          </geometry>
-          <material>
-            <ambient>0.120 0.120 0.144 1.000</ambient>
-            <diffuse>0.150 0.150 0.180 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <collision name="leg1_collision">
-          <pose>0.110 0.000 0.430 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.060</radius>
-              <length>0.860</length>
-            </cylinder>
-          </geometry>
-        </collision>
-        <visual name="leg1_visual">
-          <pose>0.110 0.000 0.430 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.060</radius>
-              <length>0.860</length>
-            </cylinder>
-          </geometry>
-          <material>
-            <ambient>0.120 0.120 0.144 1.000</ambient>
-            <diffuse>0.150 0.150 0.180 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <collision name="torso_collision">
-          <pose>0.000 0.000 1.150 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.160</radius>
-              <length>0.650</length>
-            </cylinder>
-          </geometry>
-        </collision>
-        <visual name="torso_visual">
-          <pose>0.000 0.000 1.150 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.160</radius>
-              <length>0.650</length>
-            </cylinder>
-          </geometry>
-          <material>
-            <ambient>0.160 0.200 0.280 1.000</ambient>
-            <diffuse>0.200 0.250 0.350 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <collision name="head_collision">
-          <pose>0.000 0.000 1.680 0.000 0.000 0.000</pose>
-          <geometry>
-            <sphere>
-              <radius>0.120</radius>
-            </sphere>
-          </geometry>
-        </collision>
-        <visual name="head_visual">
-          <pose>0.000 0.000 1.680 0.000 0.000 0.000</pose>
-          <geometry>
-            <sphere>
-              <radius>0.120</radius>
-            </sphere>
-          </geometry>
-          <material>
-            <ambient>0.760 0.640 0.520 1.000</ambient>
-            <diffuse>0.950 0.800 0.650 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <collision name="arm0_collision">
-          <pose>0.000 -0.220 1.160 0.000 1.571 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.045</radius>
-              <length>0.620</length>
-            </cylinder>
-          </geometry>
-        </collision>
-        <visual name="arm0_visual">
-          <pose>0.000 -0.220 1.160 0.000 1.571 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.045</radius>
-              <length>0.620</length>
-            </cylinder>
-          </geometry>
-          <material>
-            <ambient>0.160 0.200 0.280 1.000</ambient>
-            <diffuse>0.200 0.250 0.350 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <collision name="arm1_collision">
-          <pose>0.000 0.220 1.160 0.000 1.571 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.045</radius>
-              <length>0.620</length>
-            </cylinder>
-          </geometry>
-        </collision>
-        <visual name="arm1_visual">
-          <pose>0.000 0.220 1.160 0.000 1.571 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.045</radius>
-              <length>0.620</length>
-            </cylinder>
-          </geometry>
-          <material>
-            <ambient>0.160 0.200 0.280 1.000</ambient>
-            <diffuse>0.200 0.250 0.350 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
-        <label>12</label>
-      </plugin>
-    </model>
-    <model name="person_3">
-      <pose>77.000 -2.500 0.000 0.000 0.000 -1.000</pose>
-      <static>true</static>
-      <link name="link">
-        <collision name="leg0_collision">
-          <pose>-0.110 0.000 0.430 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.060</radius>
-              <length>0.860</length>
-            </cylinder>
-          </geometry>
-        </collision>
-        <visual name="leg0_visual">
-          <pose>-0.110 0.000 0.430 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.060</radius>
-              <length>0.860</length>
-            </cylinder>
-          </geometry>
-          <material>
-            <ambient>0.120 0.120 0.144 1.000</ambient>
-            <diffuse>0.150 0.150 0.180 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <collision name="leg1_collision">
-          <pose>0.110 0.000 0.430 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.060</radius>
-              <length>0.860</length>
-            </cylinder>
-          </geometry>
-        </collision>
-        <visual name="leg1_visual">
-          <pose>0.110 0.000 0.430 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.060</radius>
-              <length>0.860</length>
-            </cylinder>
-          </geometry>
-          <material>
-            <ambient>0.120 0.120 0.144 1.000</ambient>
-            <diffuse>0.150 0.150 0.180 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <collision name="torso_collision">
-          <pose>0.000 0.000 1.150 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.160</radius>
-              <length>0.650</length>
-            </cylinder>
-          </geometry>
-        </collision>
-        <visual name="torso_visual">
-          <pose>0.000 0.000 1.150 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.160</radius>
-              <length>0.650</length>
-            </cylinder>
-          </geometry>
-          <material>
-            <ambient>0.160 0.200 0.280 1.000</ambient>
-            <diffuse>0.200 0.250 0.350 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <collision name="head_collision">
-          <pose>0.000 0.000 1.680 0.000 0.000 0.000</pose>
-          <geometry>
-            <sphere>
-              <radius>0.120</radius>
-            </sphere>
-          </geometry>
-        </collision>
-        <visual name="head_visual">
-          <pose>0.000 0.000 1.680 0.000 0.000 0.000</pose>
-          <geometry>
-            <sphere>
-              <radius>0.120</radius>
-            </sphere>
-          </geometry>
-          <material>
-            <ambient>0.760 0.640 0.520 1.000</ambient>
-            <diffuse>0.950 0.800 0.650 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <collision name="arm0_collision">
-          <pose>0.000 -0.220 1.160 0.000 1.571 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.045</radius>
-              <length>0.620</length>
-            </cylinder>
-          </geometry>
-        </collision>
-        <visual name="arm0_visual">
-          <pose>0.000 -0.220 1.160 0.000 1.571 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.045</radius>
-              <length>0.620</length>
-            </cylinder>
-          </geometry>
-          <material>
-            <ambient>0.160 0.200 0.280 1.000</ambient>
-            <diffuse>0.200 0.250 0.350 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <collision name="arm1_collision">
-          <pose>0.000 0.220 1.160 0.000 1.571 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.045</radius>
-              <length>0.620</length>
-            </cylinder>
-          </geometry>
-        </collision>
-        <visual name="arm1_visual">
-          <pose>0.000 0.220 1.160 0.000 1.571 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.045</radius>
-              <length>0.620</length>
-            </cylinder>
-          </geometry>
-          <material>
-            <ambient>0.160 0.200 0.280 1.000</ambient>
-            <diffuse>0.200 0.250 0.350 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
-        <label>12</label>
-      </plugin>
-    </model>
-    <model name="person_4">
-      <pose>114.000 -2.150 0.000 0.000 0.000 1.200</pose>
-      <static>true</static>
-      <link name="link">
-        <collision name="leg0_collision">
-          <pose>-0.110 0.000 0.430 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.060</radius>
-              <length>0.860</length>
-            </cylinder>
-          </geometry>
-        </collision>
-        <visual name="leg0_visual">
-          <pose>-0.110 0.000 0.430 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.060</radius>
-              <length>0.860</length>
-            </cylinder>
-          </geometry>
-          <material>
-            <ambient>0.120 0.120 0.144 1.000</ambient>
-            <diffuse>0.150 0.150 0.180 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <collision name="leg1_collision">
-          <pose>0.110 0.000 0.430 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.060</radius>
-              <length>0.860</length>
-            </cylinder>
-          </geometry>
-        </collision>
-        <visual name="leg1_visual">
-          <pose>0.110 0.000 0.430 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.060</radius>
-              <length>0.860</length>
-            </cylinder>
-          </geometry>
-          <material>
-            <ambient>0.120 0.120 0.144 1.000</ambient>
-            <diffuse>0.150 0.150 0.180 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <collision name="torso_collision">
-          <pose>0.000 0.000 1.150 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.160</radius>
-              <length>0.650</length>
-            </cylinder>
-          </geometry>
-        </collision>
-        <visual name="torso_visual">
-          <pose>0.000 0.000 1.150 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.160</radius>
-              <length>0.650</length>
-            </cylinder>
-          </geometry>
-          <material>
-            <ambient>0.160 0.200 0.280 1.000</ambient>
-            <diffuse>0.200 0.250 0.350 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <collision name="head_collision">
-          <pose>0.000 0.000 1.680 0.000 0.000 0.000</pose>
-          <geometry>
-            <sphere>
-              <radius>0.120</radius>
-            </sphere>
-          </geometry>
-        </collision>
-        <visual name="head_visual">
-          <pose>0.000 0.000 1.680 0.000 0.000 0.000</pose>
-          <geometry>
-            <sphere>
-              <radius>0.120</radius>
-            </sphere>
-          </geometry>
-          <material>
-            <ambient>0.760 0.640 0.520 1.000</ambient>
-            <diffuse>0.950 0.800 0.650 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <collision name="arm0_collision">
-          <pose>0.000 -0.220 1.160 0.000 1.571 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.045</radius>
-              <length>0.620</length>
-            </cylinder>
-          </geometry>
-        </collision>
-        <visual name="arm0_visual">
-          <pose>0.000 -0.220 1.160 0.000 1.571 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.045</radius>
-              <length>0.620</length>
-            </cylinder>
-          </geometry>
-          <material>
-            <ambient>0.160 0.200 0.280 1.000</ambient>
-            <diffuse>0.200 0.250 0.350 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <collision name="arm1_collision">
-          <pose>0.000 0.220 1.160 0.000 1.571 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.045</radius>
-              <length>0.620</length>
-            </cylinder>
-          </geometry>
-        </collision>
-        <visual name="arm1_visual">
-          <pose>0.000 0.220 1.160 0.000 1.571 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.045</radius>
-              <length>0.620</length>
-            </cylinder>
-          </geometry>
-          <material>
-            <ambient>0.160 0.200 0.280 1.000</ambient>
-            <diffuse>0.200 0.250 0.350 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
-        <label>12</label>
       </plugin>
     </model>
     <model name="pothole_1">
@@ -3139,5 +2531,222 @@
         <label>1</label>
       </plugin>
     </model>
+  
+
+    <!-- ===== PEDONI (actor, person) ===== -->
+    <actor name="ped_1">
+      <skin><filename>https://fuel.gazebosim.org/1.0/Mingfei/models/actor/tip/files/meshes/walk.dae</filename><scale>1.0</scale></skin>
+      <animation name="walk"><filename>https://fuel.gazebosim.org/1.0/Mingfei/models/actor/tip/files/meshes/walk.dae</filename><interpolate_x>true</interpolate_x></animation>
+      <script>
+        <loop>true</loop><delay_start>0.00</delay_start><auto_start>true</auto_start>
+        <trajectory id="0" type="walk" tension="0.6">
+        <waypoint><time>0.00</time><pose>5.0 -1.2 1.0 0 0 0.0</pose></waypoint>
+        <waypoint><time>8.00</time><pose>13.0 -1.2 1.0 0 0 0.0</pose></waypoint>
+        <waypoint><time>8.50</time><pose>13.0 -1.2 1.0 0 0 3.1416</pose></waypoint>
+        <waypoint><time>16.50</time><pose>5.0 -1.2 1.0 0 0 3.1416</pose></waypoint>
+        <waypoint><time>17.00</time><pose>5.0 -1.2 1.0 0 0 0.0</pose></waypoint>
+        </trajectory>
+      </script>
+      <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>12</label></plugin>
+    </actor>
+    <actor name="ped_2">
+      <skin><filename>https://fuel.gazebosim.org/1.0/Mingfei/models/actor/tip/files/meshes/walk.dae</filename><scale>1.0</scale></skin>
+      <animation name="walk"><filename>https://fuel.gazebosim.org/1.0/Mingfei/models/actor/tip/files/meshes/walk.dae</filename><interpolate_x>true</interpolate_x></animation>
+      <script>
+        <loop>true</loop><delay_start>1.50</delay_start><auto_start>true</auto_start>
+        <trajectory id="0" type="walk" tension="0.6">
+        <waypoint><time>0.00</time><pose>22.0 -1.6 1.0 0 0 0.0</pose></waypoint>
+        <waypoint><time>8.00</time><pose>30.0 -1.6 1.0 0 0 0.0</pose></waypoint>
+        <waypoint><time>8.50</time><pose>30.0 -1.6 1.0 0 0 3.1416</pose></waypoint>
+        <waypoint><time>16.50</time><pose>22.0 -1.6 1.0 0 0 3.1416</pose></waypoint>
+        <waypoint><time>17.00</time><pose>22.0 -1.6 1.0 0 0 0.0</pose></waypoint>
+        </trajectory>
+      </script>
+      <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>12</label></plugin>
+    </actor>
+    <actor name="ped_3">
+      <skin><filename>https://fuel.gazebosim.org/1.0/Mingfei/models/actor/tip/files/meshes/walk.dae</filename><scale>1.0</scale></skin>
+      <animation name="walk"><filename>https://fuel.gazebosim.org/1.0/Mingfei/models/actor/tip/files/meshes/walk.dae</filename><interpolate_x>true</interpolate_x></animation>
+      <script>
+        <loop>true</loop><delay_start>3.00</delay_start><auto_start>true</auto_start>
+        <trajectory id="0" type="walk" tension="0.6">
+        <waypoint><time>0.00</time><pose>40.0 -0.9 1.0 0 0 0.0</pose></waypoint>
+        <waypoint><time>10.00</time><pose>50.0 -0.9 1.0 0 0 0.0</pose></waypoint>
+        <waypoint><time>10.50</time><pose>50.0 -0.9 1.0 0 0 3.1416</pose></waypoint>
+        <waypoint><time>20.50</time><pose>40.0 -0.9 1.0 0 0 3.1416</pose></waypoint>
+        <waypoint><time>21.00</time><pose>40.0 -0.9 1.0 0 0 0.0</pose></waypoint>
+        </trajectory>
+      </script>
+      <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>12</label></plugin>
+    </actor>
+    <actor name="ped_4">
+      <skin><filename>https://fuel.gazebosim.org/1.0/Mingfei/models/actor/tip/files/meshes/walk.dae</filename><scale>1.0</scale></skin>
+      <animation name="walk"><filename>https://fuel.gazebosim.org/1.0/Mingfei/models/actor/tip/files/meshes/walk.dae</filename><interpolate_x>true</interpolate_x></animation>
+      <script>
+        <loop>true</loop><delay_start>0.80</delay_start><auto_start>true</auto_start>
+        <trajectory id="0" type="walk" tension="0.6">
+        <waypoint><time>0.00</time><pose>58.0 -1.4 1.0 0 0 0.0</pose></waypoint>
+        <waypoint><time>10.00</time><pose>68.0 -1.4 1.0 0 0 0.0</pose></waypoint>
+        <waypoint><time>10.50</time><pose>68.0 -1.4 1.0 0 0 3.1416</pose></waypoint>
+        <waypoint><time>20.50</time><pose>58.0 -1.4 1.0 0 0 3.1416</pose></waypoint>
+        <waypoint><time>21.00</time><pose>58.0 -1.4 1.0 0 0 0.0</pose></waypoint>
+        </trajectory>
+      </script>
+      <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>12</label></plugin>
+    </actor>
+    <actor name="ped_5">
+      <skin><filename>https://fuel.gazebosim.org/1.0/Mingfei/models/actor/tip/files/meshes/walk.dae</filename><scale>1.0</scale></skin>
+      <animation name="walk"><filename>https://fuel.gazebosim.org/1.0/Mingfei/models/actor/tip/files/meshes/walk.dae</filename><interpolate_x>true</interpolate_x></animation>
+      <script>
+        <loop>true</loop><delay_start>2.20</delay_start><auto_start>true</auto_start>
+        <trajectory id="0" type="walk" tension="0.6">
+        <waypoint><time>0.00</time><pose>85.0 -1.1 1.0 0 0 0.0</pose></waypoint>
+        <waypoint><time>10.00</time><pose>95.0 -1.1 1.0 0 0 0.0</pose></waypoint>
+        <waypoint><time>10.50</time><pose>95.0 -1.1 1.0 0 0 3.1416</pose></waypoint>
+        <waypoint><time>20.50</time><pose>85.0 -1.1 1.0 0 0 3.1416</pose></waypoint>
+        <waypoint><time>21.00</time><pose>85.0 -1.1 1.0 0 0 0.0</pose></waypoint>
+        </trajectory>
+      </script>
+      <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>12</label></plugin>
+    </actor>
+    <actor name="ped_6">
+      <skin><filename>https://fuel.gazebosim.org/1.0/Mingfei/models/actor/tip/files/meshes/walk.dae</filename><scale>1.0</scale></skin>
+      <animation name="walk"><filename>https://fuel.gazebosim.org/1.0/Mingfei/models/actor/tip/files/meshes/walk.dae</filename><interpolate_x>true</interpolate_x></animation>
+      <script>
+        <loop>true</loop><delay_start>4.00</delay_start><auto_start>true</auto_start>
+        <trajectory id="0" type="walk" tension="0.6">
+        <waypoint><time>0.00</time><pose>115.0 -1.7 1.0 0 0 0.0</pose></waypoint>
+        <waypoint><time>10.00</time><pose>125.0 -1.7 1.0 0 0 0.0</pose></waypoint>
+        <waypoint><time>10.50</time><pose>125.0 -1.7 1.0 0 0 3.1416</pose></waypoint>
+        <waypoint><time>20.50</time><pose>115.0 -1.7 1.0 0 0 3.1416</pose></waypoint>
+        <waypoint><time>21.00</time><pose>115.0 -1.7 1.0 0 0 0.0</pose></waypoint>
+        </trajectory>
+      </script>
+      <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>12</label></plugin>
+    </actor>
+
+    <!-- ===== EDIFICI sull'erba (Fuel, building) ===== -->
+
+    <!-- ===== AUTO in strada (Fuel, car, statiche per ora) ===== -->
+    <include>
+      <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/Hatchback</uri>
+      <name>car_1</name>
+      <pose>20 1.3 0 0 0 0</pose>
+      <static>true</static>
+      <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>14</label></plugin>
+    </include>
+    <include>
+      <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/Hatchback red</uri>
+      <name>car_2</name>
+      <pose>58 1.3 0 0 0 0</pose>
+      <static>true</static>
+      <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>14</label></plugin>
+    </include>
+    <include>
+      <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/SUV</uri>
+      <name>car_3</name>
+      <pose>98 1.3 0 0 0 0</pose>
+      <static>true</static>
+      <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>14</label></plugin>
+    </include>
+    <include>
+      <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/Prius Hybrid</uri>
+      <name>car_4</name>
+      <pose>42 6.2 0 0 0 3.1416</pose>
+      <static>true</static>
+      <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>14</label></plugin>
+    </include>
+    <include>
+      <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/Pickup</uri>
+      <name>car_5</name>
+      <pose>125 6.2 0 0 0 3.1416</pose>
+      <static>true</static>
+      <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>14</label></plugin>
+    </include>
+
+  
+
+    <!-- ===== EDIFICI (box colorati, arretrati sull'erba) ===== -->
+    <model name="bldg_1">
+      <static>true</static>
+      <pose>12 -9.5 3.00 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><box><size>8 5 6</size></box></geometry></collision>
+        <visual name="vis">
+          <geometry><box><size>8 5 6</size></box></geometry>
+          <material>
+            <ambient>0.78 0.72 0.62 1</ambient>
+            <diffuse>0.78 0.72 0.62 1</diffuse>
+            <specular>0.1 0.1 0.1 1</specular>
+          </material>
+        </visual>
+      </link>
+      <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>3</label></plugin>
+    </model>
+    <model name="bldg_2">
+      <static>true</static>
+      <pose>40 -9.8 4.00 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><box><size>10 5 8</size></box></geometry></collision>
+        <visual name="vis">
+          <geometry><box><size>10 5 8</size></box></geometry>
+          <material>
+            <ambient>0.7 0.74 0.8 1</ambient>
+            <diffuse>0.7 0.74 0.8 1</diffuse>
+            <specular>0.1 0.1 0.1 1</specular>
+          </material>
+        </visual>
+      </link>
+      <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>3</label></plugin>
+    </model>
+    <model name="bldg_3">
+      <static>true</static>
+      <pose>72 -9.5 2.50 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><box><size>9 5 5</size></box></geometry></collision>
+        <visual name="vis">
+          <geometry><box><size>9 5 5</size></box></geometry>
+          <material>
+            <ambient>0.82 0.66 0.6 1</ambient>
+            <diffuse>0.82 0.66 0.6 1</diffuse>
+            <specular>0.1 0.1 0.1 1</specular>
+          </material>
+        </visual>
+      </link>
+      <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>3</label></plugin>
+    </model>
+    <model name="bldg_4">
+      <static>true</static>
+      <pose>105 -10.0 4.50 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><box><size>12 6 9</size></box></geometry></collision>
+        <visual name="vis">
+          <geometry><box><size>12 6 9</size></box></geometry>
+          <material>
+            <ambient>0.66 0.7 0.66 1</ambient>
+            <diffuse>0.66 0.7 0.66 1</diffuse>
+            <specular>0.1 0.1 0.1 1</specular>
+          </material>
+        </visual>
+      </link>
+      <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>3</label></plugin>
+    </model>
+    <model name="bldg_5">
+      <static>true</static>
+      <pose>132 -9.5 3.50 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><box><size>8 5 7</size></box></geometry></collision>
+        <visual name="vis">
+          <geometry><box><size>8 5 7</size></box></geometry>
+          <material>
+            <ambient>0.8 0.78 0.7 1</ambient>
+            <diffuse>0.8 0.78 0.7 1</diffuse>
+            <specular>0.1 0.1 0.1 1</specular>
+          </material>
+        </visual>
+      </link>
+      <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>3</label></plugin>
+    </model>
+
   </world>
 </sdf>
