@@ -20,6 +20,8 @@ import cv2
 from cv_bridge import CvBridge
 import tf2_ros
 from rclpy.duration import Duration
+from std_srvs.srv import Trigger
+import os
 
 
 CLASS_COST = {
@@ -164,8 +166,51 @@ class SemanticCostmapNode(Node):
         for cls, c in CLASS_COST.items():
             self.cost_lut[cls] = c
 
+        # --- persistenza mappa (salva/carica grid + confidenza) ---
+        self.declare_parameter('map_load_path', '')   # se esiste, carica all'avvio
+        self.declare_parameter('map_save_path', '')    # dove salva ~/save_map e l'autosave
+        self.map_load_path = self.get_parameter('map_load_path').value
+        self.map_save_path = self.get_parameter('map_save_path').value
+        if self.map_load_path and os.path.isfile(self.map_load_path):
+            self.load_map(self.map_load_path)
+        self.create_service(Trigger, '~/save_map', self.save_map_cb)
+
         self.get_logger().info(
             f'Semantic costmap (confidenza + dinamici) pronto. frame={self.target}.')
+
+    def load_map(self, path):
+        try:
+            d = np.load(path)
+            if (int(d['gn']) != self.gn or float(d['res']) != self.res):
+                self.get_logger().warn(
+                    'Mappa salvata incompatibile (dimensioni/risoluzione diverse): ignorata.')
+                return
+            self.grid = d['grid'].astype(np.float32)
+            self.conf = d['conf'].astype(np.float32)
+            self.gox = float(d['gox']); self.goy = float(d['goy'])
+            self.get_logger().info(f'Mappa semantica caricata da {path}.')
+        except Exception as e:
+            self.get_logger().warn(f'Caricamento mappa fallito: {e}')
+
+    def save_map(self, path):
+        try:
+            if not path.endswith('.npz'):
+                path = path + '.npz'
+            os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+            np.savez_compressed(path, grid=self.grid, conf=self.conf,
+                                gn=self.gn, res=self.res, gox=self.gox, goy=self.goy)
+            self.get_logger().info(f'Mappa semantica salvata in {path}.')
+            return path
+        except Exception as e:
+            self.get_logger().error(f'Salvataggio mappa fallito: {e}')
+            return None
+
+    def save_map_cb(self, request, response):
+        path = self.map_save_path or '/tmp/semantic_map.npz'
+        saved = self.save_map(path)
+        response.success = saved is not None
+        response.message = (f'Mappa salvata in {saved}' if saved else 'Salvataggio fallito')
+        return response
 
     def info_cb(self, msg: CameraInfo):
         self.K = np.array(msg.k).reshape(3, 3)
@@ -326,6 +371,9 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
+        # autosave all'uscita se e' impostato map_save_path
+        if getattr(node, 'map_save_path', ''):
+            node.save_map(node.map_save_path)
         node.destroy_node()
         rclpy.shutdown()
 

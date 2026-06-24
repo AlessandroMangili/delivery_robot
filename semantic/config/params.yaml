@@ -31,7 +31,7 @@ semantic_costmap_node:
 
     # --- pesi e confidenza ---
     w_dist_min: 0.03         # peso minimo a max_range (lontano)
-    gate_ratio: 0.7          # serve peso >= gate_ratio*confidenza per cambiare una cella
+    gate_ratio: 0.5          # serve peso >= gate_ratio*confidenza per cambiare una cella
 
     # classi che BLOCCANO la vista (verticali) -> usate solo per l'occlusione
     blocker_classes: [2,3,4,5,7,8,11,12,13,14,15,16,17,18]
@@ -43,3 +43,8 @@ semantic_costmap_node:
     dyn_min_obs: 3           # frame prima di fidarsi della velocita'
     dyn_timeout: 1.0         # s prima di scartare una traccia non vista
     dyn_vel_beta: 0.6        # smoothing della velocita'
+
+    # --- persistenza mappa semantica (grid + confidenza) ---
+    # vuoto = disattivato. Imposta un percorso per salvare/caricare.
+    map_save_path: '/home/alessandro/Desktop/thesis_ws/maps/semantic_map'   # es: /home/alessandro/Desktop/thesis_ws/maps/semantic_map
+    map_load_path: ''   # es: /home/alessandro/Desktop/thesis_ws/maps/semantic_map.npz
