@@ -47,7 +47,7 @@
         </light>
  
     <model name="base_ground">
-      <pose>70.000 -2.500 -0.050 0.000 0.000 0.000</pose>
+      <pose>10.000 0.000 -0.050 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="collision">
@@ -72,7 +72,7 @@
       </link>
     </model>
     <model name="road_surface">
-      <pose>70.000 4.000 0.001 0.000 0.000 0.000</pose>
+      <pose>10.000 6.500 0.001 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="collision">
@@ -99,7 +99,7 @@
       </plugin>
     </model>
     <model name="sidewalk_surface">
-      <pose>70.000 -2.500 0.030 0.000 0.000 0.000</pose>
+      <pose>10.000 0.000 0.030 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="collision">
@@ -134,7 +134,7 @@
       </plugin>
     </model>
     <model name="curb">
-      <pose>70.000 0.000 0.040 0.000 0.000 0.000</pose>
+      <pose>10.000 2.500 0.040 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="collision">
@@ -161,7 +161,7 @@
       </plugin>
     </model>
     <model name="grass_strip">
-      <pose>70.000 -9.000 0.045 0.000 0.000 0.000</pose>
+      <pose>10.000 -6.500 0.045 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="collision">
@@ -190,7 +190,7 @@
     
 
     <model name="tree_1">
-      <pose>8.000 -4.250 0.000 0.000 0.000 0.000</pose>
+      <pose>-52.000 -1.750 0.000 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="cylinder_trunk_collision">
@@ -281,7 +281,7 @@
       </plugin>
     </model>
     <model name="tree_2">
-      <pose>18.000 -3.850 0.000 0.000 0.000 0.000</pose>
+      <pose>-42.000 -1.350 0.000 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="cylinder_trunk_collision">
@@ -372,7 +372,7 @@
       </plugin>
     </model>
     <model name="tree_3">
-      <pose>30.000 -4.250 0.000 0.000 0.000 0.000</pose>
+      <pose>-30.000 -1.750 0.000 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="cylinder_trunk_collision">
@@ -463,7 +463,7 @@
       </plugin>
     </model>
     <model name="tree_4">
-      <pose>43.000 -3.850 0.000 0.000 0.000 0.000</pose>
+      <pose>-17.000 -1.350 0.000 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="cylinder_trunk_collision">
@@ -554,7 +554,7 @@
       </plugin>
     </model>
     <model name="tree_5">
-      <pose>56.000 -4.250 0.000 0.000 0.000 0.000</pose>
+      <pose>-4.000 -1.750 0.000 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="cylinder_trunk_collision">
@@ -645,7 +645,7 @@
       </plugin>
     </model>
     <model name="tree_6">
-      <pose>69.000 -3.850 0.000 0.000 0.000 0.000</pose>
+      <pose>9.000 -1.350 0.000 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="cylinder_trunk_collision">
@@ -736,7 +736,7 @@
       </plugin>
     </model>
     <model name="tree_7">
-      <pose>82.000 -4.250 0.000 0.000 0.000 0.000</pose>
+      <pose>22.000 -1.750 0.000 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="cylinder_trunk_collision">
@@ -827,7 +827,7 @@
       </plugin>
     </model>
     <model name="tree_8">
-      <pose>96.000 -3.850 0.000 0.000 0.000 0.000</pose>
+      <pose>36.000 -1.350 0.000 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="cylinder_trunk_collision">
@@ -918,7 +918,7 @@
       </plugin>
     </model>
     <model name="tree_9">
-      <pose>110.000 -4.250 0.000 0.000 0.000 0.000</pose>
+      <pose>50.000 -1.750 0.000 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="cylinder_trunk_collision">
@@ -1009,7 +1009,7 @@
       </plugin>
     </model>
     <model name="tree_10">
-      <pose>124.000 -3.850 0.000 0.000 0.000 0.000</pose>
+      <pose>64.000 -1.350 0.000 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="cylinder_trunk_collision">
@@ -1100,7 +1100,7 @@
       </plugin>
     </model>
     <model name="lamp_1">
-      <pose>15.000 0.000 0.000 0.000 0.000 0.000</pose>
+      <pose>-45.000 2.500 0.000 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="pole_collision">
@@ -1157,7 +1157,7 @@
       </plugin>
     </model>
     <model name="lamp_2">
-      <pose>40.000 0.000 0.000 0.000 0.000 0.000</pose>
+      <pose>-20.000 2.500 0.000 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="pole_collision">
@@ -1214,7 +1214,7 @@
       </plugin>
     </model>
     <model name="lamp_3">
-      <pose>65.000 0.000 0.000 0.000 0.000 0.000</pose>
+      <pose>5.000 2.500 0.000 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="pole_collision">
@@ -1271,7 +1271,7 @@
       </plugin>
     </model>
     <model name="lamp_4">
-      <pose>90.000 0.000 0.000 0.000 0.000 0.000</pose>
+      <pose>30.000 2.500 0.000 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="pole_collision">
@@ -1328,7 +1328,7 @@
       </plugin>
     </model>
     <model name="lamp_5">
-      <pose>115.000 0.000 0.000 0.000 0.000 0.000</pose>
+      <pose>55.000 2.500 0.000 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="pole_collision">
@@ -1385,7 +1385,7 @@
       </plugin>
     </model>
     <model name="bench_1">
-      <pose>26.000 -3.400 0.000 0.000 0.000 0.000</pose>
+      <pose>-34.000 -0.900 0.000 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="seat_collision">
@@ -1477,7 +1477,7 @@
       </plugin>
     </model>
     <model name="bench_2">
-      <pose>72.000 -3.450 0.000 0.000 0.000 3.142</pose>
+      <pose>12.000 -0.950 0.000 0.000 0.000 3.142</pose>
       <static>true</static>
       <link name="link">
         <collision name="seat_collision">
@@ -1569,7 +1569,7 @@
       </plugin>
     </model>
     <model name="bench_3">
-      <pose>108.000 -3.300 0.000 0.000 0.000 0.000</pose>
+      <pose>48.000 -0.800 0.000 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="seat_collision">
@@ -1661,7 +1661,7 @@
       </plugin>
     </model>
     <model name="trash_1">
-      <pose>12.000 -3.000 0.000 0.000 0.000 0.000</pose>
+      <pose>-48.000 -0.500 0.000 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="bin_collision">
@@ -1692,7 +1692,7 @@
       </plugin>
     </model>
     <model name="trash_2">
-      <pose>47.000 -3.000 0.000 0.000 0.000 0.000</pose>
+      <pose>-13.000 -0.500 0.000 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="bin_collision">
@@ -1723,7 +1723,7 @@
       </plugin>
     </model>
     <model name="trash_3">
-      <pose>88.000 -3.000 0.000 0.000 0.000 0.000</pose>
+      <pose>28.000 -0.500 0.000 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="bin_collision">
@@ -1754,7 +1754,7 @@
       </plugin>
     </model>
     <model name="trash_4">
-      <pose>128.000 -3.000 0.000 0.000 0.000 0.000</pose>
+      <pose>68.000 -0.500 0.000 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="bin_collision">
@@ -1785,7 +1785,7 @@
       </plugin>
     </model>
     <model name="awning_1">
-      <pose>21.000 -9.000 3.400 0.000 0.000 0.000</pose>
+      <pose>-39.000 -6.500 3.400 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <visual name="awning_visual">
@@ -1806,7 +1806,7 @@
       </plugin>
     </model>
     <model name="awning_2">
-      <pose>60.000 -8.500 3.400 0.000 0.000 0.000</pose>
+      <pose>0.000 -6.000 3.400 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <visual name="awning_visual">
@@ -1827,7 +1827,7 @@
       </plugin>
     </model>
     <model name="awning_3">
-      <pose>100.000 -9.000 3.400 0.000 0.000 0.000</pose>
+      <pose>40.000 -6.500 3.400 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <visual name="awning_visual">
@@ -1848,7 +1848,7 @@
       </plugin>
     </model>
     <model name="pothole_1">
-      <pose>14.000 -1.400 0.000 0.000 0.000 0.000</pose>
+      <pose>-46.000 1.100 0.000 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <visual name="visual">
@@ -1884,7 +1884,7 @@
       </plugin>
     </model>
     <model name="pothole_2">
-      <pose>31.000 -2.900 0.000 0.000 0.000 0.000</pose>
+      <pose>-29.000 -0.400 0.000 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <visual name="visual">
@@ -1920,7 +1920,7 @@
       </plugin>
     </model>
     <model name="pothole_3">
-      <pose>52.000 -1.800 0.000 0.000 0.000 0.000</pose>
+      <pose>-8.000 0.700 0.000 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <visual name="visual">
@@ -1956,7 +1956,7 @@
       </plugin>
     </model>
     <model name="pothole_4">
-      <pose>67.000 -2.500 0.000 0.000 0.000 0.000</pose>
+      <pose>7.000 0.000 0.000 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <visual name="visual">
@@ -1992,7 +1992,7 @@
       </plugin>
     </model>
     <model name="pothole_5">
-      <pose>93.000 -1.300 0.000 0.000 0.000 0.000</pose>
+      <pose>33.000 1.200 0.000 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <visual name="visual">
@@ -2028,7 +2028,7 @@
       </plugin>
     </model>
     <model name="pothole_6">
-      <pose>121.000 -2.600 0.000 0.000 0.000 0.000</pose>
+      <pose>61.000 -0.100 0.000 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <visual name="visual">
@@ -2064,7 +2064,7 @@
       </plugin>
     </model>
     <model name="pothole_7">
-      <pose>132.000 -1.900 0.000 0.000 0.000 0.000</pose>
+      <pose>72.000 0.600 0.000 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <visual name="visual">
@@ -2100,7 +2100,7 @@
       </plugin>
     </model>
     <model name="planter_1">
-      <pose>7.000 -2.700 0.160 0.000 0.000 0.000</pose>
+      <pose>-53.000 -0.200 0.160 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="collision">
@@ -2127,7 +2127,7 @@
       </plugin>
     </model>
     <model name="shrub_1">
-      <pose>7.000 -2.700 0.550 0.000 0.000 0.000</pose>
+      <pose>-53.000 -0.200 0.550 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="collision">
@@ -2154,7 +2154,7 @@
       </plugin>
     </model>
     <model name="planter_2">
-      <pose>36.000 -2.700 0.160 0.000 0.000 0.000</pose>
+      <pose>-24.000 -0.200 0.160 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="collision">
@@ -2181,7 +2181,7 @@
       </plugin>
     </model>
     <model name="shrub_2">
-      <pose>36.000 -2.700 0.550 0.000 0.000 0.000</pose>
+      <pose>-24.000 -0.200 0.550 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="collision">
@@ -2208,7 +2208,7 @@
       </plugin>
     </model>
     <model name="planter_3">
-      <pose>80.000 -2.700 0.160 0.000 0.000 0.000</pose>
+      <pose>20.000 -0.200 0.160 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="collision">
@@ -2235,7 +2235,7 @@
       </plugin>
     </model>
     <model name="shrub_3">
-      <pose>80.000 -2.700 0.550 0.000 0.000 0.000</pose>
+      <pose>20.000 -0.200 0.550 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="collision">
@@ -2262,7 +2262,7 @@
       </plugin>
     </model>
     <model name="planter_4">
-      <pose>104.000 -2.700 0.160 0.000 0.000 0.000</pose>
+      <pose>44.000 -0.200 0.160 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="collision">
@@ -2289,7 +2289,7 @@
       </plugin>
     </model>
     <model name="shrub_4">
-      <pose>104.000 -2.700 0.550 0.000 0.000 0.000</pose>
+      <pose>44.000 -0.200 0.550 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="collision">
@@ -2316,7 +2316,7 @@
       </plugin>
     </model>
     <model name="planter_5">
-      <pose>134.000 -2.700 0.160 0.000 0.000 0.000</pose>
+      <pose>74.000 -0.200 0.160 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="collision">
@@ -2343,7 +2343,7 @@
       </plugin>
     </model>
     <model name="shrub_5">
-      <pose>134.000 -2.700 0.550 0.000 0.000 0.000</pose>
+      <pose>74.000 -0.200 0.550 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="collision">
@@ -2370,7 +2370,7 @@
       </plugin>
     </model>
     <model name="crosswalk_1">
-      <pose>132.000 7.500 0.011 0.000 0.000 0.000</pose>
+      <pose>72.000 10.000 0.011 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="collision">
@@ -2397,7 +2397,7 @@
       </plugin>
     </model>
     <model name="crosswalk_2">
-      <pose>133.100 7.500 0.011 0.000 0.000 0.000</pose>
+      <pose>73.100 10.000 0.011 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="collision">
@@ -2424,7 +2424,7 @@
       </plugin>
     </model>
     <model name="crosswalk_3">
-      <pose>134.200 7.500 0.011 0.000 0.000 0.000</pose>
+      <pose>74.200 10.000 0.011 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="collision">
@@ -2451,7 +2451,7 @@
       </plugin>
     </model>
     <model name="crosswalk_4">
-      <pose>135.300 7.500 0.011 0.000 0.000 0.000</pose>
+      <pose>75.300 10.000 0.011 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="collision">
@@ -2478,7 +2478,7 @@
       </plugin>
     </model>
     <model name="crosswalk_5">
-      <pose>136.400 7.500 0.011 0.000 0.000 0.000</pose>
+      <pose>76.400 10.000 0.011 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="collision">
@@ -2505,7 +2505,7 @@
       </plugin>
     </model>
     <model name="crosswalk_6">
-      <pose>137.500 7.500 0.011 0.000 0.000 0.000</pose>
+      <pose>77.500 10.000 0.011 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="collision">
@@ -2540,11 +2540,11 @@
       <script>
         <loop>true</loop><delay_start>0.00</delay_start><auto_start>true</auto_start>
         <trajectory id="0" type="walk" tension="0.6">
-        <waypoint><time>0.00</time><pose>5.0 -1.2 1.0 0 0 0.0</pose></waypoint>
-        <waypoint><time>8.00</time><pose>13.0 -1.2 1.0 0 0 0.0</pose></waypoint>
-        <waypoint><time>8.50</time><pose>13.0 -1.2 1.0 0 0 3.1416</pose></waypoint>
-        <waypoint><time>16.50</time><pose>5.0 -1.2 1.0 0 0 3.1416</pose></waypoint>
-        <waypoint><time>17.00</time><pose>5.0 -1.2 1.0 0 0 0.0</pose></waypoint>
+        <waypoint><time>0.00</time><pose>-55.000 1.300 1.0 0 0 0.0</pose></waypoint>
+        <waypoint><time>8.00</time><pose>-47.000 1.300 1.0 0 0 0.0</pose></waypoint>
+        <waypoint><time>8.50</time><pose>-47.000 1.300 1.0 0 0 3.1416</pose></waypoint>
+        <waypoint><time>16.50</time><pose>-55.000 1.300 1.0 0 0 3.1416</pose></waypoint>
+        <waypoint><time>17.00</time><pose>-55.000 1.300 1.0 0 0 0.0</pose></waypoint>
         </trajectory>
       </script>
       <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>12</label></plugin>
@@ -2555,11 +2555,11 @@
       <script>
         <loop>true</loop><delay_start>1.50</delay_start><auto_start>true</auto_start>
         <trajectory id="0" type="walk" tension="0.6">
-        <waypoint><time>0.00</time><pose>22.0 -1.6 1.0 0 0 0.0</pose></waypoint>
-        <waypoint><time>8.00</time><pose>30.0 -1.6 1.0 0 0 0.0</pose></waypoint>
-        <waypoint><time>8.50</time><pose>30.0 -1.6 1.0 0 0 3.1416</pose></waypoint>
-        <waypoint><time>16.50</time><pose>22.0 -1.6 1.0 0 0 3.1416</pose></waypoint>
-        <waypoint><time>17.00</time><pose>22.0 -1.6 1.0 0 0 0.0</pose></waypoint>
+        <waypoint><time>0.00</time><pose>-38.000 0.900 1.0 0 0 0.0</pose></waypoint>
+        <waypoint><time>8.00</time><pose>-30.000 0.900 1.0 0 0 0.0</pose></waypoint>
+        <waypoint><time>8.50</time><pose>-30.000 0.900 1.0 0 0 3.1416</pose></waypoint>
+        <waypoint><time>16.50</time><pose>-38.000 0.900 1.0 0 0 3.1416</pose></waypoint>
+        <waypoint><time>17.00</time><pose>-38.000 0.900 1.0 0 0 0.0</pose></waypoint>
         </trajectory>
       </script>
       <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>12</label></plugin>
@@ -2570,11 +2570,11 @@
       <script>
         <loop>true</loop><delay_start>3.00</delay_start><auto_start>true</auto_start>
         <trajectory id="0" type="walk" tension="0.6">
-        <waypoint><time>0.00</time><pose>40.0 -0.9 1.0 0 0 0.0</pose></waypoint>
-        <waypoint><time>10.00</time><pose>50.0 -0.9 1.0 0 0 0.0</pose></waypoint>
-        <waypoint><time>10.50</time><pose>50.0 -0.9 1.0 0 0 3.1416</pose></waypoint>
-        <waypoint><time>20.50</time><pose>40.0 -0.9 1.0 0 0 3.1416</pose></waypoint>
-        <waypoint><time>21.00</time><pose>40.0 -0.9 1.0 0 0 0.0</pose></waypoint>
+        <waypoint><time>0.00</time><pose>-20.000 1.600 1.0 0 0 0.0</pose></waypoint>
+        <waypoint><time>10.00</time><pose>-10.000 1.600 1.0 0 0 0.0</pose></waypoint>
+        <waypoint><time>10.50</time><pose>-10.000 1.600 1.0 0 0 3.1416</pose></waypoint>
+        <waypoint><time>20.50</time><pose>-20.000 1.600 1.0 0 0 3.1416</pose></waypoint>
+        <waypoint><time>21.00</time><pose>-20.000 1.600 1.0 0 0 0.0</pose></waypoint>
         </trajectory>
       </script>
       <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>12</label></plugin>
@@ -2585,11 +2585,11 @@
       <script>
         <loop>true</loop><delay_start>0.80</delay_start><auto_start>true</auto_start>
         <trajectory id="0" type="walk" tension="0.6">
-        <waypoint><time>0.00</time><pose>58.0 -1.4 1.0 0 0 0.0</pose></waypoint>
-        <waypoint><time>10.00</time><pose>68.0 -1.4 1.0 0 0 0.0</pose></waypoint>
-        <waypoint><time>10.50</time><pose>68.0 -1.4 1.0 0 0 3.1416</pose></waypoint>
-        <waypoint><time>20.50</time><pose>58.0 -1.4 1.0 0 0 3.1416</pose></waypoint>
-        <waypoint><time>21.00</time><pose>58.0 -1.4 1.0 0 0 0.0</pose></waypoint>
+        <waypoint><time>0.00</time><pose>-2.000 1.100 1.0 0 0 0.0</pose></waypoint>
+        <waypoint><time>10.00</time><pose>8.000 1.100 1.0 0 0 0.0</pose></waypoint>
+        <waypoint><time>10.50</time><pose>8.000 1.100 1.0 0 0 3.1416</pose></waypoint>
+        <waypoint><time>20.50</time><pose>-2.000 1.100 1.0 0 0 3.1416</pose></waypoint>
+        <waypoint><time>21.00</time><pose>-2.000 1.100 1.0 0 0 0.0</pose></waypoint>
         </trajectory>
       </script>
       <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>12</label></plugin>
@@ -2600,11 +2600,11 @@
       <script>
         <loop>true</loop><delay_start>2.20</delay_start><auto_start>true</auto_start>
         <trajectory id="0" type="walk" tension="0.6">
-        <waypoint><time>0.00</time><pose>85.0 -1.1 1.0 0 0 0.0</pose></waypoint>
-        <waypoint><time>10.00</time><pose>95.0 -1.1 1.0 0 0 0.0</pose></waypoint>
-        <waypoint><time>10.50</time><pose>95.0 -1.1 1.0 0 0 3.1416</pose></waypoint>
-        <waypoint><time>20.50</time><pose>85.0 -1.1 1.0 0 0 3.1416</pose></waypoint>
-        <waypoint><time>21.00</time><pose>85.0 -1.1 1.0 0 0 0.0</pose></waypoint>
+        <waypoint><time>0.00</time><pose>25.000 1.400 1.0 0 0 0.0</pose></waypoint>
+        <waypoint><time>10.00</time><pose>35.000 1.400 1.0 0 0 0.0</pose></waypoint>
+        <waypoint><time>10.50</time><pose>35.000 1.400 1.0 0 0 3.1416</pose></waypoint>
+        <waypoint><time>20.50</time><pose>25.000 1.400 1.0 0 0 3.1416</pose></waypoint>
+        <waypoint><time>21.00</time><pose>25.000 1.400 1.0 0 0 0.0</pose></waypoint>
         </trajectory>
       </script>
       <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>12</label></plugin>
@@ -2615,11 +2615,11 @@
       <script>
         <loop>true</loop><delay_start>4.00</delay_start><auto_start>true</auto_start>
         <trajectory id="0" type="walk" tension="0.6">
-        <waypoint><time>0.00</time><pose>115.0 -1.7 1.0 0 0 0.0</pose></waypoint>
-        <waypoint><time>10.00</time><pose>125.0 -1.7 1.0 0 0 0.0</pose></waypoint>
-        <waypoint><time>10.50</time><pose>125.0 -1.7 1.0 0 0 3.1416</pose></waypoint>
-        <waypoint><time>20.50</time><pose>115.0 -1.7 1.0 0 0 3.1416</pose></waypoint>
-        <waypoint><time>21.00</time><pose>115.0 -1.7 1.0 0 0 0.0</pose></waypoint>
+        <waypoint><time>0.00</time><pose>55.000 0.800 1.0 0 0 0.0</pose></waypoint>
+        <waypoint><time>10.00</time><pose>65.000 0.800 1.0 0 0 0.0</pose></waypoint>
+        <waypoint><time>10.50</time><pose>65.000 0.800 1.0 0 0 3.1416</pose></waypoint>
+        <waypoint><time>20.50</time><pose>55.000 0.800 1.0 0 0 3.1416</pose></waypoint>
+        <waypoint><time>21.00</time><pose>55.000 0.800 1.0 0 0 0.0</pose></waypoint>
         </trajectory>
       </script>
       <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>12</label></plugin>
@@ -2629,37 +2629,37 @@
 
     <!-- ===== AUTO in strada (Fuel, car, statiche per ora) ===== -->
     <include>
-      <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/Hatchback</uri>
+      <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/SUV</uri>
       <name>car_1</name>
-      <pose>20 1.3 0 0 0 0</pose>
+      <pose>-40.000 3.800 0 0 0 0</pose>
       <static>true</static>
       <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>14</label></plugin>
     </include>
     <include>
-      <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/Hatchback red</uri>
+      <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/SUV</uri>
       <name>car_2</name>
-      <pose>58 1.3 0 0 0 0</pose>
+      <pose>-2.000 3.800 0 0 0 0</pose>
       <static>true</static>
       <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>14</label></plugin>
     </include>
     <include>
       <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/SUV</uri>
       <name>car_3</name>
-      <pose>98 1.3 0 0 0 0</pose>
+      <pose>38.000 3.800 0 0 0 0</pose>
       <static>true</static>
       <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>14</label></plugin>
     </include>
     <include>
       <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/Prius Hybrid</uri>
       <name>car_4</name>
-      <pose>42 6.2 0 0 0 3.1416</pose>
+      <pose>-18.000 8.700 0 0 0 3.1416</pose>
       <static>true</static>
       <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>14</label></plugin>
     </include>
     <include>
       <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/Pickup</uri>
       <name>car_5</name>
-      <pose>125 6.2 0 0 0 3.1416</pose>
+      <pose>65.000 8.700 0 0 0 3.1416</pose>
       <static>true</static>
       <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>14</label></plugin>
     </include>
@@ -2669,7 +2669,7 @@
     <!-- ===== EDIFICI (box colorati, arretrati sull'erba) ===== -->
     <model name="bldg_1">
       <static>true</static>
-      <pose>12 -9.5 3.00 0 0 0</pose>
+      <pose>-48.000 -7.000 3.00 0 0 0</pose>
       <link name="link">
         <collision name="col"><geometry><box><size>8 5 6</size></box></geometry></collision>
         <visual name="vis">
@@ -2685,7 +2685,7 @@
     </model>
     <model name="bldg_2">
       <static>true</static>
-      <pose>40 -9.8 4.00 0 0 0</pose>
+      <pose>-20.000 -7.300 4.00 0 0 0</pose>
       <link name="link">
         <collision name="col"><geometry><box><size>10 5 8</size></box></geometry></collision>
         <visual name="vis">
@@ -2701,7 +2701,7 @@
     </model>
     <model name="bldg_3">
       <static>true</static>
-      <pose>72 -9.5 2.50 0 0 0</pose>
+      <pose>12.000 -7.000 2.50 0 0 0</pose>
       <link name="link">
         <collision name="col"><geometry><box><size>9 5 5</size></box></geometry></collision>
         <visual name="vis">
@@ -2717,7 +2717,7 @@
     </model>
     <model name="bldg_4">
       <static>true</static>
-      <pose>105 -10.0 4.50 0 0 0</pose>
+      <pose>45.000 -7.500 4.50 0 0 0</pose>
       <link name="link">
         <collision name="col"><geometry><box><size>12 6 9</size></box></geometry></collision>
         <visual name="vis">
@@ -2733,7 +2733,7 @@
     </model>
     <model name="bldg_5">
       <static>true</static>
-      <pose>132 -9.5 3.50 0 0 0</pose>
+      <pose>72.000 -7.000 3.50 0 0 0</pose>
       <link name="link">
         <collision name="col"><geometry><box><size>8 5 7</size></box></geometry></collision>
         <visual name="vis">
