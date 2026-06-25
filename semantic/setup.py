@@ -30,6 +30,8 @@ setup(
             'semantic_overlay_node = semantic.semantic_overlay_node:main',
             'semantic_costmap_node = semantic.semantic_costmap_node:main',
             'gt_segmentation_node = semantic.gt_segmentation_relay:main',
+            'confinement_layer = semantic.confinement_layer:main',
+            'ssrl_combiner = semantic.ssrl_combiner:main',
         ],
     },
 )
