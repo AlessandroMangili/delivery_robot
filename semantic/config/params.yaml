@@ -1,3 +1,10 @@
+# ============================================================
+#  Pipeline SEGMENTAZIONE GROUND-TRUTH (Gazebo) -> COSTMAP
+#  Nodi:
+#    ros2 run semantic gt_segmentation_relay  --ros-args -p use_sim_time:=true -p publish_overlay:=true
+#    ros2 run semantic semantic_costmap_node  --ros-args --params-file <questo file> -p use_sim_time:=true
+# ============================================================
+
 gt_segmentation_relay:
   ros__parameters:
     labels_topic: /semantic/labels_map
@@ -11,7 +18,11 @@ semantic_costmap_node:
     base_frame: base_footprint
     resolution: 0.05
     size_m: 8.0
-    global_size_m: 80.0
+    # --- griglia globale (rettangolare, per marciapiede lungo e stretto) ---
+    global_size_x: 160.0      # m, lato lungo (lungo il marciapiede, x 0..140)
+    global_size_y: 40.0       # m, lato corto (trasversale)
+    global_origin_x: -10.0    # m, angolo basso-sx: copre x [-10, 150]
+    global_origin_y: -20.0    # m, copre y [-20, 20]
     pixel_stride: 4
     max_range: 5.0
     min_row_frac: 0.55
@@ -24,7 +35,7 @@ semantic_costmap_node:
 
     # --- pesi e confidenza ---
     w_dist_min: 0.03         # peso minimo a max_range (lontano)
-    gate_ratio: 0.7          # serve peso >= gate_ratio*confidenza per cambiare una cella
+    gate_ratio: 0.5          # serve peso >= gate_ratio*confidenza per cambiare una cella
 
     # classi che BLOCCANO la vista (verticali) -> usate solo per l'occlusione
     blocker_classes: [2,3,4,5,7,8,11,12,13,14,15,16,17,18]
@@ -37,7 +48,7 @@ semantic_costmap_node:
     dyn_timeout: 1.0         # s prima di scartare una traccia non vista
     dyn_vel_beta: 0.6        # smoothing della velocita'
 
-    # --- persistenza mappa: SOLO il nome file; va in semantic/maps/ ---
+     # --- persistenza mappa: SOLO il nome file; va in semantic/maps/ ---
     map_save_name: 'map1'   # es: 'sidewalk'  (vuoto = non salvare)
     map_load_name: 'map1'   # es: 'sidewalk'  (vuoto = non caricare)
 

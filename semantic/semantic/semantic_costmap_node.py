@@ -93,7 +93,10 @@ class SemanticCostmapNode(Node):
         self.declare_parameter('base_frame', 'base_footprint')
         self.declare_parameter('resolution', 0.05)
         self.declare_parameter('size_m', 8.0)
-        self.declare_parameter('global_size_m', 80.0)
+        self.declare_parameter('global_size_x', 160.0)   # m, lato lungo (lungo il marciapiede)
+        self.declare_parameter('global_size_y', 40.0)     # m, lato corto (trasversale)
+        self.declare_parameter('global_origin_x', -10.0)  # m, angolo basso-sx della griglia
+        self.declare_parameter('global_origin_y', -20.0)
         self.declare_parameter('pixel_stride', 4)
         self.declare_parameter('max_range', 5.0)
         self.declare_parameter('min_row_frac', 0.62)
@@ -118,7 +121,10 @@ class SemanticCostmapNode(Node):
         self.base_frame = gp('base_frame').value
         self.res = gp('resolution').value
         self.size_m = gp('size_m').value
-        self.global_size_m = gp('global_size_m').value
+        self.global_size_x = gp('global_size_x').value
+        self.global_size_y = gp('global_size_y').value
+        self.global_origin_x = gp('global_origin_x').value
+        self.global_origin_y = gp('global_origin_y').value
         self.stride = gp('pixel_stride').value
         self.max_range = gp('max_range').value
         self.min_row_frac = gp('min_row_frac').value
@@ -143,11 +149,12 @@ class SemanticCostmapNode(Node):
                                min_obs=gp('dyn_min_obs').value, timeout=gp('dyn_timeout').value,
                                beta=gp('dyn_vel_beta').value)
 
-        self.gn = int(self.global_size_m / self.res)
-        self.gox = -self.global_size_m / 2.0
-        self.goy = -self.global_size_m / 2.0
-        self.grid = np.full((self.gn, self.gn), -1.0, dtype=np.float32)
-        self.conf = np.zeros((self.gn, self.gn), dtype=np.float32)
+        self.gnx = int(self.global_size_x / self.res)   # colonne (x)
+        self.gny = int(self.global_size_y / self.res)   # righe (y)
+        self.gox = self.global_origin_x
+        self.goy = self.global_origin_y
+        self.grid = np.full((self.gny, self.gnx), -1.0, dtype=np.float32)
+        self.conf = np.zeros((self.gny, self.gnx), dtype=np.float32)
 
         self.win = int(self.size_m / self.res)
         self.bridge = CvBridge()
@@ -221,7 +228,9 @@ class SemanticCostmapNode(Node):
     def load_map(self, path):
         try:
             d = np.load(path)
-            if (int(d['gn']) != self.gn or float(d['res']) != self.res):
+            if ('gnx' not in d or 'gny' not in d
+                    or int(d['gnx']) != self.gnx or int(d['gny']) != self.gny
+                    or float(d['res']) != self.res):
                 self.get_logger().warn(
                     'Mappa salvata incompatibile (dimensioni/risoluzione diverse): ignorata.')
                 return
@@ -238,7 +247,8 @@ class SemanticCostmapNode(Node):
                 path = path + '.npz'
             os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
             np.savez_compressed(path, grid=self.grid, conf=self.conf,
-                                gn=self.gn, res=self.res, gox=self.gox, goy=self.goy)
+                                gnx=self.gnx, gny=self.gny, res=self.res,
+                                gox=self.gox, goy=self.goy)
             self.get_logger().info(f'Mappa semantica salvata in {path}.')
             return path
         except Exception as e:
@@ -344,7 +354,7 @@ class SemanticCostmapNode(Node):
 
         gi = ((X - self.gox) / self.res).astype(int)
         gj = ((Y - self.goy) / self.res).astype(int)
-        inside = ok & (gi >= 0) & (gi < self.gn) & (gj >= 0) & (gj < self.gn)
+        inside = ok & (gi >= 0) & (gi < self.gnx) & (gj >= 0) & (gj < self.gny)
 
         gi_u = gi[inside]; gj_u = gj[inside]
         co_u = costs[inside].astype(np.float32)
@@ -353,8 +363,8 @@ class SemanticCostmapNode(Node):
             self.publish_map(bx, by, msg.header.stamp)
             return
 
-        flat = gj_u * self.gn + gi_u
-        N = self.gn * self.gn
+        flat = gj_u * self.gnx + gi_u
+        N = self.gnx * self.gny
         order = np.argsort(w_u)
         flat_s = flat[order]
         frame_cost = np.full(N, -1.0, dtype=np.float32)
@@ -372,8 +382,8 @@ class SemanticCostmapNode(Node):
         V[knownup] = (1.0 - fa) * V[knownup] + fa * frame_cost[knownup]
         C[accept] = np.maximum(C[accept], frame_w[accept])
 
-        self.grid = V.reshape(self.gn, self.gn)
-        self.conf = C.reshape(self.gn, self.gn)
+        self.grid = V.reshape(self.gny, self.gnx)
+        self.conf = C.reshape(self.gny, self.gnx)
         self.publish_map(bx, by, msg.header.stamp)
 
     def publish_map(self, bx, by, stamp):
@@ -381,14 +391,20 @@ class SemanticCostmapNode(Node):
             ci = int((bx - self.gox) / self.res)
             cj = int((by - self.goy) / self.res)
             half = self.win // 2
-            i0 = max(0, ci - half); i1 = min(self.gn, ci + half)
-            j0 = max(0, cj - half); j1 = min(self.gn, cj + half)
+            i0 = max(0, min(self.gnx, ci - half)); i1 = max(0, min(self.gnx, ci + half))
+            j0 = max(0, min(self.gny, cj - half)); j1 = max(0, min(self.gny, cj + half))
+            # robot fuori dalla griglia globale -> finestra vuota: non pubblicare, ma non crashare
+            if i1 <= i0 or j1 <= j0:
+                self.get_logger().warn(
+                    'Robot fuori dalla griglia globale: amplia global_size_x/y o sposta '
+                    'global_origin_x/y.', throttle_duration_sec=5.0)
+                return
             sub = self.grid[j0:j1, i0:i1]
             ox = self.gox + i0 * self.res; oy = self.goy + j0 * self.res
             width = i1 - i0; height = j1 - j0
         else:
             sub = self.grid; ox, oy = self.gox, self.goy
-            width = self.gn; height = self.gn
+            width = self.gnx; height = self.gny
 
         msg = OccupancyGrid()
         msg.header.stamp = stamp
