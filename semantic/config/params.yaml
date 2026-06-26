@@ -21,7 +21,7 @@ semantic_costmap_node:
     # --- griglia globale (rettangolare, per marciapiede lungo e stretto) ---
     global_size_x: 160.0      # m, lato lungo (lungo il marciapiede, x 0..140)
     global_size_y: 40.0       # m, lato corto (trasversale)
-    global_origin_x: -10.0    # m, angolo basso-sx: copre x [-10, 150]
+    global_origin_x: -80.0    # m: copre x [-80, 80] (marciapiede ora x[-70,70])
     global_origin_y: -20.0    # m, copre y [-20, 20]
     pixel_stride: 4
     max_range: 5.0
@@ -35,7 +35,7 @@ semantic_costmap_node:
 
     # --- pesi e confidenza ---
     w_dist_min: 0.03         # peso minimo a max_range (lontano)
-    gate_ratio: 0.5          # serve peso >= gate_ratio*confidenza per cambiare una cella
+    gate_ratio: 0.7          # serve peso >= gate_ratio*confidenza per cambiare una cella
 
     # classi che BLOCCANO la vista (verticali) -> usate solo per l'occlusione
     blocker_classes: [2,3,4,5,7,8,11,12,13,14,15,16,17,18]
