@@ -17,12 +17,7 @@ semantic_costmap_node:
     camera_optical_frame: camera_rgb_optical_frame
     base_frame: base_footprint
     resolution: 0.05
-    size_m: 8.0
-    # --- griglia globale (rettangolare, per marciapiede lungo e stretto) ---
-    global_size_x: 160.0      # m, lato lungo (lungo il marciapiede, x 0..140)
-    global_size_y: 40.0       # m, lato corto (trasversale)
-    global_origin_x: -80.0    # m: copre x [-80, 80] (marciapiede ora x[-70,70])
-    global_origin_y: -20.0    # m, copre y [-20, 20]
+    size_m: 10.0
     pixel_stride: 4
     max_range: 5.0
     min_row_frac: 0.55
@@ -40,6 +35,14 @@ semantic_costmap_node:
     # classi che BLOCCANO la vista (verticali) -> usate solo per l'occlusione
     blocker_classes: [2,3,4,5,7,8,11,12,13,14,15,16,17,18]
 
+    # --- griglia AUTO-GROW: si espande da sola, niente da impostare ---
+    initial_size_m: 10.0   # griglia iniziale attorno al robot
+    grow_margin_m: 3.0     # margine aggiunto a ogni espansione
+
+    # --- persistenza mappa: SOLO il nome file; va in semantic/maps/ ---
+    map_save_name: ''   # es: 'sidewalk'  (vuoto = non salvare)
+    map_load_name: ''   # es: 'sidewalk'  (vuoto = non caricare)
+
     # --- oggetti dinamici (tracking + velocita') ---
     dynamic_classes: [11,12,13,14,15,16,17,18]  # persona, rider, veicoli
     dyn_v_thresh: 0.3        # m/s sopra cui l'oggetto e' 'in movimento' -> escluso
@@ -47,10 +50,6 @@ semantic_costmap_node:
     dyn_min_obs: 3           # frame prima di fidarsi della velocita'
     dyn_timeout: 1.0         # s prima di scartare una traccia non vista
     dyn_vel_beta: 0.6        # smoothing della velocita'
-
-     # --- persistenza mappa: SOLO il nome file; va in semantic/maps/ ---
-    map_save_name: 'map1'   # es: 'sidewalk'  (vuoto = non salvare)
-    map_load_name: 'map1'   # es: 'sidewalk'  (vuoto = non caricare)
 
 confinement_layer:
   ros__parameters:

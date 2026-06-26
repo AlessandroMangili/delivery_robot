@@ -93,10 +93,8 @@ class SemanticCostmapNode(Node):
         self.declare_parameter('base_frame', 'base_footprint')
         self.declare_parameter('resolution', 0.05)
         self.declare_parameter('size_m', 8.0)
-        self.declare_parameter('global_size_x', 160.0)   # m, lato lungo (lungo il marciapiede)
-        self.declare_parameter('global_size_y', 40.0)     # m, lato corto (trasversale)
-        self.declare_parameter('global_origin_x', -10.0)  # m, angolo basso-sx della griglia
-        self.declare_parameter('global_origin_y', -20.0)
+        self.declare_parameter('initial_size_m', 10.0)   # m, griglia iniziale (poi cresce da sola)
+        self.declare_parameter('grow_margin_m', 3.0)     # m, margine aggiunto a ogni espansione
         self.declare_parameter('pixel_stride', 4)
         self.declare_parameter('max_range', 5.0)
         self.declare_parameter('min_row_frac', 0.62)
@@ -121,10 +119,8 @@ class SemanticCostmapNode(Node):
         self.base_frame = gp('base_frame').value
         self.res = gp('resolution').value
         self.size_m = gp('size_m').value
-        self.global_size_x = gp('global_size_x').value
-        self.global_size_y = gp('global_size_y').value
-        self.global_origin_x = gp('global_origin_x').value
-        self.global_origin_y = gp('global_origin_y').value
+        self.initial_size_m = gp('initial_size_m').value
+        self.grow_margin = gp('grow_margin_m').value
         self.stride = gp('pixel_stride').value
         self.max_range = gp('max_range').value
         self.min_row_frac = gp('min_row_frac').value
@@ -149,10 +145,10 @@ class SemanticCostmapNode(Node):
                                min_obs=gp('dyn_min_obs').value, timeout=gp('dyn_timeout').value,
                                beta=gp('dyn_vel_beta').value)
 
-        self.gnx = int(self.global_size_x / self.res)   # colonne (x)
-        self.gny = int(self.global_size_y / self.res)   # righe (y)
-        self.gox = self.global_origin_x
-        self.goy = self.global_origin_y
+        self.gnx = int(self.initial_size_m / self.res)   # colonne (x), cresce da sola
+        self.gny = int(self.initial_size_m / self.res)   # righe (y)
+        self.gox = -self.initial_size_m / 2.0
+        self.goy = -self.initial_size_m / 2.0
         self.grid = np.full((self.gny, self.gnx), -1.0, dtype=np.float32)
         self.conf = np.zeros((self.gny, self.gnx), dtype=np.float32)
 
@@ -228,16 +224,17 @@ class SemanticCostmapNode(Node):
     def load_map(self, path):
         try:
             d = np.load(path)
-            if ('gnx' not in d or 'gny' not in d
-                    or int(d['gnx']) != self.gnx or int(d['gny']) != self.gny
-                    or float(d['res']) != self.res):
+            if float(d['res']) != self.res:
                 self.get_logger().warn(
-                    'Mappa salvata incompatibile (dimensioni/risoluzione diverse): ignorata.')
+                    'Mappa salvata con risoluzione diversa: ignorata.')
                 return
+            # con l'auto-grow adotto direttamente la griglia salvata (qualsiasi dimensione)
             self.grid = d['grid'].astype(np.float32)
             self.conf = d['conf'].astype(np.float32)
+            self.gny, self.gnx = self.grid.shape
             self.gox = float(d['gox']); self.goy = float(d['goy'])
-            self.get_logger().info(f'Mappa semantica caricata da {path}.')
+            self.get_logger().info(
+                f'Mappa semantica caricata da {path} ({self.gnx}x{self.gny}).')
         except Exception as e:
             self.get_logger().warn(f'Caricamento mappa fallito: {e}')
 
@@ -273,6 +270,33 @@ class SemanticCostmapNode(Node):
             self.get_logger().warn(f'TF non disponibile {frame}->{self.target}: {e}',
                                    throttle_duration_sec=2.0)
             return None
+
+    def ensure_capacity(self, X, Y):
+        """Espande la griglia (auto-grow) se le coordinate mondo X,Y cadono fuori.
+        Copia i dati esistenti nella nuova griglia, aggiorna origine e dimensioni."""
+        gi_min = int(np.floor((X.min() - self.gox) / self.res))
+        gi_max = int(np.floor((X.max() - self.gox) / self.res))
+        gj_min = int(np.floor((Y.min() - self.goy) / self.res))
+        gj_max = int(np.floor((Y.max() - self.goy) / self.res))
+        m = int(self.grow_margin / self.res)
+        pl = (m - gi_min) if gi_min < 0 else 0
+        pb = (m - gj_min) if gj_min < 0 else 0
+        pr = (gi_max - (self.gnx - 1) + m) if gi_max >= self.gnx else 0
+        pt = (gj_max - (self.gny - 1) + m) if gj_max >= self.gny else 0
+        if not (pl or pr or pb or pt):
+            return
+        new_gnx = self.gnx + pl + pr
+        new_gny = self.gny + pb + pt
+        new_grid = np.full((new_gny, new_gnx), -1.0, dtype=np.float32)
+        new_conf = np.zeros((new_gny, new_gnx), dtype=np.float32)
+        new_grid[pb:pb + self.gny, pl:pl + self.gnx] = self.grid
+        new_conf[pb:pb + self.gny, pl:pl + self.gnx] = self.conf
+        self.grid = new_grid; self.conf = new_conf
+        self.gnx = new_gnx; self.gny = new_gny
+        self.gox -= pl * self.res; self.goy -= pb * self.res
+        self.get_logger().info(
+            f'Griglia espansa -> {self.gnx}x{self.gny} celle, origine '
+            f'({self.gox:.1f},{self.goy:.1f}).', throttle_duration_sec=2.0)
 
     def seg_cb(self, msg: Image):
         if self.K is None:
@@ -352,6 +376,11 @@ class SemanticCostmapNode(Node):
         w_occ = np.where(occluded, self.occ_weak, 1.0)
         wpix = w_dist * w_occ
 
+        # AUTO-GROW: se le osservazioni valide cadono fuori griglia, espandi
+        okx = ok & np.isfinite(X) & np.isfinite(Y)
+        if okx.any():
+            self.ensure_capacity(X[okx], Y[okx])
+
         gi = ((X - self.gox) / self.res).astype(int)
         gj = ((Y - self.goy) / self.res).astype(int)
         inside = ok & (gi >= 0) & (gi < self.gnx) & (gj >= 0) & (gj < self.gny)
@@ -395,9 +424,6 @@ class SemanticCostmapNode(Node):
             j0 = max(0, min(self.gny, cj - half)); j1 = max(0, min(self.gny, cj + half))
             # robot fuori dalla griglia globale -> finestra vuota: non pubblicare, ma non crashare
             if i1 <= i0 or j1 <= j0:
-                self.get_logger().warn(
-                    'Robot fuori dalla griglia globale: amplia global_size_x/y o sposta '
-                    'global_origin_x/y.', throttle_duration_sec=5.0)
                 return
             sub = self.grid[j0:j1, i0:i1]
             ox = self.gox + i0 * self.res; oy = self.goy + j0 * self.res
