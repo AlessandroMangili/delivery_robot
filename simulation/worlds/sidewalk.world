@@ -46,21 +46,21 @@
             <direction>-0.5 0.1 -0.9</direction>
         </light>
  
-    <model name="base_ground">
-      <pose>10.000 0.000 -0.050 0.000 0.000 0.000</pose>
+        <model name="base_ground">
+      <pose>0.000 4.000 -0.050 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="collision">
           <geometry>
             <box>
-              <size>140.000 28.000 0.100</size>
+              <size>70.000 40.000 0.100</size>
             </box>
           </geometry>
         </collision>
         <visual name="visual">
           <geometry>
             <box>
-              <size>140.000 28.000 0.100</size>
+              <size>70.000 40.000 0.100</size>
             </box>
           </geometry>
           <material>
@@ -72,20 +72,20 @@
       </link>
     </model>
     <model name="road_surface">
-      <pose>10.000 6.500 0.001 0.000 0.000 0.000</pose>
+      <pose>0.000 6.500 0.001 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="collision">
           <geometry>
             <box>
-              <size>140.000 8.000 0.020</size>
+              <size>70.000 8.000 0.020</size>
             </box>
           </geometry>
         </collision>
         <visual name="visual">
           <geometry>
             <box>
-              <size>140.000 8.000 0.020</size>
+              <size>70.000 8.000 0.020</size>
             </box>
           </geometry>
           <material>
@@ -99,13 +99,13 @@
       </plugin>
     </model>
     <model name="sidewalk_surface">
-      <pose>10.000 0.000 0.030 0.000 0.000 0.000</pose>
+      <pose>0.000 0.000 0.030 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="collision">
           <geometry>
             <box>
-              <size>140.000 5.000 0.060</size>
+              <size>70.000 5.000 0.060</size>
             </box>
           </geometry>
         </collision>
@@ -114,7 +114,7 @@
           <geometry>
             <mesh>
               <uri>../meshes/sidewalk_plane.obj</uri>
-            </mesh>
+            <scale>0.5 1.0 1.0</scale></mesh>
           </geometry>
           <material>
             <ambient>0.70 0.69 0.66 1.0</ambient>
@@ -134,20 +134,20 @@
       </plugin>
     </model>
     <model name="curb">
-      <pose>10.000 2.500 0.040 0.000 0.000 0.000</pose>
+      <pose>0.000 2.500 0.040 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="collision">
           <geometry>
             <box>
-              <size>140.000 0.180 0.080</size>
+              <size>70.000 0.180 0.080</size>
             </box>
           </geometry>
         </collision>
         <visual name="visual">
           <geometry>
             <box>
-              <size>140.000 0.180 0.080</size>
+              <size>70.000 0.180 0.080</size>
             </box>
           </geometry>
           <material>
@@ -161,20 +161,20 @@
       </plugin>
     </model>
     <model name="grass_strip">
-      <pose>10.000 -6.500 0.045 0.000 0.000 0.000</pose>
+      <pose>0.000 -6.500 0.045 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="collision">
           <geometry>
             <box>
-              <size>140.000 8.000 0.030</size>
+              <size>70.000 8.000 0.030</size>
             </box>
           </geometry>
         </collision>
         <visual name="visual">
           <geometry>
             <box>
-              <size>140.000 8.000 0.030</size>
+              <size>70.000 8.000 0.030</size>
             </box>
           </geometry>
           <material>
@@ -187,283 +187,8 @@
         <label>10</label>
       </plugin>
     </model>
-    
-
-    <model name="tree_1">
-      <pose>-52.000 -1.750 0.000 0.000 0.000 0.000</pose>
-      <static>true</static>
-      <link name="link">
-        <collision name="cylinder_trunk_collision">
-          <pose>0.000 0.000 1.500 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.180</radius>
-              <length>3.000</length>
-            </cylinder>
-          </geometry>
-        </collision>
-        <visual name="cylinder_trunk_visual">
-          <pose>0.000 0.000 1.500 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.180</radius>
-              <length>3.000</length>
-            </cylinder>
-          </geometry>
-          <material>
-            <ambient>0.360 0.224 0.096 1.000</ambient>
-            <diffuse>0.450 0.280 0.120 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <visual name="canopy_visual_0">
-          <pose>0.000 0.000 3.480 0.000 0.000 0.000</pose>
-          <geometry>
-            <sphere>
-              <radius>1.250</radius>
-            </sphere>
-          </geometry>
-          <material>
-            <ambient>0.144 0.360 0.120 1.000</ambient>
-            <diffuse>0.180 0.450 0.150 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <visual name="canopy_visual_1">
-          <pose>0.700 0.200 3.240 0.000 0.000 0.000</pose>
-          <geometry>
-            <sphere>
-              <radius>1.062</radius>
-            </sphere>
-          </geometry>
-          <material>
-            <ambient>0.144 0.360 0.120 1.000</ambient>
-            <diffuse>0.180 0.450 0.150 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <visual name="canopy_visual_2">
-          <pose>-0.600 -0.200 3.240 0.000 0.000 0.000</pose>
-          <geometry>
-            <sphere>
-              <radius>1.000</radius>
-            </sphere>
-          </geometry>
-          <material>
-            <ambient>0.144 0.360 0.120 1.000</ambient>
-            <diffuse>0.180 0.450 0.150 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <visual name="canopy_visual_3">
-          <pose>0.200 0.600 3.120 0.000 0.000 0.000</pose>
-          <geometry>
-            <sphere>
-              <radius>0.938</radius>
-            </sphere>
-          </geometry>
-          <material>
-            <ambient>0.144 0.360 0.120 1.000</ambient>
-            <diffuse>0.180 0.450 0.150 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <collision name="canopy_collision">
-          <pose>0.000 0.000 3.360 0.000 0.000 0.000</pose>
-          <geometry>
-            <sphere>
-              <radius>1.500</radius>
-            </sphere>
-          </geometry>
-        </collision>
-      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
-        <label>9</label>
-      </plugin>
-    </model>
-    <model name="tree_2">
-      <pose>-42.000 -1.350 0.000 0.000 0.000 0.000</pose>
-      <static>true</static>
-      <link name="link">
-        <collision name="cylinder_trunk_collision">
-          <pose>0.000 0.000 1.700 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.180</radius>
-              <length>3.400</length>
-            </cylinder>
-          </geometry>
-        </collision>
-        <visual name="cylinder_trunk_visual">
-          <pose>0.000 0.000 1.700 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.180</radius>
-              <length>3.400</length>
-            </cylinder>
-          </geometry>
-          <material>
-            <ambient>0.360 0.224 0.096 1.000</ambient>
-            <diffuse>0.450 0.280 0.120 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <visual name="canopy_visual_0">
-          <pose>0.000 0.000 3.880 0.000 0.000 0.000</pose>
-          <geometry>
-            <sphere>
-              <radius>1.400</radius>
-            </sphere>
-          </geometry>
-          <material>
-            <ambient>0.144 0.360 0.120 1.000</ambient>
-            <diffuse>0.180 0.450 0.150 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <visual name="canopy_visual_1">
-          <pose>0.700 0.200 3.640 0.000 0.000 0.000</pose>
-          <geometry>
-            <sphere>
-              <radius>1.190</radius>
-            </sphere>
-          </geometry>
-          <material>
-            <ambient>0.144 0.360 0.120 1.000</ambient>
-            <diffuse>0.180 0.450 0.150 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <visual name="canopy_visual_2">
-          <pose>-0.600 -0.200 3.640 0.000 0.000 0.000</pose>
-          <geometry>
-            <sphere>
-              <radius>1.120</radius>
-            </sphere>
-          </geometry>
-          <material>
-            <ambient>0.144 0.360 0.120 1.000</ambient>
-            <diffuse>0.180 0.450 0.150 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <visual name="canopy_visual_3">
-          <pose>0.200 0.600 3.520 0.000 0.000 0.000</pose>
-          <geometry>
-            <sphere>
-              <radius>1.050</radius>
-            </sphere>
-          </geometry>
-          <material>
-            <ambient>0.144 0.360 0.120 1.000</ambient>
-            <diffuse>0.180 0.450 0.150 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <collision name="canopy_collision">
-          <pose>0.000 0.000 3.760 0.000 0.000 0.000</pose>
-          <geometry>
-            <sphere>
-              <radius>1.680</radius>
-            </sphere>
-          </geometry>
-        </collision>
-      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
-        <label>9</label>
-      </plugin>
-    </model>
-    <model name="tree_3">
-      <pose>-30.000 -1.750 0.000 0.000 0.000 0.000</pose>
-      <static>true</static>
-      <link name="link">
-        <collision name="cylinder_trunk_collision">
-          <pose>0.000 0.000 1.900 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.180</radius>
-              <length>3.800</length>
-            </cylinder>
-          </geometry>
-        </collision>
-        <visual name="cylinder_trunk_visual">
-          <pose>0.000 0.000 1.900 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.180</radius>
-              <length>3.800</length>
-            </cylinder>
-          </geometry>
-          <material>
-            <ambient>0.360 0.224 0.096 1.000</ambient>
-            <diffuse>0.450 0.280 0.120 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <visual name="canopy_visual_0">
-          <pose>0.000 0.000 4.280 0.000 0.000 0.000</pose>
-          <geometry>
-            <sphere>
-              <radius>1.250</radius>
-            </sphere>
-          </geometry>
-          <material>
-            <ambient>0.144 0.360 0.120 1.000</ambient>
-            <diffuse>0.180 0.450 0.150 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <visual name="canopy_visual_1">
-          <pose>0.700 0.200 4.040 0.000 0.000 0.000</pose>
-          <geometry>
-            <sphere>
-              <radius>1.062</radius>
-            </sphere>
-          </geometry>
-          <material>
-            <ambient>0.144 0.360 0.120 1.000</ambient>
-            <diffuse>0.180 0.450 0.150 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <visual name="canopy_visual_2">
-          <pose>-0.600 -0.200 4.040 0.000 0.000 0.000</pose>
-          <geometry>
-            <sphere>
-              <radius>1.000</radius>
-            </sphere>
-          </geometry>
-          <material>
-            <ambient>0.144 0.360 0.120 1.000</ambient>
-            <diffuse>0.180 0.450 0.150 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <visual name="canopy_visual_3">
-          <pose>0.200 0.600 3.920 0.000 0.000 0.000</pose>
-          <geometry>
-            <sphere>
-              <radius>0.938</radius>
-            </sphere>
-          </geometry>
-          <material>
-            <ambient>0.144 0.360 0.120 1.000</ambient>
-            <diffuse>0.180 0.450 0.150 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <collision name="canopy_collision">
-          <pose>0.000 0.000 4.160 0.000 0.000 0.000</pose>
-          <geometry>
-            <sphere>
-              <radius>1.500</radius>
-            </sphere>
-          </geometry>
-        </collision>
-      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
-        <label>9</label>
-      </plugin>
-    </model>
     <model name="tree_4">
-      <pose>-17.000 -1.350 0.000 0.000 0.000 0.000</pose>
+      <pose>-27.000 -1.350 0.000 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="cylinder_trunk_collision">
@@ -554,7 +279,7 @@
       </plugin>
     </model>
     <model name="tree_5">
-      <pose>-4.000 -1.750 0.000 0.000 0.000 0.000</pose>
+      <pose>-14.000 -1.750 0.000 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="cylinder_trunk_collision">
@@ -645,7 +370,7 @@
       </plugin>
     </model>
     <model name="tree_6">
-      <pose>9.000 -1.350 0.000 0.000 0.000 0.000</pose>
+      <pose>-1.000 -1.350 0.000 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="cylinder_trunk_collision">
@@ -736,7 +461,7 @@
       </plugin>
     </model>
     <model name="tree_7">
-      <pose>22.000 -1.750 0.000 0.000 0.000 0.000</pose>
+      <pose>12.000 -1.750 0.000 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="cylinder_trunk_collision">
@@ -827,7 +552,7 @@
       </plugin>
     </model>
     <model name="tree_8">
-      <pose>36.000 -1.350 0.000 0.000 0.000 0.000</pose>
+      <pose>26.000 -1.350 0.000 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="cylinder_trunk_collision">
@@ -917,247 +642,8 @@
         <label>9</label>
       </plugin>
     </model>
-    <model name="tree_9">
-      <pose>50.000 -1.750 0.000 0.000 0.000 0.000</pose>
-      <static>true</static>
-      <link name="link">
-        <collision name="cylinder_trunk_collision">
-          <pose>0.000 0.000 1.900 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.180</radius>
-              <length>3.800</length>
-            </cylinder>
-          </geometry>
-        </collision>
-        <visual name="cylinder_trunk_visual">
-          <pose>0.000 0.000 1.900 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.180</radius>
-              <length>3.800</length>
-            </cylinder>
-          </geometry>
-          <material>
-            <ambient>0.360 0.224 0.096 1.000</ambient>
-            <diffuse>0.450 0.280 0.120 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <visual name="canopy_visual_0">
-          <pose>0.000 0.000 4.280 0.000 0.000 0.000</pose>
-          <geometry>
-            <sphere>
-              <radius>1.250</radius>
-            </sphere>
-          </geometry>
-          <material>
-            <ambient>0.144 0.360 0.120 1.000</ambient>
-            <diffuse>0.180 0.450 0.150 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <visual name="canopy_visual_1">
-          <pose>0.700 0.200 4.040 0.000 0.000 0.000</pose>
-          <geometry>
-            <sphere>
-              <radius>1.062</radius>
-            </sphere>
-          </geometry>
-          <material>
-            <ambient>0.144 0.360 0.120 1.000</ambient>
-            <diffuse>0.180 0.450 0.150 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <visual name="canopy_visual_2">
-          <pose>-0.600 -0.200 4.040 0.000 0.000 0.000</pose>
-          <geometry>
-            <sphere>
-              <radius>1.000</radius>
-            </sphere>
-          </geometry>
-          <material>
-            <ambient>0.144 0.360 0.120 1.000</ambient>
-            <diffuse>0.180 0.450 0.150 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <visual name="canopy_visual_3">
-          <pose>0.200 0.600 3.920 0.000 0.000 0.000</pose>
-          <geometry>
-            <sphere>
-              <radius>0.938</radius>
-            </sphere>
-          </geometry>
-          <material>
-            <ambient>0.144 0.360 0.120 1.000</ambient>
-            <diffuse>0.180 0.450 0.150 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <collision name="canopy_collision">
-          <pose>0.000 0.000 4.160 0.000 0.000 0.000</pose>
-          <geometry>
-            <sphere>
-              <radius>1.500</radius>
-            </sphere>
-          </geometry>
-        </collision>
-      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
-        <label>9</label>
-      </plugin>
-    </model>
-    <model name="tree_10">
-      <pose>64.000 -1.350 0.000 0.000 0.000 0.000</pose>
-      <static>true</static>
-      <link name="link">
-        <collision name="cylinder_trunk_collision">
-          <pose>0.000 0.000 1.500 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.180</radius>
-              <length>3.000</length>
-            </cylinder>
-          </geometry>
-        </collision>
-        <visual name="cylinder_trunk_visual">
-          <pose>0.000 0.000 1.500 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.180</radius>
-              <length>3.000</length>
-            </cylinder>
-          </geometry>
-          <material>
-            <ambient>0.360 0.224 0.096 1.000</ambient>
-            <diffuse>0.450 0.280 0.120 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <visual name="canopy_visual_0">
-          <pose>0.000 0.000 3.480 0.000 0.000 0.000</pose>
-          <geometry>
-            <sphere>
-              <radius>1.400</radius>
-            </sphere>
-          </geometry>
-          <material>
-            <ambient>0.144 0.360 0.120 1.000</ambient>
-            <diffuse>0.180 0.450 0.150 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <visual name="canopy_visual_1">
-          <pose>0.700 0.200 3.240 0.000 0.000 0.000</pose>
-          <geometry>
-            <sphere>
-              <radius>1.190</radius>
-            </sphere>
-          </geometry>
-          <material>
-            <ambient>0.144 0.360 0.120 1.000</ambient>
-            <diffuse>0.180 0.450 0.150 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <visual name="canopy_visual_2">
-          <pose>-0.600 -0.200 3.240 0.000 0.000 0.000</pose>
-          <geometry>
-            <sphere>
-              <radius>1.120</radius>
-            </sphere>
-          </geometry>
-          <material>
-            <ambient>0.144 0.360 0.120 1.000</ambient>
-            <diffuse>0.180 0.450 0.150 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <visual name="canopy_visual_3">
-          <pose>0.200 0.600 3.120 0.000 0.000 0.000</pose>
-          <geometry>
-            <sphere>
-              <radius>1.050</radius>
-            </sphere>
-          </geometry>
-          <material>
-            <ambient>0.144 0.360 0.120 1.000</ambient>
-            <diffuse>0.180 0.450 0.150 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <collision name="canopy_collision">
-          <pose>0.000 0.000 3.360 0.000 0.000 0.000</pose>
-          <geometry>
-            <sphere>
-              <radius>1.680</radius>
-            </sphere>
-          </geometry>
-        </collision>
-      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
-        <label>9</label>
-      </plugin>
-    </model>
-    <model name="lamp_1">
-      <pose>-45.000 2.500 0.000 0.000 0.000 0.000</pose>
-      <static>true</static>
-      <link name="link">
-        <collision name="pole_collision">
-          <pose>0.000 0.000 2.900 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.060</radius>
-              <length>5.800</length>
-            </cylinder>
-          </geometry>
-        </collision>
-        <visual name="pole_visual">
-          <pose>0.000 0.000 2.900 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.060</radius>
-              <length>5.800</length>
-            </cylinder>
-          </geometry>
-          <material>
-            <ambient>0.120 0.120 0.120 1.000</ambient>
-            <diffuse>0.150 0.150 0.150 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <visual name="arm_visual">
-          <pose>0.550 0.000 5.000 0.000 0.000 0.000</pose>
-          <geometry>
-            <box>
-              <size>1.100 0.050 0.050</size>
-            </box>
-          </geometry>
-          <material>
-            <ambient>0.120 0.120 0.120 1.000</ambient>
-            <diffuse>0.150 0.150 0.150 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <visual name="lamp_visual">
-          <pose>1.000 0.000 4.950 0.000 0.000 0.000</pose>
-          <geometry>
-            <box>
-              <size>0.180 0.180 0.220</size>
-            </box>
-          </geometry>
-          <material>
-            <ambient>0.760 0.760 0.560 1.000</ambient>
-            <diffuse>0.950 0.950 0.700 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
-        <label>6</label>
-      </plugin>
-    </model>
     <model name="lamp_2">
-      <pose>-20.000 2.500 0.000 0.000 0.000 0.000</pose>
+      <pose>-30.000 2.500 0.000 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="pole_collision">
@@ -1214,7 +700,7 @@
       </plugin>
     </model>
     <model name="lamp_3">
-      <pose>5.000 2.500 0.000 0.000 0.000 0.000</pose>
+      <pose>-5.000 2.500 0.000 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="pole_collision">
@@ -1271,7 +757,7 @@
       </plugin>
     </model>
     <model name="lamp_4">
-      <pose>30.000 2.500 0.000 0.000 0.000 0.000</pose>
+      <pose>20.000 2.500 0.000 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="pole_collision">
@@ -1325,159 +811,10 @@
         </visual>
       </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
         <label>6</label>
-      </plugin>
-    </model>
-    <model name="lamp_5">
-      <pose>55.000 2.500 0.000 0.000 0.000 0.000</pose>
-      <static>true</static>
-      <link name="link">
-        <collision name="pole_collision">
-          <pose>0.000 0.000 2.900 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.060</radius>
-              <length>5.800</length>
-            </cylinder>
-          </geometry>
-        </collision>
-        <visual name="pole_visual">
-          <pose>0.000 0.000 2.900 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.060</radius>
-              <length>5.800</length>
-            </cylinder>
-          </geometry>
-          <material>
-            <ambient>0.120 0.120 0.120 1.000</ambient>
-            <diffuse>0.150 0.150 0.150 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <visual name="arm_visual">
-          <pose>0.550 0.000 5.000 0.000 0.000 0.000</pose>
-          <geometry>
-            <box>
-              <size>1.100 0.050 0.050</size>
-            </box>
-          </geometry>
-          <material>
-            <ambient>0.120 0.120 0.120 1.000</ambient>
-            <diffuse>0.150 0.150 0.150 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <visual name="lamp_visual">
-          <pose>1.000 0.000 4.950 0.000 0.000 0.000</pose>
-          <geometry>
-            <box>
-              <size>0.180 0.180 0.220</size>
-            </box>
-          </geometry>
-          <material>
-            <ambient>0.760 0.760 0.560 1.000</ambient>
-            <diffuse>0.950 0.950 0.700 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
-        <label>6</label>
-      </plugin>
-    </model>
-    <model name="bench_1">
-      <pose>-34.000 -0.900 0.000 0.000 0.000 0.000</pose>
-      <static>true</static>
-      <link name="link">
-        <collision name="seat_collision">
-          <pose>0.000 0.000 0.420 0.000 0.000 0.000</pose>
-          <geometry>
-            <box>
-              <size>1.600 0.450 0.080</size>
-            </box>
-          </geometry>
-        </collision>
-        <visual name="seat_visual">
-          <pose>0.000 0.000 0.420 0.000 0.000 0.000</pose>
-          <geometry>
-            <box>
-              <size>1.600 0.450 0.080</size>
-            </box>
-          </geometry>
-          <material>
-            <ambient>0.360 0.224 0.096 1.000</ambient>
-            <diffuse>0.450 0.280 0.120 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <collision name="back_collision">
-          <pose>0.000 -0.180 0.720 0.000 0.000 0.000</pose>
-          <geometry>
-            <box>
-              <size>1.600 0.080 0.550</size>
-            </box>
-          </geometry>
-        </collision>
-        <visual name="back_visual">
-          <pose>0.000 -0.180 0.720 0.000 0.000 0.000</pose>
-          <geometry>
-            <box>
-              <size>1.600 0.080 0.550</size>
-            </box>
-          </geometry>
-          <material>
-            <ambient>0.360 0.224 0.096 1.000</ambient>
-            <diffuse>0.450 0.280 0.120 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <collision name="leg1_collision">
-          <pose>-0.650 0.000 0.225 0.000 0.000 0.000</pose>
-          <geometry>
-            <box>
-              <size>0.080 0.400 0.450</size>
-            </box>
-          </geometry>
-        </collision>
-        <visual name="leg1_visual">
-          <pose>-0.650 0.000 0.225 0.000 0.000 0.000</pose>
-          <geometry>
-            <box>
-              <size>0.080 0.400 0.450</size>
-            </box>
-          </geometry>
-          <material>
-            <ambient>0.160 0.160 0.160 1.000</ambient>
-            <diffuse>0.200 0.200 0.200 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <collision name="leg2_collision">
-          <pose>0.650 0.000 0.225 0.000 0.000 0.000</pose>
-          <geometry>
-            <box>
-              <size>0.080 0.400 0.450</size>
-            </box>
-          </geometry>
-        </collision>
-        <visual name="leg2_visual">
-          <pose>0.650 0.000 0.225 0.000 0.000 0.000</pose>
-          <geometry>
-            <box>
-              <size>0.080 0.400 0.450</size>
-            </box>
-          </geometry>
-          <material>
-            <ambient>0.160 0.160 0.160 1.000</ambient>
-            <diffuse>0.200 0.200 0.200 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
-        <label>3</label>
       </plugin>
     </model>
     <model name="bench_2">
-      <pose>12.000 -0.950 0.000 0.000 0.000 3.142</pose>
+      <pose>2.000 -0.950 0.000 0.000 0.000 3.142</pose>
       <static>true</static>
       <link name="link">
         <collision name="seat_collision">
@@ -1561,129 +898,6 @@
           <material>
             <ambient>0.160 0.160 0.160 1.000</ambient>
             <diffuse>0.200 0.200 0.200 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
-        <label>3</label>
-      </plugin>
-    </model>
-    <model name="bench_3">
-      <pose>48.000 -0.800 0.000 0.000 0.000 0.000</pose>
-      <static>true</static>
-      <link name="link">
-        <collision name="seat_collision">
-          <pose>0.000 0.000 0.420 0.000 0.000 0.000</pose>
-          <geometry>
-            <box>
-              <size>1.600 0.450 0.080</size>
-            </box>
-          </geometry>
-        </collision>
-        <visual name="seat_visual">
-          <pose>0.000 0.000 0.420 0.000 0.000 0.000</pose>
-          <geometry>
-            <box>
-              <size>1.600 0.450 0.080</size>
-            </box>
-          </geometry>
-          <material>
-            <ambient>0.360 0.224 0.096 1.000</ambient>
-            <diffuse>0.450 0.280 0.120 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <collision name="back_collision">
-          <pose>0.000 -0.180 0.720 0.000 0.000 0.000</pose>
-          <geometry>
-            <box>
-              <size>1.600 0.080 0.550</size>
-            </box>
-          </geometry>
-        </collision>
-        <visual name="back_visual">
-          <pose>0.000 -0.180 0.720 0.000 0.000 0.000</pose>
-          <geometry>
-            <box>
-              <size>1.600 0.080 0.550</size>
-            </box>
-          </geometry>
-          <material>
-            <ambient>0.360 0.224 0.096 1.000</ambient>
-            <diffuse>0.450 0.280 0.120 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <collision name="leg1_collision">
-          <pose>-0.650 0.000 0.225 0.000 0.000 0.000</pose>
-          <geometry>
-            <box>
-              <size>0.080 0.400 0.450</size>
-            </box>
-          </geometry>
-        </collision>
-        <visual name="leg1_visual">
-          <pose>-0.650 0.000 0.225 0.000 0.000 0.000</pose>
-          <geometry>
-            <box>
-              <size>0.080 0.400 0.450</size>
-            </box>
-          </geometry>
-          <material>
-            <ambient>0.160 0.160 0.160 1.000</ambient>
-            <diffuse>0.200 0.200 0.200 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <collision name="leg2_collision">
-          <pose>0.650 0.000 0.225 0.000 0.000 0.000</pose>
-          <geometry>
-            <box>
-              <size>0.080 0.400 0.450</size>
-            </box>
-          </geometry>
-        </collision>
-        <visual name="leg2_visual">
-          <pose>0.650 0.000 0.225 0.000 0.000 0.000</pose>
-          <geometry>
-            <box>
-              <size>0.080 0.400 0.450</size>
-            </box>
-          </geometry>
-          <material>
-            <ambient>0.160 0.160 0.160 1.000</ambient>
-            <diffuse>0.200 0.200 0.200 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
-        <label>3</label>
-      </plugin>
-    </model>
-    <model name="trash_1">
-      <pose>-48.000 -0.500 0.000 0.000 0.000 0.000</pose>
-      <static>true</static>
-      <link name="link">
-        <collision name="bin_collision">
-          <pose>0.000 0.000 0.450 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.180</radius>
-              <length>0.900</length>
-            </cylinder>
-          </geometry>
-        </collision>
-        <visual name="bin_visual">
-          <pose>0.000 0.000 0.450 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.180</radius>
-              <length>0.900</length>
-            </cylinder>
-          </geometry>
-          <material>
-            <ambient>0.144 0.144 0.144 1.000</ambient>
-            <diffuse>0.180 0.180 0.180 1.000</diffuse>
             <specular>0.050 0.050 0.050 1.000</specular>
           </material>
         </visual>
@@ -1692,7 +906,7 @@
       </plugin>
     </model>
     <model name="trash_2">
-      <pose>-13.000 -0.500 0.000 0.000 0.000 0.000</pose>
+      <pose>-23.000 -0.500 0.000 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="bin_collision">
@@ -1723,7 +937,7 @@
       </plugin>
     </model>
     <model name="trash_3">
-      <pose>28.000 -0.500 0.000 0.000 0.000 0.000</pose>
+      <pose>18.000 -0.500 0.000 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="bin_collision">
@@ -1751,176 +965,10 @@
         </visual>
       </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
         <label>3</label>
-      </plugin>
-    </model>
-    <model name="trash_4">
-      <pose>68.000 -0.500 0.000 0.000 0.000 0.000</pose>
-      <static>true</static>
-      <link name="link">
-        <collision name="bin_collision">
-          <pose>0.000 0.000 0.450 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.180</radius>
-              <length>0.900</length>
-            </cylinder>
-          </geometry>
-        </collision>
-        <visual name="bin_visual">
-          <pose>0.000 0.000 0.450 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.180</radius>
-              <length>0.900</length>
-            </cylinder>
-          </geometry>
-          <material>
-            <ambient>0.144 0.144 0.144 1.000</ambient>
-            <diffuse>0.180 0.180 0.180 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
-        <label>3</label>
-      </plugin>
-    </model>
-    <model name="awning_1">
-      <pose>-39.000 -6.500 3.400 0.000 0.000 0.000</pose>
-      <static>true</static>
-      <link name="link">
-        <visual name="awning_visual">
-          <pose>0.000 0.000 0.000 0.000 0.000 0.000</pose>
-          <geometry>
-            <box>
-              <size>4.500 0.600 0.200</size>
-            </box>
-          </geometry>
-          <material>
-            <ambient>0.040 0.144 0.360 1.000</ambient>
-            <diffuse>0.050 0.180 0.450 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
-        <label>3</label>
-      </plugin>
-    </model>
-    <model name="awning_2">
-      <pose>0.000 -6.000 3.400 0.000 0.000 0.000</pose>
-      <static>true</static>
-      <link name="link">
-        <visual name="awning_visual">
-          <pose>0.000 0.000 0.000 0.000 0.000 0.000</pose>
-          <geometry>
-            <box>
-              <size>4.500 0.600 0.200</size>
-            </box>
-          </geometry>
-          <material>
-            <ambient>0.040 0.144 0.360 1.000</ambient>
-            <diffuse>0.050 0.180 0.450 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
-        <label>3</label>
-      </plugin>
-    </model>
-    <model name="awning_3">
-      <pose>40.000 -6.500 3.400 0.000 0.000 0.000</pose>
-      <static>true</static>
-      <link name="link">
-        <visual name="awning_visual">
-          <pose>0.000 0.000 0.000 0.000 0.000 0.000</pose>
-          <geometry>
-            <box>
-              <size>4.500 0.600 0.200</size>
-            </box>
-          </geometry>
-          <material>
-            <ambient>0.040 0.144 0.360 1.000</ambient>
-            <diffuse>0.050 0.180 0.450 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
-        <label>3</label>
-      </plugin>
-    </model>
-    <model name="pothole_1">
-      <pose>-46.000 1.100 0.000 0.000 0.000 0.000</pose>
-      <static>true</static>
-      <link name="link">
-        <visual name="visual">
-          <pose>0.000 0.000 -0.018 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.280</radius>
-              <length>0.010</length>
-            </cylinder>
-          </geometry>
-          <material>
-            <ambient>0.280 0.280 0.280 1.000</ambient>
-            <diffuse>0.350 0.350 0.350 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <visual name="visual_patch">
-          <pose>0.000 0.000 -0.016 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.378</radius>
-              <length>0.004</length>
-            </cylinder>
-          </geometry>
-          <material>
-            <ambient>0.440 0.440 0.440 1.000</ambient>
-            <diffuse>0.550 0.550 0.550 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
-        <label>1</label>
-      </plugin>
-    </model>
-    <model name="pothole_2">
-      <pose>-29.000 -0.400 0.000 0.000 0.000 0.000</pose>
-      <static>true</static>
-      <link name="link">
-        <visual name="visual">
-          <pose>0.000 0.000 -0.018 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.350</radius>
-              <length>0.010</length>
-            </cylinder>
-          </geometry>
-          <material>
-            <ambient>0.280 0.280 0.280 1.000</ambient>
-            <diffuse>0.350 0.350 0.350 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <visual name="visual_patch">
-          <pose>0.000 0.000 -0.016 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.473</radius>
-              <length>0.004</length>
-            </cylinder>
-          </geometry>
-          <material>
-            <ambient>0.440 0.440 0.440 1.000</ambient>
-            <diffuse>0.550 0.550 0.550 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
-        <label>1</label>
       </plugin>
     </model>
     <model name="pothole_3">
-      <pose>-8.000 0.700 0.000 0.000 0.000 0.000</pose>
+      <pose>-18.000 0.700 0.000 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <visual name="visual">
@@ -1956,7 +1004,7 @@
       </plugin>
     </model>
     <model name="pothole_4">
-      <pose>7.000 0.000 0.000 0.000 0.000 0.000</pose>
+      <pose>-3.000 0.000 0.000 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <visual name="visual">
@@ -1992,7 +1040,7 @@
       </plugin>
     </model>
     <model name="pothole_5">
-      <pose>33.000 1.200 0.000 0.000 0.000 0.000</pose>
+      <pose>23.000 1.200 0.000 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <visual name="visual">
@@ -2027,134 +1075,8 @@
         <label>1</label>
       </plugin>
     </model>
-    <model name="pothole_6">
-      <pose>61.000 -0.100 0.000 0.000 0.000 0.000</pose>
-      <static>true</static>
-      <link name="link">
-        <visual name="visual">
-          <pose>0.000 0.000 -0.018 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.420</radius>
-              <length>0.010</length>
-            </cylinder>
-          </geometry>
-          <material>
-            <ambient>0.280 0.280 0.280 1.000</ambient>
-            <diffuse>0.350 0.350 0.350 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <visual name="visual_patch">
-          <pose>0.000 0.000 -0.016 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.567</radius>
-              <length>0.004</length>
-            </cylinder>
-          </geometry>
-          <material>
-            <ambient>0.440 0.440 0.440 1.000</ambient>
-            <diffuse>0.550 0.550 0.550 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
-        <label>1</label>
-      </plugin>
-    </model>
-    <model name="pothole_7">
-      <pose>72.000 0.600 0.000 0.000 0.000 0.000</pose>
-      <static>true</static>
-      <link name="link">
-        <visual name="visual">
-          <pose>0.000 0.000 -0.018 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.280</radius>
-              <length>0.010</length>
-            </cylinder>
-          </geometry>
-          <material>
-            <ambient>0.280 0.280 0.280 1.000</ambient>
-            <diffuse>0.350 0.350 0.350 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <visual name="visual_patch">
-          <pose>0.000 0.000 -0.016 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.378</radius>
-              <length>0.004</length>
-            </cylinder>
-          </geometry>
-          <material>
-            <ambient>0.440 0.440 0.440 1.000</ambient>
-            <diffuse>0.550 0.550 0.550 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
-        <label>1</label>
-      </plugin>
-    </model>
-    <model name="planter_1">
-      <pose>-53.000 -0.200 0.160 0.000 0.000 0.000</pose>
-      <static>true</static>
-      <link name="link">
-        <collision name="collision">
-          <geometry>
-            <box>
-              <size>0.800 0.800 0.320</size>
-            </box>
-          </geometry>
-        </collision>
-        <visual name="visual">
-          <geometry>
-            <box>
-              <size>0.800 0.800 0.320</size>
-            </box>
-          </geometry>
-          <material>
-            <ambient>0.160 0.144 0.112 1.000</ambient>
-            <diffuse>0.200 0.180 0.140 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
-        <label>3</label>
-      </plugin>
-    </model>
-    <model name="shrub_1">
-      <pose>-53.000 -0.200 0.550 0.000 0.000 0.000</pose>
-      <static>true</static>
-      <link name="link">
-        <collision name="collision">
-          <geometry>
-            <sphere>
-              <radius>0.280</radius>
-            </sphere>
-          </geometry>
-        </collision>
-        <visual name="visual">
-          <geometry>
-            <sphere>
-              <radius>0.280</radius>
-            </sphere>
-          </geometry>
-          <material>
-            <ambient>0.136 0.304 0.120 1.000</ambient>
-            <diffuse>0.170 0.380 0.150 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
-        <label>9</label>
-      </plugin>
-    </model>
     <model name="planter_2">
-      <pose>-24.000 -0.200 0.160 0.000 0.000 0.000</pose>
+      <pose>-34.000 -0.200 0.160 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="collision">
@@ -2181,7 +1103,7 @@
       </plugin>
     </model>
     <model name="shrub_2">
-      <pose>-24.000 -0.200 0.550 0.000 0.000 0.000</pose>
+      <pose>-34.000 -0.200 0.550 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="collision">
@@ -2208,7 +1130,7 @@
       </plugin>
     </model>
     <model name="planter_3">
-      <pose>20.000 -0.200 0.160 0.000 0.000 0.000</pose>
+      <pose>10.000 -0.200 0.160 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="collision">
@@ -2235,7 +1157,7 @@
       </plugin>
     </model>
     <model name="shrub_3">
-      <pose>20.000 -0.200 0.550 0.000 0.000 0.000</pose>
+      <pose>10.000 -0.200 0.550 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="collision">
@@ -2262,7 +1184,7 @@
       </plugin>
     </model>
     <model name="planter_4">
-      <pose>44.000 -0.200 0.160 0.000 0.000 0.000</pose>
+      <pose>34.000 -0.200 0.160 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="collision">
@@ -2289,7 +1211,7 @@
       </plugin>
     </model>
     <model name="shrub_4">
-      <pose>44.000 -0.200 0.550 0.000 0.000 0.000</pose>
+      <pose>34.000 -0.200 0.550 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
         <collision name="collision">
@@ -2314,378 +1236,10 @@
       </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
         <label>9</label>
       </plugin>
-    </model>
-    <model name="planter_5">
-      <pose>74.000 -0.200 0.160 0.000 0.000 0.000</pose>
-      <static>true</static>
-      <link name="link">
-        <collision name="collision">
-          <geometry>
-            <box>
-              <size>0.800 0.800 0.320</size>
-            </box>
-          </geometry>
-        </collision>
-        <visual name="visual">
-          <geometry>
-            <box>
-              <size>0.800 0.800 0.320</size>
-            </box>
-          </geometry>
-          <material>
-            <ambient>0.160 0.144 0.112 1.000</ambient>
-            <diffuse>0.200 0.180 0.140 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
-        <label>3</label>
-      </plugin>
-    </model>
-    <model name="shrub_5">
-      <pose>74.000 -0.200 0.550 0.000 0.000 0.000</pose>
-      <static>true</static>
-      <link name="link">
-        <collision name="collision">
-          <geometry>
-            <sphere>
-              <radius>0.280</radius>
-            </sphere>
-          </geometry>
-        </collision>
-        <visual name="visual">
-          <geometry>
-            <sphere>
-              <radius>0.280</radius>
-            </sphere>
-          </geometry>
-          <material>
-            <ambient>0.136 0.304 0.120 1.000</ambient>
-            <diffuse>0.170 0.380 0.150 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
-        <label>9</label>
-      </plugin>
-    </model>
-    <model name="crosswalk_1">
-      <pose>72.000 10.000 0.011 0.000 0.000 0.000</pose>
-      <static>true</static>
-      <link name="link">
-        <collision name="collision">
-          <geometry>
-            <box>
-              <size>0.700 0.350 0.012</size>
-            </box>
-          </geometry>
-        </collision>
-        <visual name="visual">
-          <geometry>
-            <box>
-              <size>0.700 0.350 0.012</size>
-            </box>
-          </geometry>
-          <material>
-            <ambient>0.760 0.760 0.760 1.000</ambient>
-            <diffuse>0.950 0.950 0.950 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
-        <label>1</label>
-      </plugin>
-    </model>
-    <model name="crosswalk_2">
-      <pose>73.100 10.000 0.011 0.000 0.000 0.000</pose>
-      <static>true</static>
-      <link name="link">
-        <collision name="collision">
-          <geometry>
-            <box>
-              <size>0.700 0.350 0.012</size>
-            </box>
-          </geometry>
-        </collision>
-        <visual name="visual">
-          <geometry>
-            <box>
-              <size>0.700 0.350 0.012</size>
-            </box>
-          </geometry>
-          <material>
-            <ambient>0.760 0.760 0.760 1.000</ambient>
-            <diffuse>0.950 0.950 0.950 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
-        <label>1</label>
-      </plugin>
-    </model>
-    <model name="crosswalk_3">
-      <pose>74.200 10.000 0.011 0.000 0.000 0.000</pose>
-      <static>true</static>
-      <link name="link">
-        <collision name="collision">
-          <geometry>
-            <box>
-              <size>0.700 0.350 0.012</size>
-            </box>
-          </geometry>
-        </collision>
-        <visual name="visual">
-          <geometry>
-            <box>
-              <size>0.700 0.350 0.012</size>
-            </box>
-          </geometry>
-          <material>
-            <ambient>0.760 0.760 0.760 1.000</ambient>
-            <diffuse>0.950 0.950 0.950 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
-        <label>1</label>
-      </plugin>
-    </model>
-    <model name="crosswalk_4">
-      <pose>75.300 10.000 0.011 0.000 0.000 0.000</pose>
-      <static>true</static>
-      <link name="link">
-        <collision name="collision">
-          <geometry>
-            <box>
-              <size>0.700 0.350 0.012</size>
-            </box>
-          </geometry>
-        </collision>
-        <visual name="visual">
-          <geometry>
-            <box>
-              <size>0.700 0.350 0.012</size>
-            </box>
-          </geometry>
-          <material>
-            <ambient>0.760 0.760 0.760 1.000</ambient>
-            <diffuse>0.950 0.950 0.950 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
-        <label>1</label>
-      </plugin>
-    </model>
-    <model name="crosswalk_5">
-      <pose>76.400 10.000 0.011 0.000 0.000 0.000</pose>
-      <static>true</static>
-      <link name="link">
-        <collision name="collision">
-          <geometry>
-            <box>
-              <size>0.700 0.350 0.012</size>
-            </box>
-          </geometry>
-        </collision>
-        <visual name="visual">
-          <geometry>
-            <box>
-              <size>0.700 0.350 0.012</size>
-            </box>
-          </geometry>
-          <material>
-            <ambient>0.760 0.760 0.760 1.000</ambient>
-            <diffuse>0.950 0.950 0.950 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
-        <label>1</label>
-      </plugin>
-    </model>
-    <model name="crosswalk_6">
-      <pose>77.500 10.000 0.011 0.000 0.000 0.000</pose>
-      <static>true</static>
-      <link name="link">
-        <collision name="collision">
-          <geometry>
-            <box>
-              <size>0.700 0.350 0.012</size>
-            </box>
-          </geometry>
-        </collision>
-        <visual name="visual">
-          <geometry>
-            <box>
-              <size>0.700 0.350 0.012</size>
-            </box>
-          </geometry>
-          <material>
-            <ambient>0.760 0.760 0.760 1.000</ambient>
-            <diffuse>0.950 0.950 0.950 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
-        <label>1</label>
-      </plugin>
-    </model>
-  
-
-    <!-- ===== PEDONI (actor, person) ===== -->
-    <actor name="ped_1">
-      <skin><filename>https://fuel.gazebosim.org/1.0/Mingfei/models/actor/tip/files/meshes/walk.dae</filename><scale>1.0</scale></skin>
-      <animation name="walk"><filename>https://fuel.gazebosim.org/1.0/Mingfei/models/actor/tip/files/meshes/walk.dae</filename><interpolate_x>true</interpolate_x></animation>
-      <script>
-        <loop>true</loop><delay_start>0.00</delay_start><auto_start>true</auto_start>
-        <trajectory id="0" type="walk" tension="0.6">
-        <waypoint><time>0.00</time><pose>-55.000 1.300 1.0 0 0 0.0</pose></waypoint>
-        <waypoint><time>8.00</time><pose>-47.000 1.300 1.0 0 0 0.0</pose></waypoint>
-        <waypoint><time>8.50</time><pose>-47.000 1.300 1.0 0 0 3.1416</pose></waypoint>
-        <waypoint><time>16.50</time><pose>-55.000 1.300 1.0 0 0 3.1416</pose></waypoint>
-        <waypoint><time>17.00</time><pose>-55.000 1.300 1.0 0 0 0.0</pose></waypoint>
-        </trajectory>
-      </script>
-      <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>12</label></plugin>
-    </actor>
-    <actor name="ped_2">
-      <skin><filename>https://fuel.gazebosim.org/1.0/Mingfei/models/actor/tip/files/meshes/walk.dae</filename><scale>1.0</scale></skin>
-      <animation name="walk"><filename>https://fuel.gazebosim.org/1.0/Mingfei/models/actor/tip/files/meshes/walk.dae</filename><interpolate_x>true</interpolate_x></animation>
-      <script>
-        <loop>true</loop><delay_start>1.50</delay_start><auto_start>true</auto_start>
-        <trajectory id="0" type="walk" tension="0.6">
-        <waypoint><time>0.00</time><pose>-38.000 0.900 1.0 0 0 0.0</pose></waypoint>
-        <waypoint><time>8.00</time><pose>-30.000 0.900 1.0 0 0 0.0</pose></waypoint>
-        <waypoint><time>8.50</time><pose>-30.000 0.900 1.0 0 0 3.1416</pose></waypoint>
-        <waypoint><time>16.50</time><pose>-38.000 0.900 1.0 0 0 3.1416</pose></waypoint>
-        <waypoint><time>17.00</time><pose>-38.000 0.900 1.0 0 0 0.0</pose></waypoint>
-        </trajectory>
-      </script>
-      <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>12</label></plugin>
-    </actor>
-    <actor name="ped_3">
-      <skin><filename>https://fuel.gazebosim.org/1.0/Mingfei/models/actor/tip/files/meshes/walk.dae</filename><scale>1.0</scale></skin>
-      <animation name="walk"><filename>https://fuel.gazebosim.org/1.0/Mingfei/models/actor/tip/files/meshes/walk.dae</filename><interpolate_x>true</interpolate_x></animation>
-      <script>
-        <loop>true</loop><delay_start>3.00</delay_start><auto_start>true</auto_start>
-        <trajectory id="0" type="walk" tension="0.6">
-        <waypoint><time>0.00</time><pose>-20.000 1.600 1.0 0 0 0.0</pose></waypoint>
-        <waypoint><time>10.00</time><pose>-10.000 1.600 1.0 0 0 0.0</pose></waypoint>
-        <waypoint><time>10.50</time><pose>-10.000 1.600 1.0 0 0 3.1416</pose></waypoint>
-        <waypoint><time>20.50</time><pose>-20.000 1.600 1.0 0 0 3.1416</pose></waypoint>
-        <waypoint><time>21.00</time><pose>-20.000 1.600 1.0 0 0 0.0</pose></waypoint>
-        </trajectory>
-      </script>
-      <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>12</label></plugin>
-    </actor>
-    <actor name="ped_4">
-      <skin><filename>https://fuel.gazebosim.org/1.0/Mingfei/models/actor/tip/files/meshes/walk.dae</filename><scale>1.0</scale></skin>
-      <animation name="walk"><filename>https://fuel.gazebosim.org/1.0/Mingfei/models/actor/tip/files/meshes/walk.dae</filename><interpolate_x>true</interpolate_x></animation>
-      <script>
-        <loop>true</loop><delay_start>0.80</delay_start><auto_start>true</auto_start>
-        <trajectory id="0" type="walk" tension="0.6">
-        <waypoint><time>0.00</time><pose>-2.000 1.100 1.0 0 0 0.0</pose></waypoint>
-        <waypoint><time>10.00</time><pose>8.000 1.100 1.0 0 0 0.0</pose></waypoint>
-        <waypoint><time>10.50</time><pose>8.000 1.100 1.0 0 0 3.1416</pose></waypoint>
-        <waypoint><time>20.50</time><pose>-2.000 1.100 1.0 0 0 3.1416</pose></waypoint>
-        <waypoint><time>21.00</time><pose>-2.000 1.100 1.0 0 0 0.0</pose></waypoint>
-        </trajectory>
-      </script>
-      <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>12</label></plugin>
-    </actor>
-    <actor name="ped_5">
-      <skin><filename>https://fuel.gazebosim.org/1.0/Mingfei/models/actor/tip/files/meshes/walk.dae</filename><scale>1.0</scale></skin>
-      <animation name="walk"><filename>https://fuel.gazebosim.org/1.0/Mingfei/models/actor/tip/files/meshes/walk.dae</filename><interpolate_x>true</interpolate_x></animation>
-      <script>
-        <loop>true</loop><delay_start>2.20</delay_start><auto_start>true</auto_start>
-        <trajectory id="0" type="walk" tension="0.6">
-        <waypoint><time>0.00</time><pose>25.000 1.400 1.0 0 0 0.0</pose></waypoint>
-        <waypoint><time>10.00</time><pose>35.000 1.400 1.0 0 0 0.0</pose></waypoint>
-        <waypoint><time>10.50</time><pose>35.000 1.400 1.0 0 0 3.1416</pose></waypoint>
-        <waypoint><time>20.50</time><pose>25.000 1.400 1.0 0 0 3.1416</pose></waypoint>
-        <waypoint><time>21.00</time><pose>25.000 1.400 1.0 0 0 0.0</pose></waypoint>
-        </trajectory>
-      </script>
-      <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>12</label></plugin>
-    </actor>
-    <actor name="ped_6">
-      <skin><filename>https://fuel.gazebosim.org/1.0/Mingfei/models/actor/tip/files/meshes/walk.dae</filename><scale>1.0</scale></skin>
-      <animation name="walk"><filename>https://fuel.gazebosim.org/1.0/Mingfei/models/actor/tip/files/meshes/walk.dae</filename><interpolate_x>true</interpolate_x></animation>
-      <script>
-        <loop>true</loop><delay_start>4.00</delay_start><auto_start>true</auto_start>
-        <trajectory id="0" type="walk" tension="0.6">
-        <waypoint><time>0.00</time><pose>55.000 0.800 1.0 0 0 0.0</pose></waypoint>
-        <waypoint><time>10.00</time><pose>65.000 0.800 1.0 0 0 0.0</pose></waypoint>
-        <waypoint><time>10.50</time><pose>65.000 0.800 1.0 0 0 3.1416</pose></waypoint>
-        <waypoint><time>20.50</time><pose>55.000 0.800 1.0 0 0 3.1416</pose></waypoint>
-        <waypoint><time>21.00</time><pose>55.000 0.800 1.0 0 0 0.0</pose></waypoint>
-        </trajectory>
-      </script>
-      <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>12</label></plugin>
-    </actor>
-
-    <!-- ===== EDIFICI sull'erba (Fuel, building) ===== -->
-
-    <!-- ===== AUTO in strada (Fuel, car, statiche per ora) ===== -->
-    <include>
-      <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/SUV</uri>
-      <name>car_1</name>
-      <pose>-40.000 3.800 0 0 0 0</pose>
-      <static>true</static>
-      <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>14</label></plugin>
-    </include>
-    <include>
-      <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/SUV</uri>
-      <name>car_2</name>
-      <pose>-2.000 3.800 0 0 0 0</pose>
-      <static>true</static>
-      <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>14</label></plugin>
-    </include>
-    <include>
-      <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/SUV</uri>
-      <name>car_3</name>
-      <pose>38.000 3.800 0 0 0 0</pose>
-      <static>true</static>
-      <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>14</label></plugin>
-    </include>
-    <include>
-      <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/Prius Hybrid</uri>
-      <name>car_4</name>
-      <pose>-18.000 8.700 0 0 0 3.1416</pose>
-      <static>true</static>
-      <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>14</label></plugin>
-    </include>
-    <include>
-      <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/Pickup</uri>
-      <name>car_5</name>
-      <pose>65.000 8.700 0 0 0 3.1416</pose>
-      <static>true</static>
-      <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>14</label></plugin>
-    </include>
-
-  
-
-    <!-- ===== EDIFICI (box colorati, arretrati sull'erba) ===== -->
-    <model name="bldg_1">
-      <static>true</static>
-      <pose>-48.000 -7.000 3.00 0 0 0</pose>
-      <link name="link">
-        <collision name="col"><geometry><box><size>8 5 6</size></box></geometry></collision>
-        <visual name="vis">
-          <geometry><box><size>8 5 6</size></box></geometry>
-          <material>
-            <ambient>0.78 0.72 0.62 1</ambient>
-            <diffuse>0.78 0.72 0.62 1</diffuse>
-            <specular>0.1 0.1 0.1 1</specular>
-          </material>
-        </visual>
-      </link>
-      <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>3</label></plugin>
     </model>
     <model name="bldg_2">
       <static>true</static>
-      <pose>-20.000 -7.300 4.00 0 0 0</pose>
+      <pose>-30.000 -5.800 4.00 0 0 0</pose>
       <link name="link">
         <collision name="col"><geometry><box><size>10 5 8</size></box></geometry></collision>
         <visual name="vis">
@@ -2699,9 +1253,77 @@
       </link>
       <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>3</label></plugin>
     </model>
+    <model name="bldg_2_mirror">
+      <static>true</static>
+      <pose>-30.000 18.800 4.00 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><box><size>10 5 8</size></box></geometry></collision>
+        <visual name="vis">
+          <geometry><box><size>10 5 8</size></box></geometry>
+          <material>
+            <ambient>0.7 0.74 0.8 1</ambient>
+            <diffuse>0.7 0.74 0.8 1</diffuse>
+            <specular>0.1 0.1 0.1 1</specular>
+          </material>
+        </visual>
+      </link>
+      <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>3</label></plugin>
+    </model>
+
+
+    <model name="bldg_2_mid">
+      <static>true</static>
+      <pose>-15.000 -5.500 2.50 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><box><size>9 5 5</size></box></geometry></collision>
+        <visual name="vis">
+          <geometry><box><size>9 5 5</size></box></geometry>
+          <material>
+            <ambient>0.82 0.66 0.6 1</ambient>
+            <diffuse>0.82 0.66 0.6 1</diffuse>
+            <specular>0.1 0.1 0.1 1</specular>
+          </material>
+        </visual>
+      </link>
+      <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>3</label></plugin>
+    </model>
+
+    <model name="bldg_2_mid_mirror">
+      <static>true</static>
+      <pose>-12.000 16.500 2.50 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><box><size>9 5 5</size></box></geometry></collision>
+        <visual name="vis">
+          <geometry><box><size>9 5 5</size></box></geometry>
+          <material>
+            <ambient>0.82 0.66 0.6 1</ambient>
+            <diffuse>0.82 0.66 0.6 1</diffuse>
+            <specular>0.1 0.1 0.1 1</specular>
+          </material>
+        </visual>
+      </link>
+      <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>3</label></plugin>
+    </model>
+    
     <model name="bldg_3">
       <static>true</static>
-      <pose>12.000 -7.000 2.50 0 0 0</pose>
+      <pose>2.000 -5.800 2.50 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><box><size>9 5 5</size></box></geometry></collision>
+        <visual name="vis">
+          <geometry><box><size>9 5 5</size></box></geometry>
+          <material>
+            <ambient>0.82 0.66 0.6 1</ambient>
+            <diffuse>0.82 0.66 0.6 1</diffuse>
+            <specular>0.1 0.1 0.1 1</specular>
+          </material>
+        </visual>
+      </link>
+      <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>3</label></plugin>
+    </model>
+    <model name="bldg_3_mirror">
+      <static>true</static>
+      <pose>2.000 18.500 2.50 0 0 0</pose>
       <link name="link">
         <collision name="col"><geometry><box><size>9 5 5</size></box></geometry></collision>
         <visual name="vis">
@@ -2717,7 +1339,7 @@
     </model>
     <model name="bldg_4">
       <static>true</static>
-      <pose>45.000 -7.500 4.50 0 0 0</pose>
+      <pose>28.500 -6.000 4.50 0 0 0</pose>
       <link name="link">
         <collision name="col"><geometry><box><size>12 6 9</size></box></geometry></collision>
         <visual name="vis">
@@ -2731,16 +1353,16 @@
       </link>
       <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>3</label></plugin>
     </model>
-    <model name="bldg_5">
+    <model name="bldg_4_mirror">
       <static>true</static>
-      <pose>72.000 -7.000 3.50 0 0 0</pose>
+      <pose>28.500 19.000 4.50 0 0 0</pose>
       <link name="link">
-        <collision name="col"><geometry><box><size>8 5 7</size></box></geometry></collision>
+        <collision name="col"><geometry><box><size>12 6 9</size></box></geometry></collision>
         <visual name="vis">
-          <geometry><box><size>8 5 7</size></box></geometry>
+          <geometry><box><size>12 6 9</size></box></geometry>
           <material>
-            <ambient>0.8 0.78 0.7 1</ambient>
-            <diffuse>0.8 0.78 0.7 1</diffuse>
+            <ambient>0.66 0.7 0.66 1</ambient>
+            <diffuse>0.66 0.7 0.66 1</diffuse>
             <specular>0.1 0.1 0.1 1</specular>
           </material>
         </visual>
@@ -2748,5 +1370,78 @@
       <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>3</label></plugin>
     </model>
 
+    <actor name="ped_3">
+      <skin><filename>https://fuel.gazebosim.org/1.0/Mingfei/models/actor/tip/files/meshes/walk.dae</filename><scale>1.0</scale></skin>
+      <animation name="walk"><filename>https://fuel.gazebosim.org/1.0/Mingfei/models/actor/tip/files/meshes/walk.dae</filename><interpolate_x>true</interpolate_x></animation>
+      <script>
+        <loop>true</loop><delay_start>3.00</delay_start><auto_start>true</auto_start>
+        <trajectory id="0" type="walk" tension="0.6">
+        <waypoint><time>0.00</time><pose>-30.000 1.600 1.0 0 0 0.0</pose></waypoint>
+        <waypoint><time>10.00</time><pose>-20.000 1.600 1.0 0 0 0.0</pose></waypoint>
+        <waypoint><time>10.50</time><pose>-20.000 1.600 1.0 0 0 3.1416</pose></waypoint>
+        <waypoint><time>20.50</time><pose>-30.000 1.600 1.0 0 0 3.1416</pose></waypoint>
+        <waypoint><time>21.00</time><pose>-30.000 1.600 1.0 0 0 0.0</pose></waypoint>
+        </trajectory>
+      </script>
+      <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>12</label></plugin>
+    </actor>
+    <actor name="ped_4">
+      <skin><filename>https://fuel.gazebosim.org/1.0/Mingfei/models/actor/tip/files/meshes/walk.dae</filename><scale>1.0</scale></skin>
+      <animation name="walk"><filename>https://fuel.gazebosim.org/1.0/Mingfei/models/actor/tip/files/meshes/walk.dae</filename><interpolate_x>true</interpolate_x></animation>
+      <script>
+        <loop>true</loop><delay_start>0.80</delay_start><auto_start>true</auto_start>
+        <trajectory id="0" type="walk" tension="0.6">
+        <waypoint><time>0.00</time><pose>-12.000 1.100 1.0 0 0 0.0</pose></waypoint>
+        <waypoint><time>10.00</time><pose>-2.000 1.100 1.0 0 0 0.0</pose></waypoint>
+        <waypoint><time>10.50</time><pose>-2.000 1.100 1.0 0 0 3.1416</pose></waypoint>
+        <waypoint><time>20.50</time><pose>-12.000 1.100 1.0 0 0 3.1416</pose></waypoint>
+        <waypoint><time>21.00</time><pose>-12.000 1.100 1.0 0 0 0.0</pose></waypoint>
+        </trajectory>
+      </script>
+      <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>12</label></plugin>
+    </actor>
+    <actor name="ped_5">
+      <skin><filename>https://fuel.gazebosim.org/1.0/Mingfei/models/actor/tip/files/meshes/walk.dae</filename><scale>1.0</scale></skin>
+      <animation name="walk"><filename>https://fuel.gazebosim.org/1.0/Mingfei/models/actor/tip/files/meshes/walk.dae</filename><interpolate_x>true</interpolate_x></animation>
+      <script>
+        <loop>true</loop><delay_start>2.20</delay_start><auto_start>true</auto_start>
+        <trajectory id="0" type="walk" tension="0.6">
+        <waypoint><time>0.00</time><pose>15.000 1.400 1.0 0 0 0.0</pose></waypoint>
+        <waypoint><time>10.00</time><pose>25.000 1.400 1.0 0 0 0.0</pose></waypoint>
+        <waypoint><time>10.50</time><pose>25.000 1.400 1.0 0 0 3.1416</pose></waypoint>
+        <waypoint><time>20.50</time><pose>15.000 1.400 1.0 0 0 3.1416</pose></waypoint>
+        <waypoint><time>21.00</time><pose>15.000 1.400 1.0 0 0 0.0</pose></waypoint>
+        </trajectory>
+      </script>
+      <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>12</label></plugin>
+    </actor>
+    <include>
+      <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/SUV</uri>
+      <name>car_2</name>
+      <pose>-12.000 3.800 0 0 0 0</pose>
+      <static>true</static>
+      <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>14</label></plugin>
+    </include>
+    <include>
+      <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/SUV</uri>
+      <name>car_3</name>
+      <pose>28.000 3.800 0 0 0 0</pose>
+      <static>true</static>
+      <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>14</label></plugin>
+    </include>
+    <include>
+      <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/Prius Hybrid</uri>
+      <name>car_4</name>
+      <pose>-28.000 8.700 0 0 0 3.1416</pose>
+      <static>true</static>
+      <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>14</label></plugin>
+    </include>
+    <include>
+      <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/Prius Hybrid</uri>
+      <name>car_5</name>
+      <pose>6.350 6.000 0 0 0 1.57</pose>
+      <static>true</static>
+      <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>14</label></plugin>
+    </include>
   </world>
 </sdf>
