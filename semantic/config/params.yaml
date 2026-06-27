@@ -17,7 +17,7 @@ semantic_costmap_node:
     camera_optical_frame: camera_rgb_optical_frame
     base_frame: base_footprint
     resolution: 0.05
-    size_m: 10.0
+    size_m: 12.0
     pixel_stride: 4
     max_range: 5.0
     min_row_frac: 0.55
@@ -40,8 +40,8 @@ semantic_costmap_node:
     grow_margin_m: 3.0     # margine aggiunto a ogni espansione
 
     # --- persistenza mappa: SOLO il nome file; va in semantic/maps/ ---
-    map_save_name: ''   # es: 'sidewalk'  (vuoto = non salvare)
-    map_load_name: ''   # es: 'sidewalk'  (vuoto = non caricare)
+    map_save_name: 'map1'   # es: 'sidewalk'  (vuoto = non salvare)
+    map_load_name: 'map1'   # es: 'sidewalk'  (vuoto = non caricare)
 
     # --- oggetti dinamici (tracking + velocita') ---
     dynamic_classes: [11,12,13,14,15,16,17,18]  # persona, rider, veicoli
