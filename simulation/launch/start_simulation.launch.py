@@ -34,7 +34,7 @@ def generate_launch_description():
     )
 
     model_arg = DeclareLaunchArgument(
-        'model', default_value='turtlebot3_waffle_pi.urdf',
+        'model', default_value='turtlebot3_waffle_pi_gps.urdf',
         description='Name of the URDF description to load'
     )
 
@@ -188,7 +188,7 @@ def generate_launch_description():
     launchDescriptionObject.add_action(spawn_urdf_node)
     launchDescriptionObject.add_action(gz_bridge_node)
     launchDescriptionObject.add_action(robot_state_publisher_node)
-    #launchDescriptionObject.add_action(ekf_node)
-    #launchDescriptionObject.add_action(navsat_transform_node)
+    launchDescriptionObject.add_action(ekf_node)
+    launchDescriptionObject.add_action(navsat_transform_node)
 
     return launchDescriptionObject

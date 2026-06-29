@@ -116,13 +116,13 @@
                <visualize>true</visualize>
                <gz_frame_id>camera_link</gz_frame_id>
           </sensor>
-   	  <gazebo reference="gps_link">
+     </gazebo>
+     <gazebo reference="gps_link">
           <sensor name="navsat" type="navsat">
                <always_on>1</always_on>
                <update_rate>10</update_rate>
                <topic>navsat</topic>
                <gz_frame_id>gps_link</gz_frame_id>
           </sensor>
-     </gazebo>
      </gazebo>
 </robot>
