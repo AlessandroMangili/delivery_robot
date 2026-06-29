@@ -21,7 +21,7 @@ semantic_costmap_node:
     pixel_stride: 4
     max_range: 5.0
     min_row_frac: 0.55
-    publish_window: true
+    publish_window: false   # pubblica la mappa intera (false) oppure solo la finestra attorno al robot di dimensioni size_m x size_m
 
     # --- occlusione (z-buffer polare) -> abbassa il peso, non scarta ---
     occ_sector_deg: 2.0      # ampiezza settore angolare
