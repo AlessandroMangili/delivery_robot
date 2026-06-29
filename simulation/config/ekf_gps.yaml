@@ -1,0 +1,70 @@
+# ================================================================
+#  robot_localization: localizzazione GPS+odometria+IMU
+#  - ekf_filter_node      pubblica  map -> odom   (EKF globale)
+#  - navsat_transform_node converte il GPS (lat/lon) in /odometry/gps
+#  odom -> base_footprint resta pubblicato dal DiffDrive (NON toccare).
+#  ATTENZIONE: questo pubblica map->odom, COME AMCL. Usa O AMCL O questo,
+#  MAI entrambi insieme (si contendono la stessa TF).
+# ================================================================
+
+ekf_filter_node:
+  ros__parameters:
+    use_sim_time: true
+    frequency: 30.0
+    sensor_timeout: 0.1
+    two_d_mode: true                 # robot planare: ignora z, roll, pitch
+    transform_time_offset: 0.0
+    transform_timeout: 0.0
+    print_diagnostics: true
+    publish_tf: true
+
+    map_frame: map
+    odom_frame: odom
+    base_link_frame: base_footprint
+    world_frame: map                 # -> pubblica la trasformata map->odom
+
+    # --- odometria ruote (/odom dal DiffDrive): uso le VELOCITA' ---
+    odom0: /odom
+    odom0_config: [false, false, false,
+                   false, false, false,
+                   true,  true,  false,
+                   false, false, true,
+                   false, false, false]
+    odom0_queue_size: 10
+    odom0_differential: false
+    odom0_relative: false
+
+    # --- IMU (/imu): uso yaw, vel. yaw, accel. x ---
+    imu0: /imu
+    imu0_config: [false, false, false,
+                  false, false, true,
+                  false, false, false,
+                  false, false, true,
+                  true,  false, false]
+    imu0_differential: false
+    imu0_relative: false
+    imu0_remove_gravitational_acceleration: true
+
+    # --- GPS convertito (/odometry/gps da navsat_transform): uso x,y assoluti ---
+    odom1: /odometry/gps
+    odom1_config: [true,  true,  false,
+                   false, false, false,
+                   false, false, false,
+                   false, false, false,
+                   false, false, false]
+    odom1_queue_size: 10
+    odom1_differential: false
+    odom1_relative: false
+
+navsat_transform_node:
+  ros__parameters:
+    use_sim_time: true
+    frequency: 30.0
+    delay: 3.0                       # attende che odom/imu siano stabili
+    magnetic_declination_radians: 0.0
+    yaw_offset: 0.0
+    zero_altitude: true
+    broadcast_utm_transform: false
+    publish_filtered_gps: true
+    use_odometry_yaw: true           # usa lo yaw dell'odometria (in sim e' affidabile)
+    wait_for_datum: false            # fissa il datum dal primo fix GPS

@@ -121,6 +121,32 @@ def generate_launch_description():
             {'use_sim_time': LaunchConfiguration('use_sim_time')},
         ]
     )
+    
+    # EKF globale: fonde odom + imu + gps -> pubblica map->odom
+    ekf_params = PathJoinSubstitution([pkg_simulation, 'config', 'ekf_gps.yaml'])
+    ekf_node = Node(
+        package='robot_localization',
+        executable='ekf_node',
+        name='ekf_filter_node',
+        output='screen',
+        parameters=[ekf_params, {'use_sim_time': LaunchConfiguration('use_sim_time')}],
+        # l'EKF pubblica /odometry/filtered (default) e la TF map->odom
+    )
+
+    # navsat_transform: GPS (lat/lon) -> /odometry/gps nel frame map
+    navsat_transform_node = Node(
+        package='robot_localization',
+        executable='navsat_transform_node',
+        name='navsat_transform_node',
+        output='screen',
+        parameters=[ekf_params, {'use_sim_time': LaunchConfiguration('use_sim_time')}],
+        remappings=[
+            ('imu', '/imu'),                          # heading
+            ('gps/fix', '/navsat'),                   # NavSatFix dal bridge
+            ('odometry/filtered', '/odometry/filtered'),  # uscita dell'EKF globale
+            ('odometry/gps', '/odometry/gps'),        # ingresso odom1 dell'EKF
+        ],
+    )
 
     gz_bridge_node = Node(
         package="ros_gz_bridge",
@@ -134,7 +160,7 @@ def generate_launch_description():
             "/camera/image@sensor_msgs/msg/Image@gz.msgs.Image",
             "/camera/camera_info@sensor_msgs/msg/CameraInfo@gz.msgs.CameraInfo",
             "imu@sensor_msgs/msg/Imu@gz.msgs.IMU",
-            #"/navsat@sensor_msgs/msg/NavSatFix@gz.msgs.NavSat",
+            "/navsat@sensor_msgs/msg/NavSatFix[gz.msgs.NavSat",
             "/scan@sensor_msgs/msg/LaserScan@gz.msgs.LaserScan",
             "/scan/points@sensor_msgs/msg/PointCloud2@gz.msgs.PointCloudPacked",
             "/camera/depth_image@sensor_msgs/msg/Image@gz.msgs.Image",
@@ -163,5 +189,6 @@ def generate_launch_description():
     launchDescriptionObject.add_action(gz_bridge_node)
     launchDescriptionObject.add_action(robot_state_publisher_node)
     #launchDescriptionObject.add_action(ekf_node)
+    #launchDescriptionObject.add_action(navsat_transform_node)
 
     return launchDescriptionObject
