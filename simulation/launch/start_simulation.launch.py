@@ -24,7 +24,7 @@ def generate_launch_description():
     )
 
     rviz_config_arg = DeclareLaunchArgument(
-        'rviz_config', default_value='localization.rviz',
+        'rviz_config', default_value='navigation.rviz',
         description='RViz config file'
     )
 
@@ -188,7 +188,7 @@ def generate_launch_description():
     launchDescriptionObject.add_action(spawn_urdf_node)
     launchDescriptionObject.add_action(gz_bridge_node)
     launchDescriptionObject.add_action(robot_state_publisher_node)
-    launchDescriptionObject.add_action(ekf_node)
-    launchDescriptionObject.add_action(navsat_transform_node)
+    #launchDescriptionObject.add_action(ekf_node)
+    #launchDescriptionObject.add_action(navsat_transform_node)
 
     return launchDescriptionObject
