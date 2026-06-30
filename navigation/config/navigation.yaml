@@ -245,6 +245,7 @@ global_costmap:
       robot_radius: 0.22
       resolution: 0.05
       track_unknown_space: true
+      trinary_costmap: false 
       plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
 
       # --- STATIC LAYER = il tuo costmap semantico SSRL ---
@@ -280,16 +281,37 @@ global_costmap:
 
 
 planner_server:
+planner_server:
   ros__parameters:
-    use_sim_time: true
+    use_sim_time: true                 # IMPORTANTE: in sim (lezione gia' imparata)
     expected_planner_frequency: 1.0
     planner_plugins: ["GridBased"]
-    costmap_update_timeout: 1.0
+ 
     GridBased:
-      plugin: "nav2_navfn_planner/NavfnPlanner"
-      tolerance: 0.5
-      use_astar: false
-      allow_unknown: true
+      plugin: "nav2_smac_planner/SmacPlanner2D"
+      tolerance: 0.125                 # m: quanto vicino al goal basta arrivare se irraggiungibile esatto
+      downsample_costmap: false        # non ridurre la risoluzione della costmap
+      downsampling_factor: 1
+      allow_unknown: true              # puo' pianificare in celle ignote (utile ai bordi mappa)
+      max_iterations: 1000000          # tetto iterazioni (alto = non si arrende su mappe grandi)
+      max_on_approach_iterations: 1000 # iterazioni extra vicino al goal
+      max_planning_time: 2.0           # s: tempo massimo per pianificare
+ 
+      # ---- LA LEVA CHIAVE per "stare al centro" ----
+      # cost_travel_multiplier: peso del COSTO rispetto alla DISTANZA.
+      #   piu' alto = evita di piu' le celle costose (bordi) = sta piu' al centro.
+      #   default 2.0. Per marciapiede stretto, prova 3.0-4.0 se taglia ancora.
+      cost_travel_multiplier: 3.0
+ 
+      use_final_approach_orientation: false
+ 
+      # ---- smoother del percorso (rende la traiettoria fluida) ----
+      smoother:
+        max_iterations: 1000
+        w_smooth: 0.3
+        w_data: 0.2
+        tolerance: 1.0e-10
+
 
 smoother_server:
   ros__parameters:
