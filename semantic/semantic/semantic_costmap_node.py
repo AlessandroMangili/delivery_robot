@@ -173,7 +173,7 @@ class SemanticCostmapNode(Node):
         # Si indicano solo i NOMI dei file; vengono risolti nella cartella maps/
         # del SORGENTE del pacchetto 'semantic' (persiste tra le colcon build).
         self.declare_parameter('map_load_name', '')   # nome file da caricare all'avvio (vuoto = no)
-        self.declare_parameter('map_save_name', '')    # nome file per salvataggio/autosave (vuoto = no)
+        self.declare_parameter('map_save_name', '')    # nome file usato dal servizio ~/save_map (vuoto = chiede un nome)
         self.maps_dir = self.resolve_maps_dir()
         load_name = self.get_parameter('map_load_name').value
         save_name = self.get_parameter('map_save_name').value
@@ -188,6 +188,10 @@ class SemanticCostmapNode(Node):
                 self.get_logger().warn(f'Mappa da caricare non trovata: {load_path}')
         self.create_service(Trigger, '~/save_map', self.save_map_cb)
         self.get_logger().info(f'Cartella mappe: {self.maps_dir}')
+        save_hint = self.map_save_path if self.map_save_path else f'{self.maps_dir}/semantic_map.npz'
+        self.get_logger().info(
+            'SALVATAGGIO MANUALE (niente autosave). Per salvare la mappa: '
+            f'ros2 service call /semantic_costmap_node/save_map std_srvs/srv/Trigger  ->  {save_hint}')
 
         self.get_logger().info(
             f'Semantic costmap (confidenza + dinamici) pronto. frame={self.target}.')
@@ -453,9 +457,7 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
-        # autosave all'uscita se e' impostato map_save_path
-        if getattr(node, 'map_save_path', ''):
-            node.save_map(node.map_save_path)
+        node.get_logger().info('Nodo in chiusura')
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
