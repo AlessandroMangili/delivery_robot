@@ -32,6 +32,7 @@ setup(
             'gt_segmentation_node = semantic.gt_segmentation_relay:main',
             'confinement_layer = semantic.confinement_layer:main',
             'ssrl_combiner = semantic.ssrl_combiner:main',
+            'dynamic_anticipation_layer = semantic.dynamic_anticipation_layer:main',
         ],
     },
 )
