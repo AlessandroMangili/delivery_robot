@@ -4,7 +4,7 @@ from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, TextSubstitution, Command
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, TextSubstitution, Command, PythonExpression
 from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
 from launch_ros.parameter_descriptions import ParameterValue
@@ -58,10 +58,25 @@ def generate_launch_description():
         description='Flag to enable use_sim_time'
     )
 
+    # NUOVO: headless. Se true -> Gazebo parte SENZA GUI (solo server) = molto piu' leggero.
+    headless_arg = DeclareLaunchArgument(
+        'headless', default_value='false',
+        description='Se true avvia Gazebo senza GUI (server-only), molto piu' + "'" + 'leggero'
+    )
+
     urdf_file_path = PathJoinSubstitution([
         pkg_simulation,
         "urdf",
         LaunchConfiguration('model')
+    ])
+
+    # gli argomenti gz: '-s' = server only (headless), altrimenti server+gui.
+    #   -r = run subito, -v -v1 = verbosita'
+    # PythonExpression sceglie la stringa in base a 'headless'.
+    gz_args_value = PythonExpression([
+        "'-s -r -v -v1' if '",
+        LaunchConfiguration('headless'),
+        "'.lower() == 'true' else '-r -v -v1'"
     ])
 
     gazebo_launch = IncludeLaunchDescription(
@@ -73,8 +88,8 @@ def generate_launch_description():
             'worlds',
             LaunchConfiguration('world')
         ]),
-        #TextSubstitution(text=' -r -v -v1 --render-engine ogre')],
-        TextSubstitution(text=' -r -v -v1')],
+        TextSubstitution(text=' '),
+        gz_args_value],
         'on_exit_shutdown': 'true'}.items()
     )
 
@@ -183,6 +198,7 @@ def generate_launch_description():
     launchDescriptionObject.add_action(y_arg)
     launchDescriptionObject.add_action(yaw_arg)
     launchDescriptionObject.add_action(sim_time_arg)
+    launchDescriptionObject.add_action(headless_arg)
     launchDescriptionObject.add_action(gazebo_launch)
     launchDescriptionObject.add_action(rviz_node)
     launchDescriptionObject.add_action(spawn_urdf_node)
