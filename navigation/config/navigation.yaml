@@ -88,7 +88,7 @@ controller_server:
       short_circuit_trajectory_evaluation: True
       stateful: True
       critics: ["RotateToGoal", "Oscillation", "BaseObstacle", "GoalAlign", "PathAlign", "PathDist", "GoalDist"]
-      BaseObstacle.scale: 0.02
+      BaseObstacle.scale: 0.4               # era 0.02
       PathAlign.scale: 32.0
       PathAlign.forward_point_distance: 0.1
       GoalAlign.scale: 24.0
@@ -202,7 +202,7 @@ local_costmap:
       height: 5
       resolution: 0.05
       robot_radius: 0.22
-      plugins: ["obstacle_layer", "inflation_layer"]
+      plugins: ["obstacle_layer", "dynamic_layer", "inflation_layer"]
        # --- OBSTACLE LAYER = ostacoli fisici dal LiDAR ---
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer"
@@ -218,6 +218,12 @@ local_costmap:
           raytrace_min_range: 0.0
           obstacle_max_range: 6.0     # Era 2.5
           obstacle_min_range: 0.0
+      dynamic_layer:
+        plugin: "nav2_costmap_2d::StaticLayer"
+        map_topic: /dynamic_cost
+        map_subscribe_transient_local: False
+        subscribe_to_updates: false
+        trinary_costmap: false          # preserva il gradiente di costo
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         cost_scaling_factor: 5.0
