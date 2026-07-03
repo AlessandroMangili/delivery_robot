@@ -14,7 +14,7 @@ dynamic_esdf_layer:
     robot_frame: base_link
 
     # --- griglia rolling ---
-    size_m: 6.0          # lato finestra [m] (deve coprire il raggio di reazione utile)
+    size_m: 10.0          # lato finestra [m] (deve coprire il raggio di reazione utile)
     resolution: 0.05     # [m/cella] (allineata alla local costmap)
     rate_hz: 10.0        # frequenza di calcolo (limitata di fatto dalla freq. dello scan)
 
@@ -22,7 +22,7 @@ dynamic_esdf_layer:
     # soglia anti-rumore: sotto questa |dESDF| = statico/rumore di localizzazione.
     # ALZALA se vedi falsi positivi su oggetti fermi; ABBASSALA se non rileva
     # pedoni lenti.
-    desdf_thresh: 0.12
+    desdf_thresh: 0.25
 
     # --- costo (Opzione 2: guadagno alto per far pesare di piu' i dinamici) ---
     # costo = cost_gain * (|dESDF| - desdf_thresh), saturato a max_cost.
@@ -35,3 +35,17 @@ dynamic_esdf_layer:
     esdf_ema: 0.4            # smoothing temporale ESDF (0=off, ->1 molto liscio)
     cost_dilate_cells: 2     # dilatazione zona di costo [celle] (margine anticipato)
     scan_timeout: 0.5        # [s] max eta' dello scan prima di scartarlo
+
+    # --- difese contro falsi positivi (occlusione, robot in moto) ---
+    near_obstacle_m: 0.6    # costo solo entro questa distanza da un ostacolo occupato
+    gate_ang_vel: 0.4       # [rad/s] sopra: sospendi costo (rotazione = cambio occlusione)
+    gate_lin_vel: 0.5       # [m/s] sopra: sospendi costo (traslazione veloce)
+    odom_topic: /odom       # per leggere la velocita' del robot (gate)
+
+    # --- persistenza mappa (Opzione 2: Observed persistente) ---
+    occ_up: 0.7       # incremento prob. se cella vista-occupata
+    occ_down: 0.3     # decremento prob. se cella vista-libera
+    occ_thresh: 0.5   # soglia per considerare una cella occupata
+
+    # --- stabilita' temporale del costo (anti-sfarfallio) ---
+    cost_ema: 0.5     # smoothing del costo di uscita (0=off, ->1 molto stabile)
