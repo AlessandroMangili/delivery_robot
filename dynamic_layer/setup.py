@@ -28,7 +28,8 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'dynamic_esdf_layer = dynamic_layer.dynamic_esdf_layer:main'
+            'dynamic_esdf_layer = dynamic_layer.dynamic_esdf_layer:main',
+            'dynamic_vo_camera = dynamic_layer.dynamic_vo_camera:main'
         ],
     },
 )
