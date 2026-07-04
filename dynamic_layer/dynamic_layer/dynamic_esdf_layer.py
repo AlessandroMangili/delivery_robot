@@ -1,39 +1,28 @@
 #!/usr/bin/env python3
 """
-dynamic_esdf_layer.py  --  Layer di costo ANTICIPATORIO per ostacoli dinamici.
+dynamic_tracker.py -- Rilevamento e anticipazione di ostacoli dinamici.
 
-Metodo (fedele a Zhong et al., WEVJ 2024, "Dynamic Obstacle Avoidance ...
-2D Differential ESDF"): invece di tracciare i pedoni e stimarne la velocita'
-(fragile con proiezione monoculare), il MOVIMENTO viene ricavato dalla
-DIFFERENZA della mappa di distanza (ESDF) tra due frame consecutivi.
+APPROCCIO (chiaro e diretto):
+  1. il LiDAR rileva i punti degli ostacoli, in frame mondo 'odom'
+  2. i punti vicini sono RAGGRUPPATI in cluster (un cluster = un oggetto):
+     le due gambe di un pedone, essendo vicine, finiscono nello stesso cluster
+     -> il pedone e' UN oggetto solo (come una bici o un'auto)
+  3. il centroide di ogni cluster e' TRACCIATO scansione dopo scansione
+  4. dallo spostamento del centroide fra frame si stima la VELOCITA' (vx,vy)
+  5. se l'oggetto si muove (|v| > soglia), si proietta un CONO di costo nella
+     direzione del moto, lungo ~ velocita' x orizzonte (dove l'oggetto SARA')
+  6. una FRECCIA per oggetto mostra la direzione stimata (debug in RViz)
 
-Idea chiave -- perche' distingue statico da dinamico anche col robot in moto:
-la ESDF e' costruita nel frame FISSO del mondo ('odom'), NON nel frame del
-robot. Una cella della griglia corrisponde sempre allo STESSO punto del mondo:
-  - un albero fermo occupa sempre le stesse celle-mondo -> ESDF invariata
-    -> dESDF ~ 0  -> STATICO.
-  - un pedone che cammina occupa celle-mondo diverse a ogni frame -> dove
-    arriva la distanza cala (dESDF < 0), da dove se ne va cresce (dESDF > 0)
-    -> DINAMICO.
-Il moto del robot e' gia' compensato perche' i punti LiDAR vengono trasformati
-in 'odom' con la posa dalla localizzazione prima di entrare nella griglia.
+MODALITA' (flag use_camera):
+  - use_camera=false : solo LiDAR. Clustering per distanza. Semplice e robusto,
+    ma due pedoni molto vicini possono fondersi in un cluster.
+  - use_camera=true  : la camera semantica separa i pedoni vicini e conferma che
+    un cluster e' davvero una classe dinamica (pedone/veicolo), scartando i
+    cluster statici (muri/alberi che il LiDAR vede ma non sono dinamici).
 
-Pipeline:
-  /scan (LaserScan, frame base_scan)
-    -> punti in frame odom (via TF)
-    -> griglia di occupazione ROLLING ancorata al mondo
-    -> ESDF con cv2.distanceTransform  (equivalente veloce all'algoritmo BFS
-       del paper; distanza euclidea di ogni cella dall'ostacolo piu' vicino)
-    -> dESDF = (ESDF_ora - ESDF_prima)/dt, allineata sulle stesse celle-mondo
-    -> COSTO ANTICIPATORIO dove dESDF < -soglia  (ostacolo in avvicinamento),
-       proporzionale a |dESDF| (piu' veloce l'avvicinamento, piu' alto il costo)
-    -> /dynamic_cost (OccupancyGrid, frame odom)  ->  layer della local costmap
-
-NOTA MODULARITA' (per l'estensione semantica futura):
-  il gancio `self.semantic_gate(gx, gy)` restituisce ora sempre True (nessun
-  filtro). Quando aggiungerai la semantica, qui filtrerai: "considera dinamica
-  questa cella solo se la classe semantica in (gx,gy) e' pedone/bici/veicolo".
-  Il resto del nodo NON cambia.
+Output:
+  /dynamic_cost   (OccupancyGrid, frame odom)  -> layer local costmap di Nav2
+  /dynamic_tracks (MarkerArray)                -> frecce direzione (debug)
 """
 
 import numpy as np
@@ -42,433 +31,469 @@ import cv2
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+from rclpy.duration import Duration
 
-from sensor_msgs.msg import LaserScan
+from sensor_msgs.msg import LaserScan, Image, CameraInfo
 from nav_msgs.msg import OccupancyGrid, Odometry
+from visualization_msgs.msg import Marker, MarkerArray
+from geometry_msgs.msg import Point
 
 import tf2_ros
 from tf2_ros import TransformException
 
+try:
+    from cv_bridge import CvBridge
+    _HAVE_BRIDGE = True
+except Exception:
+    _HAVE_BRIDGE = False
 
-class DynamicESDFLayer(Node):
+
+def transform_to_matrix(t):
+    """TransformStamped -> matrice 4x4 (rototraslazione)."""
+    q = t.transform.rotation
+    tr = t.transform.translation
+    x, y, z, w = q.x, q.y, q.z, q.w
+    R = np.array([
+        [1 - 2*(y*y + z*z),     2*(x*y - z*w),     2*(x*z + y*w)],
+        [    2*(x*y + z*w), 1 - 2*(x*x + z*z),     2*(y*z - x*w)],
+        [    2*(x*z - y*w),     2*(y*z + x*w), 1 - 2*(x*x + y*y)],
+    ])
+    M = np.eye(4)
+    M[:3, :3] = R
+    M[:3, 3] = [tr.x, tr.y, tr.z]
+    return M
+
+
+class DynamicTracker(Node):
     def __init__(self):
-        super().__init__('dynamic_esdf_layer')
+        super().__init__('dynamic_tracker')
 
         # ---------------- parametri ----------------
         self.declare_parameter('scan_topic', '/scan')
         self.declare_parameter('output_topic', '/dynamic_cost')
-        self.declare_parameter('world_frame', 'odom')     # frame FISSO (ancoraggio mappa)
+        self.declare_parameter('world_frame', 'odom')       # FISSO ma continuo
         self.declare_parameter('robot_frame', 'base_link')
-
-        self.declare_parameter('size_m', 6.0)             # lato finestra rolling [m]
-        self.declare_parameter('resolution', 0.05)        # [m/cella]
-        self.declare_parameter('rate_hz', 10.0)           # frequenza di calcolo
-
-        # soglia anti-rumore di localizzazione: sotto questa |dESDF| = statico/rumore
-        self.declare_parameter('desdf_thresh', 0.15)      # [m/s] di variazione distanza
-        # guadagno costo: costo = gain * (|dESDF| - thresh), saturato a max_cost
-        self.declare_parameter('cost_gain', 120.0)
-        self.declare_parameter('max_cost', 100)
-        # smoothing temporale della ESDF (riduce il jitter frame-a-frame)
-        self.declare_parameter('esdf_ema', 0.4)           # 0=nessuno, ->1 molto liscio
-        # dilatazione del costo (allarga un po' la zona anticipata, in celle)
-        self.declare_parameter('cost_dilate_cells', 2)
-        # tempo max senza scan valido prima di azzerare
-        self.declare_parameter('scan_timeout', 0.5)
-        # NUOVO: il costo dinamico si applica solo entro questa distanza [m] da un
-        # ostacolo OCCUPATO e visto. Elimina i coni/raggi spuri nel vuoto (ombre).
-        self.declare_parameter('near_obstacle_m', 0.6)
-        # NUOVO: gate sul movimento del robot. Se il robot ruota/trasla oltre queste
-        # soglie, il pattern di occlusione cambia troppo -> il dESDF e' inaffidabile
-        # -> attenuo/azzero il costo per evitare falsi positivi da "cambio vista".
-        self.declare_parameter('gate_ang_vel', 0.4)   # [rad/s] soglia rotazione
-        self.declare_parameter('gate_lin_vel', 0.5)   # [m/s] soglia traslazione
         self.declare_parameter('odom_topic', '/odom')
-        # NUOVO (Opzione 2 - persistenza): la mappa di occupazione e' PERSISTENTE
-        # nel frame mondo. Le celle viste-occupate salgono, le viste-libere calano;
-        # le celle NON viste (occluse) MANTENGONO il valore -> niente salti da
-        # ri-osservazione. occ_up/occ_down = quanto sale/scende la probabilita'
-        # per frame; occ_thresh = soglia per considerare una cella "occupata".
-        self.declare_parameter('occ_up', 0.7)      # incremento se vista-occupata
-        self.declare_parameter('occ_down', 0.3)    # decremento se vista-libera
-        self.declare_parameter('occ_thresh', 0.5)  # soglia occupazione
-        # NUOVO: smoothing temporale del COSTO di uscita. Il dESDF (e quindi il
-        # costo) e' rumoroso frame-a-frame (balla tra alto e basso -> "sfarfallio").
-        # L'EMA sul costo finale lo stabilizza: cost_smooth = a*nuovo + (1-a)*vecchio.
-        # Alto = piu' stabile ma meno reattivo. 0 = disattivato.
-        self.declare_parameter('cost_ema', 0.5)
+
+        # griglia rolling di uscita
+        self.declare_parameter('size_m', 8.0)
+        self.declare_parameter('resolution', 0.05)
+        self.declare_parameter('rate_hz', 10.0)
+        self.declare_parameter('max_range', 8.0)
+
+        # --- clustering LiDAR ---
+        # due punti entro cluster_eps_m appartengono allo stesso oggetto: unisce
+        # le due gambe del pedone (~30-40 cm) in UN cluster.
+        self.declare_parameter('cluster_eps_m', 0.5)
+        self.declare_parameter('cluster_min_pts', 2)     # min punti per cluster valido
+        self.declare_parameter('cluster_max_size_m', 1.5)  # scarta cluster enormi (muri)
+
+        # --- tracking ---
+        self.declare_parameter('gate_dist_m', 0.7)       # associazione track<->cluster
+        self.declare_parameter('vel_ema', 0.4)           # smoothing velocita' (0..1)
+        self.declare_parameter('pos_ema', 0.5)           # smoothing posizione
+        self.declare_parameter('min_obs', 3)             # frame min prima di fidarsi
+        self.declare_parameter('track_timeout_s', 0.6)   # eta' max track non visto
+        self.declare_parameter('min_speed', 0.15)        # [m/s] sotto = fermo, no cono
+
+        # --- proiezione cono ---
+        self.declare_parameter('horizon_s', 2.0)         # [s] quanto proietto avanti
+        self.declare_parameter('cone_halfwidth_m', 0.4)  # semi-larghezza base
+        self.declare_parameter('cone_spread', 1.5)       # quanto si allarga in punta
+        self.declare_parameter('max_cost', 100)
+        self.declare_parameter('mark_obstacle', True)    # marca anche l'oggetto stesso
+
+        # --- gate movimento robot (rotazioni rapide sporcano il tracking) ---
+        self.declare_parameter('gate_ang_vel', 1.0)      # [rad/s]
+
+        # --- camera (opzionale) ---
+        self.declare_parameter('use_camera', False)
+        self.declare_parameter('seg_topic', '/semantic/segmentation')
+        self.declare_parameter('info_topic', '/camera/camera_info')
+        self.declare_parameter('camera_optical_frame', 'camera_rgb_optical_frame')
+        self.declare_parameter('dynamic_classes', [11, 12, 13, 14, 15, 16, 17, 18])
+        self.declare_parameter('cam_assoc_m', 0.8)       # tolleranza assoc LiDAR<->camera
 
         gp = self.get_parameter
         self.scan_topic = gp('scan_topic').value
         self.out_topic = gp('output_topic').value
         self.world_frame = gp('world_frame').value
         self.robot_frame = gp('robot_frame').value
+        self.odom_topic = gp('odom_topic').value
         self.size_m = float(gp('size_m').value)
         self.res = float(gp('resolution').value)
         self.rate_hz = float(gp('rate_hz').value)
-        self.desdf_thresh = float(gp('desdf_thresh').value)
-        self.cost_gain = float(gp('cost_gain').value)
+        self.max_range = float(gp('max_range').value)
+        self.cluster_eps = float(gp('cluster_eps_m').value)
+        self.cluster_min_pts = int(gp('cluster_min_pts').value)
+        self.cluster_max_size = float(gp('cluster_max_size_m').value)
+        self.gate_dist = float(gp('gate_dist_m').value)
+        self.vel_ema = float(gp('vel_ema').value)
+        self.pos_ema = float(gp('pos_ema').value)
+        self.min_obs = int(gp('min_obs').value)
+        self.track_timeout = float(gp('track_timeout_s').value)
+        self.min_speed = float(gp('min_speed').value)
+        self.horizon_s = float(gp('horizon_s').value)
+        self.cone_halfwidth = float(gp('cone_halfwidth_m').value)
+        self.cone_spread = float(gp('cone_spread').value)
         self.max_cost = int(gp('max_cost').value)
-        self.esdf_ema = float(gp('esdf_ema').value)
-        self.dilate_cells = int(gp('cost_dilate_cells').value)
-        self.scan_timeout = float(gp('scan_timeout').value)
-        self.near_obstacle_m = float(gp('near_obstacle_m').value)
+        self.mark_obstacle = bool(gp('mark_obstacle').value)
         self.gate_ang_vel = float(gp('gate_ang_vel').value)
-        self.gate_lin_vel = float(gp('gate_lin_vel').value)
-        self.odom_topic = gp('odom_topic').value
-        self.occ_up = float(gp('occ_up').value)
-        self.occ_down = float(gp('occ_down').value)
-        self.occ_thresh = float(gp('occ_thresh').value)
-        self.cost_ema = float(gp('cost_ema').value)
+        self.use_camera = bool(gp('use_camera').value)
+        self.seg_topic = gp('seg_topic').value
+        self.info_topic = gp('info_topic').value
+        self.cam_frame = gp('camera_optical_frame').value
+        self.dyn_classes = list(gp('dynamic_classes').value)
+        self.cam_assoc = float(gp('cam_assoc_m').value)
 
-        self.n = int(round(self.size_m / self.res))       # celle per lato (griglia n x n)
+        self.n = int(round(self.size_m / self.res))
+        self.dyn_lut = np.zeros(256, dtype=bool)
+        for c in self.dyn_classes:
+            self.dyn_lut[int(c)] = True
 
         # ---------------- stato ----------------
-        self.prev_esdf = None        # ESDF del frame precedente (float32, in metri)
-        self.prev_seen = None        # maschera visibilita' del frame precedente
-        self.prev_origin = None      # (ox, oy) origine-mondo della griglia precedente
-        self.prev_stamp = None       # tempo del frame precedente [s]
         self.last_scan = None
-        self.robot_lin = 0.0         # |velocita' lineare| corrente del robot
-        self.robot_ang = 0.0         # |velocita' angolare| corrente del robot
-        # mappa di occupazione PERSISTENTE (probabilita' 0..1) e sua origine-mondo.
-        # Vive tra i frame: le celle occluse mantengono il valore precedente.
-        self.persist = None          # griglia float32 n x n, prob. occupazione
-        self.persist_origin = None   # (ox, oy) della mappa persistente
-        self.cost_prev = None        # costo del frame precedente (per EMA di stabilita')
+        self.tracks = []          # dict(id,x,y,vx,vy,n,t)
+        self.next_id = 0
+        self.robot_ang = 0.0
+        self.arrows = []
+        # camera
+        self.K = None
+        self.last_seg = None
+        self.bridge = CvBridge() if (_HAVE_BRIDGE and self.use_camera) else None
 
-        # ---------------- TF ----------------
+        # ---------------- TF / IO ----------------
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
 
-        # ---------------- I/O ----------------
-        qos = QoSProfile(depth=1,
-                         reliability=ReliabilityPolicy.BEST_EFFORT,
+        qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT,
                          history=HistoryPolicy.KEEP_LAST)
-        self.sub = self.create_subscription(LaserScan, self.scan_topic, self.scan_cb, qos)
-        self.sub_odom = self.create_subscription(Odometry, self.odom_topic, self.odom_cb, qos)
-        self.pub = self.create_publisher(OccupancyGrid, self.out_topic, 1)
+        self.create_subscription(LaserScan, self.scan_topic, self.scan_cb, qos)
+        self.create_subscription(Odometry, self.odom_topic, self.odom_cb, qos)
+        if self.use_camera:
+            self.create_subscription(CameraInfo, self.info_topic, self.info_cb, qos)
+            self.create_subscription(Image, self.seg_topic, self.seg_cb, qos)
 
+        self.pub = self.create_publisher(OccupancyGrid, self.out_topic, 1)
+        self.markers_pub = self.create_publisher(MarkerArray, '/dynamic_tracks', 1)
         self.timer = self.create_timer(1.0 / self.rate_hz, self.update)
 
         self.get_logger().info(
-            f'dynamic_esdf_layer avviato | scan={self.scan_topic} -> {self.out_topic} | '
-            f'griglia {self.n}x{self.n} @ {self.res} m in frame {self.world_frame} | '
-            f'soglia dESDF={self.desdf_thresh} m/s')
+            f'dynamic_tracker avviato | scan={self.scan_topic} use_camera={self.use_camera} | '
+            f'griglia {self.n}x{self.n}@{self.res}m in {self.world_frame} | '
+            f'cluster_eps={self.cluster_eps}m')
 
     # -------------------------------------------------------------------------
-    def scan_cb(self, msg: LaserScan):
-        self.last_scan = msg
+    def scan_cb(self, msg): self.last_scan = msg
+    def odom_cb(self, msg): self.robot_ang = abs(float(msg.twist.twist.angular.z))
+    def info_cb(self, msg): self.K = np.array(msg.k).reshape(3, 3)
+    def seg_cb(self, msg):  self.last_seg = msg
 
-    def odom_cb(self, msg: Odometry):
-        # modulo delle velocita' correnti (per il gate sul movimento del robot)
-        vx = msg.twist.twist.linear.x
-        vy = msg.twist.twist.linear.y
-        self.robot_lin = float((vx * vx + vy * vy) ** 0.5)
-        self.robot_ang = abs(float(msg.twist.twist.angular.z))
-
-    # -------------------------------------------------------------------------
-    def semantic_gate(self, occ_grid):
-        """GANCIO per estensione futura (LiDAR + semantica).
-        Ora: nessun filtro (tutti gli ostacoli LiDAR passano).
-        In futuro: restituira' una maschera booleana n x n che vale True solo
-        dove la classe semantica proiettata e' dinamica (pedone/bici/veicolo),
-        cosi' un albero con dESDF spurio (per jitter di localizzazione) viene
-        comunque scartato. Il resto della pipeline resta identico."""
-        return np.ones_like(occ_grid, dtype=bool)
+    def lookup(self, frame, stamp):
+        try:
+            return self.tf_buffer.lookup_transform(
+                self.world_frame, frame, stamp, timeout=Duration(seconds=0.05))
+        except Exception:
+            try:
+                return self.tf_buffer.lookup_transform(
+                    self.world_frame, frame, rclpy.time.Time())
+            except Exception:
+                return None
 
     # -------------------------------------------------------------------------
     def update(self):
         if self.last_scan is None:
             return
-        now = self.get_clock().now()
-        now_s = now.nanoseconds * 1e-9
+        now_s = self.get_clock().now().nanoseconds * 1e-9
 
-        # posa del robot nel frame mondo (per centrare la finestra rolling)
-        try:
-            tf = self.tf_buffer.lookup_transform(
-                self.world_frame, self.robot_frame, rclpy.time.Time())
-        except TransformException:
+        # posa robot -> origine finestra rolling (centrata sul robot, quantizzata)
+        T_base = self.lookup(self.robot_frame, rclpy.time.Time())
+        if T_base is None:
             return
-        rx = tf.transform.translation.x
-        ry = tf.transform.translation.y
-
-        # origine-mondo della griglia: finestra centrata sul robot, ALLINEATA
-        # alla griglia globale (quantizzo alla risoluzione) cosi' le celle-mondo
-        # coincidono tra frame consecutivi -> il confronto ESDF e' coerente.
+        rx = T_base.transform.translation.x
+        ry = T_base.transform.translation.y
         ox = np.floor((rx - self.size_m / 2.0) / self.res) * self.res
         oy = np.floor((ry - self.size_m / 2.0) / self.res) * self.res
 
-        # --- costruisci la griglia di occupazione + maschera visibilita' ---
-        occ, seen = self.scan_to_grid(self.last_scan, ox, oy, now_s)
-        if occ is None:
-            self.get_logger().warn(
-                'scan_to_grid ha restituito None (scan vecchio o TF mancante) -> non pubblico',
-                throttle_duration_sec=2.0)
+        # 1) punti LiDAR in frame mondo
+        pts = self.scan_points_world(self.last_scan, rx, ry)
+        if pts is None:
             return
 
-        # (gancio semantica: per ora passa tutto)
-        occ = occ & self.semantic_gate(occ)
+        # 2) clustering: raggruppa punti vicini in oggetti (unisce le gambe)
+        clusters = self.cluster_points(pts)
 
-        # --- MAPPA PERSISTENTE (Opzione 2): fondi l'osservazione corrente ---
-        # Le celle viste-occupate salgono, viste-libere scendono, NON viste
-        # mantengono il valore. Cosi' la ESDF si calcola su una mappa stabile e
-        # non ci sono salti quando una cella occlusa torna visibile.
-        occ_persist = self.update_persistent(occ, seen, ox, oy)
+        # 2b) FILTRO DINAMICO/STATICO con la camera semantica.
+        # Solo i cluster confermati come classe dinamica (pedone/veicolo) passano;
+        # gli statici (muri/alberi) sono scartati -> non entrano nel layer.
+        if self.use_camera:
+            if self.K is not None and self.last_seg is not None:
+                clusters = self.camera_filter(clusters)
+            else:
+                # camera richiesta ma non ancora disponibile: non generare nulla
+                # (meglio nessun cono che falsi coni su statici)
+                clusters = []
+                self.get_logger().warn(
+                    'use_camera=true ma segmentazione/camera_info non ancora ricevute',
+                    throttle_duration_sec=3.0)
 
-        # --- ESDF sulla mappa PERSISTENTE (non sul singolo frame) ---
-        free = np.where(occ_persist, 0, 255).astype(np.uint8)
-        esdf = cv2.distanceTransform(free, cv2.DIST_L2, 5).astype(np.float32) * self.res
+        # centroidi dei cluster = detection
+        dets = [c['centroid'] for c in clusters]
 
-        # smoothing temporale opzionale (riduce jitter)
-        if self.esdf_ema > 0.0 and self.prev_esdf is not None \
-                and self.prev_esdf.shape == esdf.shape:
-            esdf_s = self.esdf_ema * self.prev_esdf + (1.0 - self.esdf_ema) * esdf
-        else:
-            esdf_s = esdf
+        # 3-4) tracking dei centroidi -> velocita'
+        self.track(dets, now_s)
 
-        cost = self.compute_cost(esdf_s, seen, occ_persist, ox, oy, now_s)
-
-        # aggiorna stato per il prossimo confronto
-        self.prev_esdf = esdf_s
-        self.prev_seen = seen
-        self.prev_origin = (ox, oy)
-        self.prev_stamp = now_s
-
-        self.publish_cost(cost, ox, oy, now)
+        # 5-6) proietta coni + frecce
+        cost = self.build_cost(ox, oy)
+        self.publish_cost(cost, ox, oy)
+        self.publish_arrows()
 
     # -------------------------------------------------------------------------
-    def update_persistent(self, occ, seen, ox, oy):
-        """Fonde l'osservazione corrente (occ, seen) nella mappa di occupazione
-        PERSISTENTE, ancorata al mondo. Ritorna la maschera booleana di occupazione
-        persistente (prob >= occ_thresh).
+    def scan_points_world(self, scan, rx, ry):
+        """Converte lo scan in punti (x,y) nel frame mondo, entro max_range."""
+        T = self.lookup(scan.header.frame_id, rclpy.time.Time())
+        if T is None:
+            return None
+        M = transform_to_matrix(T)
+        sx, sy = M[0, 3], M[1, 3]
+        yaw = np.arctan2(M[1, 0], M[0, 0])
 
-        Regola di aggiornamento (log-odds semplificato):
-          - cella vista-OCCUPATA  -> prob sale   (verso 1)  [occ_up]
-          - cella vista-LIBERA    -> prob scende  (verso 0)  [occ_down]
-          - cella NON vista       -> INVARIATA (mantiene il valore)  <-- chiave!
-        La persistenza delle celle non viste elimina i salti da ri-osservazione,
-        che erano la causa dei coni/raggi spuri quando robot o pedone si muovono."""
-        # prima volta: inizializza
-        if self.persist is None or self.persist_origin is None:
-            self.persist = np.zeros((self.n, self.n), dtype=np.float32)
-            self.persist_origin = (ox, oy)
-
-        # se l'origine e' cambiata (robot mosso), trasla la mappa persistente
-        # sulle nuove celle-mondo (rolling) prima di fondere.
-        pox, poy = self.persist_origin
-        shift_x = int(round((pox - ox) / self.res))
-        shift_y = int(round((poy - oy) / self.res))
-        if shift_x != 0 or shift_y != 0:
-            self.persist = self.shift_grid(self.persist, shift_x, shift_y, fill=0.0)
-            self.persist_origin = (ox, oy)
-
-        # aggiornamento probabilistico
-        p = self.persist
-        # celle viste-occupate: prob sale
-        seen_occ = seen & occ
-        p[seen_occ] = p[seen_occ] + self.occ_up * (1.0 - p[seen_occ])
-        # celle viste-libere: prob scende
-        seen_free = seen & (~occ)
-        p[seen_free] = p[seen_free] - self.occ_down * p[seen_free]
-        # celle NON viste: invariate (non tocco nulla) -> persistenza
-        self.persist = p
-
-        return p >= self.occ_thresh
-
-    # -------------------------------------------------------------------------
-    def scan_to_grid(self, scan: LaserScan, ox, oy, now_s):
-        """Proietta lo scan in una griglia di occupazione n x n nel frame mondo,
-        e costruisce anche la MASCHERA DI VISIBILITA' (celle effettivamente viste
-        dal LiDAR in questo frame). Ritorna (occ, seen).
-          occ  = True dove un raggio ha COLPITO un ostacolo
-          seen = True dove il LiDAR ha OSSERVATO la cella (lungo il raggio, fino
-                 all'ostacolo). Le celle nel cono d'ombra o oltre il range restano
-                 seen=False (IGNOTE) e vengono escluse dal calcolo del dESDF,
-                 cosi' l'ombra che oscilla non genera piu' costo spurio."""
-        # timeout: scan troppo vecchio -> niente
-        scan_s = scan.header.stamp.sec + scan.header.stamp.nanosec * 1e-9
-        if now_s - scan_s > self.scan_timeout:
-            self.get_logger().warn(
-                f'scan troppo vecchio: now={now_s:.2f} scan={scan_s:.2f} '
-                f'diff={now_s - scan_s:.2f}s > timeout={self.scan_timeout}s. '
-                f'Probabile use_sim_time mancante sul nodo!',
-                throttle_duration_sec=2.0)
-            return None, None
-
-        # TF dal frame dello scan al mondo
-        try:
-            t = self.tf_buffer.lookup_transform(
-                self.world_frame, scan.header.frame_id, rclpy.time.Time())
-        except TransformException as e:
-            self.get_logger().warn(
-                f'TF {self.world_frame}<-{scan.header.frame_id} non disponibile: {e}',
-                throttle_duration_sec=2.0)
-            return None, None
-
-        # posa 2D del sensore nel mondo
-        import math
-        q = t.transform.rotation
-        yaw = math.atan2(2.0 * (q.w * q.z + q.x * q.y),
-                         1.0 - 2.0 * (q.y * q.y + q.z * q.z))
-        sx = t.transform.translation.x
-        sy = t.transform.translation.y
-
-        occ = np.zeros((self.n, self.n), dtype=bool)
-        seen = np.zeros((self.n, self.n), dtype=np.uint8)
-
-        # indice-griglia del sensore (origine dei raggi)
-        s_gx = (sx - ox) / self.res
-        s_gy = (sy - oy) / self.res
-
-        # raggi validi
         ang = scan.angle_min + np.arange(len(scan.ranges)) * scan.angle_increment
         r = np.asarray(scan.ranges, dtype=np.float32)
         good = np.isfinite(r) & (r >= scan.range_min) & (r <= scan.range_max)
         ang = ang[good]; r = r[good]
         if r.size == 0:
-            return occ, seen.astype(bool)
-
-        # punto colpito, in indici-griglia
+            return np.empty((0, 2))
+        # punti nel frame sensore -> mondo
         px = r * np.cos(ang); py = r * np.sin(ang)
         wx = sx + px * np.cos(yaw) - py * np.sin(yaw)
         wy = sy + px * np.sin(yaw) + py * np.cos(yaw)
-        hx = (wx - ox) / self.res
-        hy = (wy - oy) / self.res
-
-        # --- raytracing: marca "seen" lungo ogni raggio dal sensore all'impatto ---
-        # campiono ogni raggio a passi di ~1 cella; e' O(raggi * lunghezza), ma
-        # con 720 raggi e ~6 m di raggio e' leggero (~decine di migliaia di punti).
-        n_steps = int(np.ceil((self.size_m) / self.res))          # passi max
-        tt = np.linspace(0.0, 1.0, n_steps, dtype=np.float32)      # parametro lungo il raggio
-        # per ogni raggio: punti = sensore + tt*(impatto - sensore)
-        rx = s_gx + np.outer(tt, (hx - s_gx))     # shape (n_steps, n_rays)
-        ry = s_gy + np.outer(tt, (hy - s_gy))
-        rix = np.floor(rx).astype(np.int32).ravel()
-        riy = np.floor(ry).astype(np.int32).ravel()
-        vin = (rix >= 0) & (rix < self.n) & (riy >= 0) & (riy < self.n)
-        seen[riy[vin], rix[vin]] = 1
-
-        # celle di impatto = occupate (e ovviamente viste)
-        hix = np.floor(hx).astype(np.int32)
-        hiy = np.floor(hy).astype(np.int32)
-        hin = (hix >= 0) & (hix < self.n) & (hiy >= 0) & (hiy < self.n)
-        occ[hiy[hin], hix[hin]] = True
-        seen[hiy[hin], hix[hin]] = 1
-
-        return occ, seen.astype(bool)
+        d = np.hypot(wx - rx, wy - ry)
+        keep = d <= self.max_range
+        return np.stack([wx[keep], wy[keep]], axis=1)
 
     # -------------------------------------------------------------------------
-    def compute_cost(self, esdf, seen, occ, ox, oy, now_s):
-        """Calcola il costo anticipatorio da dESDF = (esdf - prev_esdf)/dt.
-        dESDF < 0 => distanza cala => ostacolo in AVVICINAMENTO => costo ~ |dESDF|.
+    def cluster_points(self, pts):
+        """Clustering per distanza (DBSCAN-like leggero): punti entro cluster_eps
+        nello stesso cluster. Unisce le due gambe di un pedone in un oggetto.
+        Implementazione a griglia per efficienza (no librerie esterne)."""
+        clusters = []
+        if len(pts) == 0:
+            return clusters
 
-        Tre difese contro i falsi positivi (ombre, robot che ruota/trasla):
-        1. solo celle VISTE in entrambi i frame (maschera seen);
-        2. costo solo in una FASCIA vicino a ostacoli OCCUPATI e visti: nel vuoto
-           (coni d'ombra, spazio libero) non c'e' ostacolo -> niente costo, anche
-           se la ESDF li' oscilla;
-        3. GATE sul moto del robot: se ruota/trasla troppo, il pattern di occlusione
-           cambia troppo per fidarsi del dESDF -> attenuo/azzero il costo."""
+        # griglia hash a celle di lato eps: punti nella stessa cella o adiacenti
+        # sono vicini. Uso union-find sui punti.
+        eps = self.cluster_eps
+        cell = {}
+        keys = np.floor(pts / eps).astype(int)
+        for i, (kx, ky) in enumerate(keys):
+            cell.setdefault((kx, ky), []).append(i)
+
+        parent = list(range(len(pts)))
+        def find(a):
+            while parent[a] != a:
+                parent[a] = parent[parent[a]]; a = parent[a]
+            return a
+        def union(a, b):
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                parent[rb] = ra
+
+        eps2 = eps * eps
+        for i, (kx, ky) in enumerate(keys):
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    for j in cell.get((kx + dx, ky + dy), []):
+                        if j <= i:
+                            continue
+                        d2 = np.sum((pts[i] - pts[j]) ** 2)
+                        if d2 <= eps2:
+                            union(i, j)
+
+        groups = {}
+        for i in range(len(pts)):
+            groups.setdefault(find(i), []).append(i)
+
+        for idxs in groups.values():
+            if len(idxs) < self.cluster_min_pts:
+                continue
+            cpts = pts[idxs]
+            size = np.max(np.ptp(cpts, axis=0)) if len(cpts) > 1 else 0.0
+            if size > self.cluster_max_size:      # scarta muri/oggetti grandi
+                continue
+            centroid = cpts.mean(axis=0)
+            clusters.append({'centroid': (float(centroid[0]), float(centroid[1])),
+                             'pts': cpts, 'size': float(size)})
+        return clusters
+
+    # -------------------------------------------------------------------------
+    def camera_filter(self, clusters):
+        """FILTRO DINAMICO/STATICO tramite camera semantica.
+        Tiene SOLO i cluster LiDAR che coincidono con un pedone/veicolo visto
+        dalla camera (classe dinamica). Tutti gli altri (muri, alberi, cordoli:
+        classi statiche) sono SCARTATI -> non entrano nel layer dinamico.
+        Rigoroso: se la conferma camera non e' disponibile, il cluster e' scartato
+        (in caso di dubbio, meglio non generare un falso cono su uno statico)."""
+        if not clusters:
+            return []
+        T_cam = self.lookup(self.cam_frame, self.last_seg.header.stamp)
+        if T_cam is None:
+            return []      # niente TF camera -> non posso confermare -> scarto tutto
+        try:
+            seg = self.bridge.imgmsg_to_cv2(self.last_seg, desired_encoding='mono8')
+        except Exception:
+            return []
+        h, w = seg.shape
+        M = transform_to_matrix(T_cam)
+        origin = M[:3, 3]; R = M[:3, :3]
+        fx, fy = self.K[0, 0], self.K[1, 1]
+        cx, cy = self.K[0, 2], self.K[1, 2]
+
+        # proietta a terra i pixel di classe DINAMICA
+        r0 = int(h * 0.4)
+        vs = np.arange(r0, h, 4); us = np.arange(0, w, 4)
+        uu, vv = np.meshgrid(us, vs); uu = uu.ravel(); vv = vv.ravel()
+        is_dyn = self.dyn_lut[seg[vv, uu]]
+        if not is_dyn.any():
+            return []      # camera non vede NESSUN dinamico -> scarto tutti i cluster
+        uu = uu[is_dyn]; vv = vv[is_dyn]
+        dir_opt = np.stack([(uu - cx) / fx, (vv - cy) / fy, np.ones_like(uu, float)], axis=1)
+        dir_w = dir_opt @ R.T
+        dz = dir_w[:, 2]
+        val = dz < -1e-6
+        t = np.full(uu.shape, -1.0); t[val] = -origin[2] / dz[val]
+        ok = val & (t > 0)
+        gp = origin[None, :] + t[:, None] * dir_w
+        cam_pts = gp[ok][:, :2]
+        if len(cam_pts) == 0:
+            return []
+
+        # tieni SOLO i cluster con un pixel-dinamico-camera vicino (conferma classe)
+        kept = []
+        for c in clusters:
+            cx0, cy0 = c['centroid']
+            d = np.hypot(cam_pts[:, 0] - cx0, cam_pts[:, 1] - cy0)
+            if np.min(d) <= self.cam_assoc:
+                kept.append(c)
+        return kept
+
+    # -------------------------------------------------------------------------
+    def track(self, dets, now_s):
+        """Associa le detection ai track (nearest neighbor), aggiorna posizione
+        e velocita' con smoothing, crea/rimuove track."""
+        used = set()
+        for tr in self.tracks:
+            best = None; bd = self.gate_dist
+            for j, (dx, dy) in enumerate(dets):
+                if j in used:
+                    continue
+                d = np.hypot(dx - tr['x'], dy - tr['y'])
+                if d < bd:
+                    bd = d; best = j
+            if best is not None:
+                dx, dy = dets[best]
+                dt = max(1e-2, now_s - tr['t'])
+                # smoothing posizione, poi velocita' dalla posizione filtrata
+                xs = self.pos_ema * dx + (1 - self.pos_ema) * tr['x']
+                ys = self.pos_ema * dy + (1 - self.pos_ema) * tr['y']
+                vx_i = (xs - tr['x']) / dt
+                vy_i = (ys - tr['y']) / dt
+                tr['vx'] = self.vel_ema * vx_i + (1 - self.vel_ema) * tr['vx']
+                tr['vy'] = self.vel_ema * vy_i + (1 - self.vel_ema) * tr['vy']
+                tr['x'] = xs; tr['y'] = ys; tr['t'] = now_s
+                tr['n'] = min(tr['n'] + 1, 999)
+                used.add(best)
+
+        for j, (dx, dy) in enumerate(dets):
+            if j in used:
+                continue
+            self.tracks.append(dict(id=self.next_id, x=dx, y=dy,
+                                    vx=0.0, vy=0.0, n=1, t=now_s))
+            self.next_id += 1
+
+        self.tracks = [tr for tr in self.tracks
+                       if now_s - tr['t'] <= self.track_timeout]
+
+    # -------------------------------------------------------------------------
+    def build_cost(self, ox, oy):
+        """Proietta un cono per ogni track confermato e in movimento."""
         cost = np.zeros((self.n, self.n), dtype=np.uint8)
+        self.arrows = []
+        spinning = self.robot_ang > self.gate_ang_vel
 
-        if self.prev_esdf is None or self.prev_origin is None \
-                or self.prev_stamp is None or self.prev_seen is None:
-            return cost
-        if self.prev_esdf.shape != esdf.shape:
-            return cost
+        for tr in self.tracks:
+            speed = np.hypot(tr['vx'], tr['vy'])
+            if tr['n'] < self.min_obs:
+                continue
+            # marca comunque l'oggetto (nucleo) se richiesto
+            if self.mark_obstacle:
+                self._stamp(cost, tr['x'], tr['y'], ox, oy, self.cone_halfwidth, self.max_cost)
+            if spinning or speed < self.min_speed:
+                continue
+            # cono nella direzione del moto
+            self._paint_cone(cost, tr, ox, oy, speed)
+            self.arrows.append((tr['x'], tr['y'], tr['vx'], tr['vy'], speed))
+        return cost
 
-        # --- DIFESA 3: gate sul movimento del robot ---
-        # se il robot ruota o trasla oltre soglia, in questo frame il cambio di
-        # occlusione domina il dESDF -> non pubblico costo (evito falsi positivi).
-        if self.robot_ang > self.gate_ang_vel or self.robot_lin > self.gate_lin_vel:
-            self.get_logger().info(
-                f'gate moto attivo (ang={self.robot_ang:.2f} lin={self.robot_lin:.2f}) '
-                f'-> costo dinamico sospeso questo frame',
-                throttle_duration_sec=2.0)
-            return cost
+    def _stamp(self, cost, wx, wy, ox, oy, radius_m, val):
+        """Marca un disco di costo attorno a (wx,wy)."""
+        cxi = int((wx - ox) / self.res); cyi = int((wy - oy) / self.res)
+        rr = int(radius_m / self.res)
+        for dy in range(-rr, rr + 1):
+            for dx in range(-rr, rr + 1):
+                if dx*dx + dy*dy <= rr*rr:
+                    gx, gy = cxi + dx, cyi + dy
+                    if 0 <= gx < self.n and 0 <= gy < self.n and cost[gy, gx] < val:
+                        cost[gy, gx] = val
 
-        dt = max(1e-2, now_s - self.prev_stamp)
-
-        # allinea le due griglie sulle stesse celle-mondo
-        pox, poy = self.prev_origin
-        shift_x = int(round((pox - ox) / self.res))
-        shift_y = int(round((poy - oy) / self.res))
-        prev_aligned = self.shift_grid(self.prev_esdf, shift_x, shift_y, fill=np.nan)
-        prev_seen_al = self.shift_grid(self.prev_seen.astype(np.float32),
-                                       shift_x, shift_y, fill=0.0) > 0.5
-
-        # maschera: viste ORA e PRIMA
-        observed = seen & prev_seen_al & np.isfinite(prev_aligned)
-
-        # --- DIFESA 2: solo vicino a ostacoli OCCUPATI e visti ---
-        # la ESDF corrente da' la distanza dall'ostacolo piu' vicino: tengo solo
-        # le celle entro near_obstacle_m da un ostacolo (esdf piccola). Cosi' il
-        # costo sta attorno agli ostacoli reali, non nel vuoto delle ombre.
-        near_band = esdf <= self.near_obstacle_m
-        valid = observed & near_band
-
-        desdf = np.zeros_like(esdf)
-        desdf[valid] = (esdf[valid] - prev_aligned[valid]) / dt
-
-        # avvicinamento = dESDF negativo oltre soglia
-        approaching = (-desdf) - self.desdf_thresh
-        mag = np.clip(approaching, 0.0, None)
-        mag[~valid] = 0.0
-        c = np.clip(self.cost_gain * mag, 0, self.max_cost).astype(np.uint8)
-
-        # dilata leggermente per dare margine (la zona "davanti" all'ostacolo)
-        if self.dilate_cells > 0 and c.any():
-            k = 2 * self.dilate_cells + 1
-            c = cv2.dilate(c, np.ones((k, k), np.uint8))
-
-        # --- SMOOTHING TEMPORALE DEL COSTO (stabilizza lo sfarfallio) ---
-        # il dESDF e' rumoroso frame-a-frame; l'EMA sul costo fonde i frame forti
-        # e deboli in un costo stabile che persiste, invece di ballare 100->0->100.
-        cf = c.astype(np.float32)
-        if self.cost_ema > 0.0 and self.cost_prev is not None:
-            # allinea il costo precedente alle celle-mondo correnti (rolling)
-            cprev_al = self.shift_grid(self.cost_prev, shift_x, shift_y, fill=0.0)
-            cf = self.cost_ema * cf + (1.0 - self.cost_ema) * cprev_al
-        self.cost_prev = cf.copy()
-        c = np.clip(cf, 0, self.max_cost).astype(np.uint8)
-
-        # --- DIAGNOSTICA: numeri grezzi per capire cosa succede davvero ---
-        n_observed = int(observed.sum())
-        n_near = int((observed & near_band).sum())
-        desdf_approach = -desdf  # positivo = avvicinamento
-        max_approach = float(desdf_approach[valid].max()) if valid.any() else 0.0
-        n_over_thresh = int((desdf_approach[valid] > self.desdf_thresh).sum()) if valid.any() else 0
-        n_cost = int((c > 0).sum())
-        self.get_logger().info(
-            f'[diag] osservate={n_observed} vicino_ost={n_near} | '
-            f'max_avvicinamento={max_approach:.3f} m/s (soglia={self.desdf_thresh}) | '
-            f'celle>soglia={n_over_thresh} celle_costo={n_cost} costo_max={int(c.max())}',
-            throttle_duration_sec=1.0)
-
-        return c
+    def _paint_cone(self, cost, tr, ox, oy, speed):
+        """Cono dal centroide nella direzione (vx,vy), lungo speed*horizon,
+        che si allarga e decade con la distanza."""
+        ux, uy = tr['vx'] / speed, tr['vy'] / speed
+        length = min(speed * self.horizon_s, self.size_m)
+        n_steps = max(1, int(length / self.res))
+        px = (tr['x'] - ox) / self.res
+        py = (tr['y'] - oy) / self.res
+        half0 = self.cone_halfwidth / self.res
+        nx, ny = -uy, ux
+        for s in range(n_steps):
+            frac = s / max(1, n_steps - 1)
+            cx = px + ux * s
+            cy = py + uy * s
+            half = half0 * (1.0 + self.cone_spread * frac)
+            val = int(self.max_cost * (1.0 - 0.5 * frac))
+            wv = -half
+            while wv <= half + 1e-6:
+                gx = int(round(cx + nx * wv))
+                gy = int(round(cy + ny * wv))
+                if 0 <= gx < self.n and 0 <= gy < self.n and cost[gy, gx] < val:
+                    cost[gy, gx] = val
+                wv += 1.0
 
     # -------------------------------------------------------------------------
-    @staticmethod
-    def shift_grid(grid, sx, sy, fill=0.0):
-        """Trasla una griglia di (sx colonne, sy righe), riempiendo i bordi."""
-        out = np.full_like(grid, fill)
-        n = grid.shape[0]
-        # sorgente e destinazione per righe (y) e colonne (x)
-        def span(s):
-            if s >= 0:
-                return slice(s, n), slice(0, n - s)   # dst, src
-            else:
-                return slice(0, n + s), slice(-s, n)
-        dy, syy = span(sy)
-        dx, sxx = span(sx)
-        out[dy, dx] = grid[syy, sxx]
-        return out
+    def publish_arrows(self):
+        arr = MarkerArray()
+        clear = Marker()
+        clear.header.frame_id = self.world_frame
+        clear.action = Marker.DELETEALL
+        arr.markers.append(clear)
+        for k, (wx, wy, vx, vy, speed) in enumerate(self.arrows):
+            m = Marker()
+            m.header.frame_id = self.world_frame
+            m.header.stamp = self.get_clock().now().to_msg()
+            m.ns = 'dyn'; m.id = k
+            m.type = Marker.ARROW; m.action = Marker.ADD
+            p0 = Point(x=float(wx), y=float(wy), z=0.1)
+            p1 = Point(x=float(wx + vx), y=float(wy + vy), z=0.1)  # 1 s di moto
+            m.points = [p0, p1]
+            m.scale.x = 0.08; m.scale.y = 0.18; m.scale.z = 0.0
+            m.color.r = 1.0; m.color.g = 0.9; m.color.b = 0.0; m.color.a = 1.0
+            arr.markers.append(m)
+        self.markers_pub.publish(arr)
 
-    # -------------------------------------------------------------------------
-    def publish_cost(self, cost, ox, oy, stamp):
+    def publish_cost(self, cost, ox, oy):
         msg = OccupancyGrid()
-        msg.header.stamp = stamp.to_msg()
+        msg.header.stamp = self.get_clock().now().to_msg()
         msg.header.frame_id = self.world_frame
         msg.info.resolution = self.res
         msg.info.width = self.n
@@ -476,15 +501,13 @@ class DynamicESDFLayer(Node):
         msg.info.origin.position.x = float(ox)
         msg.info.origin.position.y = float(oy)
         msg.info.origin.orientation.w = 1.0
-        # OccupancyGrid vuole int8 0..100 (row-major, riga = y)
-        data = cost.astype(np.int8).flatten(order='C')
-        msg.data = data.tolist()
+        msg.data = cost.astype(np.int8).flatten(order='C').tolist()
         self.pub.publish(msg)
 
 
 def main():
     rclpy.init()
-    node = DynamicESDFLayer()
+    node = DynamicTracker()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

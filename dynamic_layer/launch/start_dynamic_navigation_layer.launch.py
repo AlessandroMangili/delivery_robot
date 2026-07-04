@@ -20,7 +20,7 @@ def generate_launch_description():
     )
     params_arg = DeclareLaunchArgument(
         'params_file',
-        default_value=os.path.join(pkg_dynamic, 'config', 'esdf.yaml'),
+        default_value=os.path.join(pkg_dynamic, 'config', 'dynamic.yaml'),
         description='File dei parametri del layer ESDF differenziale'
     )
 

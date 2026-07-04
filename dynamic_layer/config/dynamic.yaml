@@ -1,0 +1,47 @@
+dynamic_tracker:
+  ros__parameters:
+    use_sim_time: true
+
+    # --- I/O e frame ---
+    scan_topic: /scan
+    output_topic: /dynamic_cost
+    world_frame: odom            # FISSO ma continuo (non 'map')
+    robot_frame: base_link
+    odom_topic: /odom
+
+    # --- griglia rolling ---
+    size_m: 8.0
+    resolution: 0.05
+    rate_hz: 10.0
+    max_range: 8.0
+
+    # --- clustering LiDAR (unisce le due gambe in UN oggetto) ---
+    cluster_eps_m: 0.5          # punti entro 50cm = stesso oggetto (gambe ~35cm)
+    cluster_min_pts: 2          # min punti per cluster valido
+    cluster_max_size_m: 1.5     # scarta cluster piu' grandi (muri/edifici)
+
+    # --- tracking ---
+    gate_dist_m: 0.7            # associazione track<->cluster tra frame
+    vel_ema: 0.4               # smoothing velocita' (0..1; piu' alto = piu' liscio)
+    pos_ema: 0.5               # smoothing posizione prima di derivare la velocita'
+    min_obs: 3                 # frame min prima di fidarsi del track
+    track_timeout_s: 0.6       # eta' max di un track non piu' visto
+    min_speed: 0.15            # [m/s] sotto = fermo, niente cono
+
+    # --- proiezione cono ---
+    horizon_s: 2.0             # [s] quanto proietto avanti (lunghezza cono ~ v*horizon)
+    cone_halfwidth_m: 0.4      # semi-larghezza base del cono
+    cone_spread: 1.5           # quanto il cono si allarga verso la punta
+    max_cost: 100
+    mark_obstacle: true        # marca anche il nucleo dell'oggetto (non solo il cono)
+
+    # --- gate movimento robot ---
+    gate_ang_vel: 1.0          # [rad/s] sopra: sospendi coni (rotazione rapida)
+
+    # --- camera (OPZIONALE: parti con false, poi accendi) ---
+    use_camera: false           # filtro dinamico/statico: scarta gli statici (muri/alberi)
+    seg_topic: /semantic/segmentation
+    info_topic: /camera/camera_info
+    camera_optical_frame: camera_rgb_optical_frame
+    dynamic_classes: [11, 12, 13, 14, 15, 16, 17, 18]
+    cam_assoc_m: 0.8           # tolleranza associazione LiDAR<->pixel-camera
