@@ -1,10 +1,6 @@
 # ============================================================
 #  Pipeline SEGMENTAZIONE GROUND-TRUTH (Gazebo) -> COSTMAP
-#  Nodi:
-#    ros2 run semantic gt_segmentation_relay  --ros-args -p use_sim_time:=true -p publish_overlay:=true
-#    ros2 run semantic semantic_costmap_node  --ros-args --params-file <questo file> -p use_sim_time:=true
 # ============================================================
-
 gt_segmentation_relay:
   ros__parameters:
     labels_topic: /semantic/labels_map
@@ -17,51 +13,54 @@ semantic_costmap_node:
     camera_optical_frame: camera_rgb_optical_frame
     base_frame: base_footprint
     resolution: 0.05
-    size_m: 12.0
     pixel_stride: 4
     max_range: 5.0
     min_row_frac: 0.55
-    publish_window: false   # pubblica la mappa intera (false) oppure solo la finestra attorno al robot di dimensioni size_m x size_m
 
-    # --- occlusione (z-buffer polare) -> abbassa il peso, non scarta ---
-    occ_sector_deg: 2.0      # ampiezza settore angolare
-    occ_margin: 0.15         # m oltre il primo ostacolo prima di considerare "occluso"
-    occ_weak: 0.10           # peso di un'osservazione occlusa (dietro un ostacolo)
+    # --- anti-spalmamento (proiezione) ---
+    min_ray_downness: 0.08      # scarta raggi <~4.5 gradi sotto orizzonte (proiettano impreciso)
+    map_write_max_range: 4.0    # scrivi in mappa solo entro questa distanza (IPM accurato)
+
+    full_map_period_s: 1.5      # ripubblica la full map ogni N secondi (aggiornamento periodico)
+    significant_change_cells: 15  # n. celle di cambiamento RILEVANTE -> pubblica SUBITO (nuovo ostacolo)
+
+    # --- occlusione (z-buffer polare) ---
+    occ_sector_deg: 2.0
+    occ_margin: 0.15
+    occ_weak: 0.10
 
     # --- pesi e confidenza ---
-    w_dist_min: 0.03         # peso minimo a max_range (lontano)
-    gate_ratio: 0.7          # serve peso >= gate_ratio*confidenza per cambiare una cella
-
-    # classi che BLOCCANO la vista (verticali) -> usate solo per l'occlusione
+    w_dist_min: 0.03
+    gate_ratio: 0.7
     blocker_classes: [2,3,4,5,7,8,11,12,13,14,15,16,17,18]
 
-    # --- griglia AUTO-GROW: si espande da sola, niente da impostare ---
-    initial_size_m: 10.0   # griglia iniziale attorno al robot
-    grow_margin_m: 3.0     # margine aggiunto a ogni espansione
+    # --- griglia auto-grow ---
+    initial_size_m: 10.0
+    grow_margin_m: 3.0
 
-    # --- persistenza mappa: SOLO il nome file; va in semantic/maps/ ---
-    map_save_name: 'map1'   # es: 'sidewalk'  (vuoto = non salvare)
-    map_load_name: 'map1'   # es: 'sidewalk'  (vuoto = non caricare)
+    # --- persistenza mappa (nome file in semantic/maps/) ---
+    map_save_name: 'map1'
+    map_load_name: 'map1'
 
-    # --- oggetti dinamici (tracking + velocita') ---
-    dynamic_classes: [11,12,13,14,15,16,17,18]  # persona, rider, veicoli
-    dyn_v_thresh: 0.3        # m/s sopra cui l'oggetto e' 'in movimento' -> escluso
-    dyn_gate: 1.0            # m, distanza max per associare una traccia
-    dyn_min_obs: 3           # frame prima di fidarsi della velocita'
-    dyn_timeout: 1.0         # s prima di scartare una traccia non vista
-    dyn_vel_beta: 0.6        # smoothing della velocita'
+    # --- oggetti dinamici (esclusi dalla mappa persistente) ---
+    dynamic_classes: [11,12,13,14,15,16,17,18]
+    dyn_v_thresh: 0.3
+    dyn_gate: 1.0
+    dyn_min_obs: 3
+    dyn_timeout: 1.0
+    dyn_vel_beta: 0.6
 
 confinement_layer:
   ros__parameters:
     in_topic: /semantic_costmap
     out_topic: /confinement_cost
-    sidewalk_cost_max: 15     # celle <= questo costo = marciapiede
-    conf_max: 80.0            # costo di confinamento al bordo
-    falloff: 0.4             # m: lunghezza di decadimento verso il centro
-    include_unknown_as_edge: true  # l'ignoto conta come 'fuori marciapiede'
+    sidewalk_cost_max: 15
+    conf_max: 80.0
+    falloff: 0.4
+    include_unknown_as_edge: true
 
 ssrl_combiner:
   ros__parameters:
     semantic_topic: /semantic_costmap
-    layer_topics: ['/confinement_cost']  # qui aggiungerai i dinamici
+    layer_topics: ['/confinement_cost']
     out_topic: /ssrl_costmap

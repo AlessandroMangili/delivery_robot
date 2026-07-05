@@ -12,9 +12,10 @@ Mappa PERSISTENTE (frame 'map') con:
 
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
 from sensor_msgs.msg import Image, CameraInfo
 from nav_msgs.msg import OccupancyGrid
+from visualization_msgs.msg import Marker
 import numpy as np
 import cv2
 from cv_bridge import CvBridge
@@ -92,13 +93,16 @@ class SemanticCostmapNode(Node):
         self.declare_parameter('camera_optical_frame', 'camera_rgb_optical_frame')
         self.declare_parameter('base_frame', 'base_footprint')
         self.declare_parameter('resolution', 0.05)
-        self.declare_parameter('size_m', 8.0)
         self.declare_parameter('initial_size_m', 10.0)   # m, griglia iniziale (poi cresce da sola)
         self.declare_parameter('grow_margin_m', 3.0)     # m, margine aggiunto a ogni espansione
         self.declare_parameter('pixel_stride', 4)
         self.declare_parameter('max_range', 5.0)
         self.declare_parameter('min_row_frac', 0.62)
-        self.declare_parameter('publish_window', True)
+        # anti-spalmamento: scarta i raggi troppo orizzontali (vicini all'orizzonte)
+        # che proiettano lontano e impreciso. min |dz| = elevazione minima.
+        self.declare_parameter('min_ray_downness', 0.08)   # ~4.5 gradi
+        # scrivo in mappa solo entro questa distanza (dove l'IPM e' accurato)
+        self.declare_parameter('map_write_max_range', 4.0)
         self.declare_parameter('occ_sector_deg', 2.0)
         self.declare_parameter('occ_margin', 0.15)
         self.declare_parameter('occ_weak', 0.10)
@@ -118,13 +122,13 @@ class SemanticCostmapNode(Node):
         self.cam_frame = gp('camera_optical_frame').value
         self.base_frame = gp('base_frame').value
         self.res = gp('resolution').value
-        self.size_m = gp('size_m').value
         self.initial_size_m = gp('initial_size_m').value
         self.grow_margin = gp('grow_margin_m').value
         self.stride = gp('pixel_stride').value
         self.max_range = gp('max_range').value
         self.min_row_frac = gp('min_row_frac').value
-        self.publish_window = gp('publish_window').value
+        self.min_ray_downness = float(gp('min_ray_downness').value)
+        self.map_write_max_range = float(gp('map_write_max_range').value)
         self.occ_dth = np.deg2rad(gp('occ_sector_deg').value)
         self.occ_nsec = int(np.ceil(2 * np.pi / self.occ_dth))
         self.occ_margin = gp('occ_margin').value
@@ -152,7 +156,6 @@ class SemanticCostmapNode(Node):
         self.grid = np.full((self.gny, self.gnx), -1.0, dtype=np.float32)
         self.conf = np.zeros((self.gny, self.gnx), dtype=np.float32)
 
-        self.win = int(self.size_m / self.res)
         self.bridge = CvBridge()
         self.K = None
 
@@ -163,7 +166,28 @@ class SemanticCostmapNode(Node):
         seg_qos = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT,
                              history=HistoryPolicy.KEEP_LAST, depth=1)
         self.create_subscription(Image, '/semantic/segmentation', self.seg_cb, seg_qos)
-        self.pub = self.create_publisher(OccupancyGrid, '/semantic_costmap', 1)
+
+        # --- PUBBLICAZIONE MAPPA (due canali) ---
+        # 1) /semantic_costmap : FULL MAP latched (transient_local) a bassa
+        #    frequenza. Confinement e SSRL la ricevono COMPLETA (per il global
+        #    planner) e aggiornata ogni full_map_period_s. Il latching fa si' che
+        #    un subscriber che si connette dopo riceva subito l'ultima mappa intera.
+        latched_qos = QoSProfile(reliability=ReliabilityPolicy.RELIABLE,
+                                 durability=DurabilityPolicy.TRANSIENT_LOCAL,
+                                 history=HistoryPolicy.KEEP_LAST, depth=1)
+        self.pub = self.create_publisher(OccupancyGrid, '/semantic_costmap', latched_qos)
+        # marker del raggio/area mappabile (giallo)
+        self.pub_range = self.create_publisher(Marker, '/semantic_map_range', 1)
+
+        # ogni quanto ripubblicare la FULL map (bassa freq -> non rallenta)
+        self.declare_parameter('full_map_period_s', 1.5)
+        self.full_map_period = float(self.get_parameter('full_map_period_s').value)
+        self._last_full_pub = 0.0
+        self._map_dirty = True   # la full map va ripubblicata (qualcosa e' cambiato)
+        self._significant_change = 0   # n. celle cambiate in modo rilevante
+        # soglia: sopra questo n. di celle "rilevanti", pubblica SUBITO la full map
+        self.declare_parameter('significant_change_cells', 15)
+        self.significant_thresh = int(self.get_parameter('significant_change_cells').value)
 
         self.cost_lut = np.full(256, -2, dtype=np.int16)
         for cls, c in CLASS_COST.items():
@@ -329,13 +353,26 @@ class SemanticCostmapNode(Node):
         dz = dir_world[:, 2]
 
         valid = dz < -1e-6
+        # ANTI-SPALMAMENTO: scarta i raggi troppo orizzontali (vicini all'orizzonte),
+        # che proiettano lontano e con enorme imprecisione (un errore di 0.5 gradi a
+        # 2 gradi sposta il punto di metri). Tengo solo raggi ben inclinati in giu'.
+        valid = valid & (dz < -self.min_ray_downness)
         t = np.full(uu.shape, -1.0)
         t[valid] = -origin[2] / dz[valid]
         ok = valid & (t > 0)
         pts = origin[None, :] + t[:, None] * dir_world
         X, Y = pts[:, 0], pts[:, 1]
         dist = np.hypot(X - bx, Y - by)
-        ok = ok & (dist < self.max_range)
+        # scrivo in mappa solo entro map_write_max_range (dove l'IPM e' accurato):
+        # i pixel piu' lontani proiettano imprecisi e, con drift, si spalmano.
+        ok = ok & (dist < self.map_write_max_range)
+
+        # registro il range di distanza REALE dei punti scritti in mappa, per
+        # disegnare il raggio giallo esatto (non stimato).
+        if np.any(ok):
+            dok = dist[ok]
+            self._range_near_est = float(np.percentile(dok, 5))
+            self._range_far_est = float(np.percentile(dok, 95))
 
         classes = seg[vv, uu]
         costs = self.cost_lut[classes]
@@ -407,6 +444,7 @@ class SemanticCostmapNode(Node):
         seen = frame_w >= 0.0
 
         V = self.grid.ravel(); C = self.conf.ravel()
+        V_before = V.copy()   # per rilevare cambiamenti rilevanti (pubblica subito)
         accept = seen & (frame_w >= self.gate_ratio * C)
         unknown = accept & (V < 0)
         knownup = accept & (V >= 0)
@@ -414,28 +452,26 @@ class SemanticCostmapNode(Node):
         fa = frame_w[knownup] / (frame_w[knownup] + C[knownup])
         V[knownup] = (1.0 - fa) * V[knownup] + fa * frame_cost[knownup]
         C[accept] = np.maximum(C[accept], frame_w[accept])
+        if accept.any():
+            self._map_dirty = True   # la mappa e' cambiata -> ripubblica la full
+            # conta i cambiamenti RILEVANTI: celle che passano da libero a ostacolo
+            # o viceversa (non piccoli aggiustamenti di costo). Un cambiamento
+            # rilevante (nuovo ostacolo!) merita pubblicazione IMMEDIATA.
+            old_vals = V_before[accept]
+            new_vals = V[accept]
+            # "rilevante" = attraversa la soglia ostacolo (es. 50): appare/sparisce
+            # qualcosa di solido dove prima non c'era.
+            crossed = ((old_vals < 50) & (new_vals >= 50)) | \
+                      ((old_vals >= 50) & (new_vals < 50)) | (old_vals < 0)
+            self._significant_change = int(np.count_nonzero(crossed))
 
         self.grid = V.reshape(self.gny, self.gnx)
         self.conf = C.reshape(self.gny, self.gnx)
         self.publish_map(bx, by, msg.header.stamp)
 
-    def publish_map(self, bx, by, stamp):
-        if self.publish_window:
-            ci = int((bx - self.gox) / self.res)
-            cj = int((by - self.goy) / self.res)
-            half = self.win // 2
-            i0 = max(0, min(self.gnx, ci - half)); i1 = max(0, min(self.gnx, ci + half))
-            j0 = max(0, min(self.gny, cj - half)); j1 = max(0, min(self.gny, cj + half))
-            # robot fuori dalla griglia globale -> finestra vuota: non pubblicare, ma non crashare
-            if i1 <= i0 or j1 <= j0:
-                return
-            sub = self.grid[j0:j1, i0:i1]
-            ox = self.gox + i0 * self.res; oy = self.goy + j0 * self.res
-            width = i1 - i0; height = j1 - j0
-        else:
-            sub = self.grid; ox, oy = self.gox, self.goy
-            width = self.gnx; height = self.gny
-
+    def _grid_to_msg(self, sub, ox, oy, width, height, stamp):
+        """Converte una porzione di griglia in OccupancyGrid. Usa tobytes (112x
+        piu' veloce di .tolist() sulle mappe grandi)."""
         msg = OccupancyGrid()
         msg.header.stamp = stamp
         msg.header.frame_id = self.target
@@ -445,8 +481,80 @@ class SemanticCostmapNode(Node):
         msg.info.origin.position.y = float(oy)
         msg.info.origin.orientation.w = 1.0
         data = np.where(sub < 0, -1, np.clip(np.round(sub), 0, 100)).astype(np.int8)
-        msg.data = data.ravel(order='C').tolist()
-        self.pub.publish(msg)
+        import array
+        msg.data = array.array('b', np.ascontiguousarray(data).tobytes())
+        return msg
+
+    def publish_map(self, bx, by, stamp):
+        now_s = self.get_clock().now().nanoseconds * 1e-9
+
+        # --- FULL MAP latched (per confinement/SSRL/global planner) ---
+        # Pubblico la full map completa quando:
+        #  (a) e' passato full_map_period_s dall'ultima (aggiornamento periodico), OPPURE
+        #  (b) c'e' stato un CAMBIAMENTO RILEVANTE (nuovo ostacolo!) -> pubblico
+        #      SUBITO, anche se ho appena pubblicato: un ostacolo nuovo non puo'
+        #      aspettare 1.5s, il planner deve saperlo ora.
+        periodic_due = (now_s - self._last_full_pub) >= self.full_map_period
+        urgent = self._significant_change >= self.significant_thresh
+        if self._map_dirty and (periodic_due or urgent):
+            full = self._grid_to_msg(self.grid, self.gox, self.goy,
+                                     self.gnx, self.gny, stamp)
+            self.pub.publish(full)
+            if urgent:
+                self.get_logger().info(
+                    f'Cambiamento rilevante ({self._significant_change} celle) '
+                    f'-> full map pubblicata SUBITO', throttle_duration_sec=1.0)
+            self._last_full_pub = now_s
+            self._map_dirty = False
+            self._significant_change = 0
+
+        # --- MARKER: raggio/area mappabile (giallo) ---
+        self.publish_range_marker(bx, by, stamp)
+
+    def publish_range_marker(self, bx, by, stamp):
+        """Area mappabile REALE: un anello nel settore frontale, tra il limite
+        VICINO (i raggi piu' inclinati, bordo basso immagine) e quello LONTANO
+        (map_write_max_range). Rispecchia dove il robot scrive davvero in mappa."""
+        T = self.lookup(self.base_frame)
+        if T is None:
+            return
+        q = T.transform.rotation
+        yaw = np.arctan2(2.0 * (q.w * q.z + q.x * q.y),
+                         1.0 - 2.0 * (q.y * q.y + q.z * q.z))
+        # limiti REALI misurati dai punti effettivamente scritti in mappa
+        # (percentili 5-95 delle distanze), non stime fisse.
+        r_far = getattr(self, '_range_far_est', self.map_write_max_range)
+        r_near = getattr(self, '_range_near_est', 0.3)
+        # apertura angolare = FOV orizzontale reale (ricavato da K se disponibile)
+        if self.K is not None:
+            fx = self.K[0, 0]; cx = self.K[0, 2]
+            half_fov = np.arctan(cx / fx)   # meta' FOV orizzontale
+        else:
+            half_fov = np.deg2rad(30.0)
+
+        from geometry_msgs.msg import Point
+        m = Marker()
+        m.header.frame_id = self.target
+        m.header.stamp = stamp
+        m.ns = 'map_range'; m.id = 0
+        m.type = Marker.LINE_STRIP; m.action = Marker.ADD
+        m.scale.x = 0.04
+        m.color.r = 1.0; m.color.g = 0.9; m.color.b = 0.0; m.color.a = 0.7
+        pts = []
+        angs = np.linspace(-half_fov, half_fov, 24)
+        # arco lontano
+        for a in angs:
+            ang = yaw + a
+            pts.append(Point(x=float(bx + r_far * np.cos(ang)),
+                             y=float(by + r_far * np.sin(ang)), z=0.05))
+        # arco vicino (tornando indietro) -> chiude l'anello
+        for a in reversed(angs):
+            ang = yaw + a
+            pts.append(Point(x=float(bx + r_near * np.cos(ang)),
+                             y=float(by + r_near * np.sin(ang)), z=0.05))
+        pts.append(pts[0])   # chiudi
+        m.points = pts
+        self.pub_range.publish(m)
 
 
 def main():
