@@ -90,6 +90,19 @@ class SemanticCostmapNode(Node):
         super().__init__('semantic_costmap_node')
 
         self.declare_parameter('target_frame', 'map')
+        # ===== GATE LOCALIZZAZIONE ROBUSTO (isteresi + EMA, non soffoca) =====
+        # Sospende la mappatura SOLO su perdita GRAVE di localizzazione:
+        #  - la covarianza viene SMUSSATA (EMA) per ignorare i picchi isolati;
+        #  - ISTERESI: sospende sopra loc_std_suspend_m, riprende sotto
+        #    loc_std_resume_m (evita accendi-spegni continuo);
+        #  - posa AMCL "vecchia" NON blocca (AMCL non pubblica da fermo):
+        #    si mantiene l'ultimo stato noto.
+        self.declare_parameter('use_loc_quality_gate', True)
+        self.declare_parameter('loc_pose_topic', '/amcl_pose')   # EKF: /odometry/filtered
+        self.declare_parameter('loc_cov_source', 'pose_with_cov')  # 'odometry' per EKF
+        self.declare_parameter('loc_std_suspend_m', 1.0)  # EMA std sopra -> SOSPENDI
+        self.declare_parameter('loc_std_resume_m', 0.5)   # EMA std sotto -> RIPRENDI
+        self.declare_parameter('loc_cov_ema', 0.4)        # smoothing covarianza (0..1)
         self.declare_parameter('camera_optical_frame', 'camera_rgb_optical_frame')
         self.declare_parameter('base_frame', 'base_footprint')
         self.declare_parameter('resolution', 0.05)
@@ -135,6 +148,24 @@ class SemanticCostmapNode(Node):
         self.occ_weak = gp('occ_weak').value
         self.w_dist_min = gp('w_dist_min').value
         self.gate_ratio = gp('gate_ratio').value
+        # gate localizzazione robusto
+        self.use_loc_gate = bool(gp('use_loc_quality_gate').value)
+        self.loc_pose_topic = gp('loc_pose_topic').value
+        self.loc_cov_source = gp('loc_cov_source').value
+        self.loc_std_suspend = float(gp('loc_std_suspend_m').value)
+        self.loc_std_resume = float(gp('loc_std_resume_m').value)
+        self.loc_cov_ema = float(gp('loc_cov_ema').value)
+        self.loc_std_smooth = 0.0   # EMA della deviazione std di posa
+        self.loc_ok = True          # PARTE ATTIVO: sospende solo su perdita grave
+        if self.use_loc_gate:
+            from geometry_msgs.msg import PoseWithCovarianceStamped
+            from nav_msgs.msg import Odometry as _Odom
+            if self.loc_cov_source == 'odometry':
+                self.create_subscription(_Odom, self.loc_pose_topic,
+                                         self.loc_cb_odom, 10)
+            else:
+                self.create_subscription(PoseWithCovarianceStamped, self.loc_pose_topic,
+                                         self.loc_cb_pwc, 10)
         blockers = gp('blocker_classes').value
         dynamic = gp('dynamic_classes').value
 
@@ -326,8 +357,48 @@ class SemanticCostmapNode(Node):
             f'Griglia espansa -> {self.gnx}x{self.gny} celle, origine '
             f'({self.gox:.1f},{self.goy:.1f}).', throttle_duration_sec=2.0)
 
+    def loc_cb_pwc(self, msg):
+        """Covarianza posa da AMCL (PoseWithCovarianceStamped)."""
+        self._update_loc_quality(msg.pose.covariance)
+
+    def loc_cb_odom(self, msg):
+        """Covarianza posa da EKF (Odometry). Stesso layout 6x6."""
+        self._update_loc_quality(msg.pose.covariance)
+
+    def _update_loc_quality(self, cov):
+        """Gate ROBUSTO: EMA sulla std di posa + ISTERESI.
+        - EMA: i picchi isolati di covarianza (tipici di AMCL) non sospendono;
+          conta la TENDENZA.
+        - Isteresi: sospende sopra loc_std_suspend, riprende sotto loc_std_resume.
+        - Posa 'vecchia' non blocca: se AMCL non pubblica (robot fermo), lo stato
+          resta l'ultimo noto."""
+        var_x = max(0.0, float(cov[0]))
+        var_y = max(0.0, float(cov[7]))
+        std_xy = float(np.sqrt(max(var_x, var_y)))
+        a = self.loc_cov_ema
+        self.loc_std_smooth = a * std_xy + (1.0 - a) * self.loc_std_smooth
+        if self.loc_ok and self.loc_std_smooth > self.loc_std_suspend:
+            self.loc_ok = False
+            self.get_logger().warn(
+                f'LOCALIZZAZIONE PERSA (std smussata {self.loc_std_smooth:.2f}m > '
+                f'{self.loc_std_suspend}m) -> MAPPATURA SOSPESA. La mappa esistente '
+                f'resta pubblicata; ricalibrare la localizzazione per riprendere.')
+        elif (not self.loc_ok) and self.loc_std_smooth < self.loc_std_resume:
+            self.loc_ok = True
+            self.get_logger().info(
+                f'Localizzazione RECUPERATA (std smussata {self.loc_std_smooth:.2f}m < '
+                f'{self.loc_std_resume}m) -> mappatura RIPRESA.')
+
     def seg_cb(self, msg: Image):
         if self.K is None:
+            return
+        # GATE: localizzazione persa gravemente -> NON aggiornare la mappa
+        # (evita di rovinarla), ma continua a pubblicarla per la navigazione.
+        if self.use_loc_gate and not self.loc_ok:
+            T_base = self.lookup(self.base_frame)
+            if T_base is not None:
+                self.publish_map(T_base.transform.translation.x,
+                                 T_base.transform.translation.y, msg.header.stamp)
             return
         seg = self.bridge.imgmsg_to_cv2(msg, desired_encoding='mono8')
         h, w = seg.shape
