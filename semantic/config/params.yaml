@@ -28,9 +28,8 @@ semantic_costmap_node:
     pixel_stride: 4                        # campiona 1 pixel ogni N (4 = -94% pixel, veloce)
     max_range: 5.0                         # [m] distanza max considerata per la VISTA/occlusione
     min_row_frac: 0.55                     # campiona l'immagine da questa frazione in giu' (0.55 = solo la meta' bassa: il suolo)
-    min_ray_downness: 0.08                 # ANTI-SPALMAMENTO: scarta raggi con inclinazione verso il basso < ~4.5 gradi (sin=0.08). 
-                                           # I raggi quasi-orizzontali proiettano lontano e impreciso.
-    map_write_max_range: 4.0               # [m] SCRIVE in mappa solo entro questa distanza (dove l'IPM e' accurato); oltre = solo vista
+    min_ray_downness: 0.06                 # ANTI-SPALMAMENTO: scarta raggi con inclinazione verso il basso i raggi quasi-orizzontali proiettano lontano e impreciso
+    map_write_max_range: 4.5               # [m] SCRIVE in mappa solo entro questa distanza (dove l'IPM e' accurato); oltre = solo vista
 
     # ----- pubblicazione full map (latched) -----
     full_map_period_s: 1.5                 # [s] ripubblica la full map ogni N secondi (aggiornamento periodico, leggero)
@@ -78,7 +77,7 @@ confinement_layer:
     in_topic: /semantic_costmap            # mappa semantica in ingresso (latched)
     out_topic: /confinement_cost           # campo di confinamento in uscita (latched)
     sidewalk_cost_max: 15                  # celle con costo <= questo = marciapiede
-    conf_max: 80.0                         # costo di confinamento AL BORDO del marciapiede
+    conf_max: 50.0                         # costo di confinamento AL BORDO del marciapiede
     falloff: 0.4                           # [m] decadimento esponenziale verso il centro (a 0.4m dal bordo il costo e' ~30, a 1m ~7)
     include_unknown_as_edge: true          # l'ignoto (-1) conta come "fuori marciapiede" (prudente: il bordo verso l'ignoto respinge)
 
