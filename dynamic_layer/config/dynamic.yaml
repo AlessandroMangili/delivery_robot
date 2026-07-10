@@ -26,27 +26,17 @@ dynamic_esdf_layer:
     pos_ema: 0.5               # smoothing posizione
     min_obs: 3                 # frame min prima di fidarsi del track
     track_timeout_s: 0.6
-    min_speed: 0.30           # [m/s] sotto = fermo, niente nucleo ne' cono (statico)
+    min_speed: 0.30            # [m/s] sotto = fermo, niente nucleo ne' cono (statico)
  
     # --- proiezione cono ---
-    horizon_s: 2.0             # [s] lunghezza cono ~ velocita' x horizon
-    cone_halfwidth_m: 0.4
-    cone_spread: 1.5
-    max_cost: 100
-    mark_obstacle: true        # marca anche il nucleo dell'oggetto dinamico
+    horizon_s: 3.0             # [s] lunghezza cono ~ velocita' x horizon
+    cone_min_length: 4.0       # [m] lunghezza minima anche a bassa velocita'
+    cone_halfwidth_m: 0.4      # semi-larghezza del cono alla base
+    cone_spread: 1.5           # quanto si allarga verso la punta
+    max_cost: 100              # costo del NUCLEO (corpo pedone): letale
+    nucleus_radius_m: 0.20     # raggio del nucleo letale: piccolo, solo il pedone
+    cone_base_cost: 99         # costo BASE cono: 99->251 quasi letale ma uscibile (100 = letale/intrappola)
+    cone_tip_cost: 90          # costo alla PUNTA: alto = reagisce prima
+    cone_lateral_falloff: 0.35 # quanto cala il costo dal centro ai bordi (via di fuga laterale)
+    mark_obstacle: true        # marca il nucleo dell'oggetto dinamico
     gate_ang_vel: 1.0          # [rad/s] sopra: sospendi coni (rotazione rapida)
- 
-    # ============ CAMERA: validazione dinamico/statico ============
-    # true  = FUSIONE LiDAR+camera (raccomandata): gli statici NON entrano.
-    #         Il LiDAR trova posizione/velocita' (360 gradi), la camera valida
-    #         ogni track come dynamic/static. L'etichetta persiste fuori dal FOV.
-    # false = solo LiDAR (nessuna validazione classe; puo' prendere statici in
-    #         rotazione). Utile per test o se la camera non e' disponibile.
-    use_camera: false
-    seg_topic: /semantic/segmentation
-    info_topic: /camera/camera_info
-    camera_optical_frame: camera_rgb_optical_frame
-    dynamic_classes: [11, 12, 13, 14, 15, 16, 17, 18]  # person/rider/veicoli
-    cam_assoc_m: 0.8           # tolleranza associazione track<->pixel-camera
-    cam_fov_deg: 40.0          # semi-apertura campo visivo camera (per il FOV check)
-    cone_if_unknown: false     # track non ancora validato NON genera cono (prudente)

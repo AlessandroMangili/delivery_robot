@@ -1,45 +1,26 @@
 #!/usr/bin/env python3
 """
-dynamic_tracker.py -- Rilevamento e anticipazione di ostacoli dinamici.
+dynamic_esdf_layer.py -- Rilevamento e anticipazione di ostacoli dinamici (SOLO LiDAR).
 
-ARCHITETTURA (fusione LiDAR + Camera, divisione dei compiti):
-  LiDAR  -> POSIZIONE, VELOCITA', 360 gradi: clustering (unisce le due gambe in
-            UN oggetto), tracking del centroide, stima velocita', proiezione cono.
-  Camera -> VALIDAZIONE dinamico/statico: proietta a terra i pixel di classe
-            DINAMICA (person/rider/veicoli) e valida ogni track.
-  Validazione PERSISTENTE: l'etichetta (unknown/dynamic/static) di ogni track
-  persiste tra frame. Fuori dal campo camera il track mantiene l'etichetta -> un
-  muro validato 'static' resta static anche dietro il robot; un pedone 'dynamic'
-  continua a generare cono anche se momentaneamente fuori vista.
-
-  Regola coni (PRUDENTE): cono SOLO per track 'dynamic'. 'unknown'/'static' -> no.
-
-MODALITA':
-  use_camera=true  : fusione completa (gli statici non entrano).
-  use_camera=false : solo LiDAR (nessuna validazione classe; cono se supera le
-                     soglie di movimento). Piu' semplice, ma puo' prendere statici
-                     quando il robot ruota.
+  LiDAR -> POSIZIONE, VELOCITA', 360 gradi: clustering (unisce le due gambe in UN
+           oggetto), tracking del centroide, stima velocita', proiezione del cono
+           di costo anticipatorio.
+  Discriminazione statico/dinamico: PER MOVIMENTO (velocita' sopra 'min_speed').
+  Un cluster fermo (muro, aiuola) non genera ne' nucleo ne' cono.
 """
 
 import numpy as np
-import cv2
 
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
 
-from sensor_msgs.msg import LaserScan, Image, CameraInfo
+from sensor_msgs.msg import LaserScan
 from nav_msgs.msg import OccupancyGrid, Odometry
 from visualization_msgs.msg import Marker, MarkerArray
 from geometry_msgs.msg import Point
 
 import tf2_ros
-
-try:
-    from cv_bridge import CvBridge
-    _HAVE_BRIDGE = True
-except Exception:
-    _HAVE_BRIDGE = False
 
 
 def transform_to_matrix(t):
@@ -79,21 +60,17 @@ class DynamicTracker(Node):
         self.declare_parameter('min_obs', 3)
         self.declare_parameter('track_timeout_s', 0.6)
         self.declare_parameter('min_speed', 0.30)
-        self.declare_parameter('horizon_s', 2.0)
+        self.declare_parameter('horizon_s', 3.0)
+        self.declare_parameter('cone_min_length', 4.0)   # [m] lunghezza minima anche a bassa velocita'
         self.declare_parameter('cone_halfwidth_m', 0.4)
         self.declare_parameter('cone_spread', 1.5)
         self.declare_parameter('max_cost', 100)
+        self.declare_parameter('nucleus_radius_m', 0.20)  # raggio NUCLEO (corpo pedone), piccolo: solo il pedone e' letale
+        self.declare_parameter('cone_base_cost', 99)      # 99 -> costmap 251: quasi letale MA scavalcabile. 100 = letale/intrappola
+        self.declare_parameter('cone_tip_cost', 90)       # costo alla PUNTA: alto = reagisce in anticipo
+        self.declare_parameter('cone_lateral_falloff', 0.35)  # 0..1: quanto cala il costo dal centro ai bordi (per USCIRE)
         self.declare_parameter('mark_obstacle', True)
         self.declare_parameter('gate_ang_vel', 1.0)
-        # camera
-        self.declare_parameter('use_camera', False)
-        self.declare_parameter('seg_topic', '/semantic/segmentation')
-        self.declare_parameter('info_topic', '/camera/camera_info')
-        self.declare_parameter('camera_optical_frame', 'camera_rgb_optical_frame')
-        self.declare_parameter('dynamic_classes', [11, 12, 13, 14, 15, 16, 17, 18])
-        self.declare_parameter('cam_assoc_m', 0.8)
-        self.declare_parameter('cam_fov_deg', 40.0)
-        self.declare_parameter('cone_if_unknown', False)
 
         gp = self.get_parameter
         self.scan_topic = gp('scan_topic').value
@@ -115,33 +92,24 @@ class DynamicTracker(Node):
         self.track_timeout = float(gp('track_timeout_s').value)
         self.min_speed = float(gp('min_speed').value)
         self.horizon_s = float(gp('horizon_s').value)
+        self.cone_min_length = float(gp('cone_min_length').value)
         self.cone_halfwidth = float(gp('cone_halfwidth_m').value)
         self.cone_spread = float(gp('cone_spread').value)
         self.max_cost = int(gp('max_cost').value)
+        self.nucleus_radius = float(gp('nucleus_radius_m').value)
+        self.cone_base_cost = int(gp('cone_base_cost').value)
+        self.cone_tip_cost = int(gp('cone_tip_cost').value)
+        self.cone_lateral_falloff = float(gp('cone_lateral_falloff').value)
         self.mark_obstacle = bool(gp('mark_obstacle').value)
         self.gate_ang_vel = float(gp('gate_ang_vel').value)
-        self.use_camera = bool(gp('use_camera').value)
-        self.seg_topic = gp('seg_topic').value
-        self.info_topic = gp('info_topic').value
-        self.cam_frame = gp('camera_optical_frame').value
-        self.dyn_classes = list(gp('dynamic_classes').value)
-        self.cam_assoc = float(gp('cam_assoc_m').value)
-        self.cam_fov = np.deg2rad(float(gp('cam_fov_deg').value))
-        self.cone_if_unknown = bool(gp('cone_if_unknown').value)
 
         self.n = int(round(self.size_m / self.res))
-        self.dyn_lut = np.zeros(256, dtype=bool)
-        for c in self.dyn_classes:
-            self.dyn_lut[int(c)] = True
 
         self.last_scan = None
         self.tracks = []
         self.next_id = 0
         self.robot_ang = 0.0
         self.arrows = []
-        self.K = None
-        self.last_seg = None
-        self.bridge = CvBridge() if (_HAVE_BRIDGE and self.use_camera) else None
 
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
@@ -150,21 +118,10 @@ class DynamicTracker(Node):
                          history=HistoryPolicy.KEEP_LAST)
         self.create_subscription(LaserScan, self.scan_topic, self.scan_cb, qos)
         self.create_subscription(Odometry, self.odom_topic, self.odom_cb, qos)
-        if self.use_camera:
-            # camera_info e segmentazione hanno QoS DIVERSI:
-            #  - camera_info: RELIABLE (default)
-            #  - segmentazione: BEST_EFFORT (tipico per immagini/sensori)
-            # uso BEST_EFFORT per entrambi: un sub BEST_EFFORT accetta anche un
-            # publisher RELIABLE, quindi copre entrambi i casi.
-            qos_cam = QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT,
-                                 history=HistoryPolicy.KEEP_LAST)
-            self.create_subscription(CameraInfo, self.info_topic, self.info_cb, qos_cam)
-            self.create_subscription(Image, self.seg_topic, self.seg_cb, qos_cam)
 
-        # TRANSIENT_LOCAL: lo StaticLayer della costmap chiede durability
-        # transient_local; un publisher volatile e' incompatibile e ROS2 blocca
-        # il flusso (nessun messaggio -> niente iniezione). transient_local qui
-        # e' compatibile con QUALSIASI subscriber (volatile o transient_local).
+        # TRANSIENT_LOCAL: il layer della costmap chiede durability transient_local;
+        # un publisher volatile e' incompatibile e ROS2 blocca il flusso.
+        # transient_local qui e' compatibile con qualsiasi subscriber.
         qos_map = QoSProfile(depth=1,
                              reliability=ReliabilityPolicy.RELIABLE,
                              durability=DurabilityPolicy.TRANSIENT_LOCAL,
@@ -174,22 +131,14 @@ class DynamicTracker(Node):
         self.timer = self.create_timer(1.0 / self.rate_hz, self.update)
 
         self.get_logger().info(
-            f'dynamic_tracker avviato | use_camera={self.use_camera} | '
+            f'dynamic_esdf_layer avviato (solo LiDAR) | '
             f'griglia {self.n}x{self.n}@{self.res}m frame={self.world_frame}')
 
     def scan_cb(self, msg): self.last_scan = msg
     def odom_cb(self, msg): self.robot_ang = abs(float(msg.twist.twist.angular.z))
-    def info_cb(self, msg):
-        if self.K is None:
-            self.get_logger().info('[cam] camera_info RICEVUTA')
-        self.K = np.array(msg.k).reshape(3, 3)
-    def seg_cb(self, msg):
-        if self.last_seg is None:
-            self.get_logger().info(f'[cam] segmentazione RICEVUTA ({msg.width}x{msg.height}, enc={msg.encoding})')
-        self.last_seg = msg
 
     def lookup(self, frame, stamp=None):
-        # stamp=None -> ultima TF disponibile (per origine griglia, camera).
+        # stamp=None -> ultima TF disponibile (per origine griglia).
         # stamp=header.stamp -> TF all'ISTANTE dell'osservazione: indispensabile
         # per lo scan, altrimenti in rotazione i punti fermi atterrano ruotati
         # frame dopo frame e sembrano muoversi (velocita' spuria -> falso dinamico).
@@ -217,9 +166,6 @@ class DynamicTracker(Node):
         clusters = self.cluster_points(pts)
         dets = [c['centroid'] for c in clusters]
         self.track(dets, now_s)
-
-        if self.use_camera and self.K is not None and self.last_seg is not None:
-            self.validate_with_camera()
 
         cost = self.build_cost(ox, oy)
         self.publish_cost(cost, ox, oy)
@@ -316,72 +262,10 @@ class DynamicTracker(Node):
             if j in used:
                 continue
             self.tracks.append(dict(id=self.next_id, x=dx, y=dy, vx=0.0, vy=0.0,
-                                    n=1, t=now_s, label='unknown'))
+                                    n=1, t=now_s))
             self.next_id += 1
         self.tracks = [tr for tr in self.tracks
                        if now_s - tr['t'] <= self.track_timeout]
-
-    def validate_with_camera(self):
-        """Etichetta i track dynamic/static con i pixel di classe dinamica.
-        Persistente: fuori dal campo camera il track mantiene l'etichetta."""
-        T_cam = self.lookup(self.cam_frame)
-        if T_cam is None:
-            self.get_logger().warn('[cam] TF camera non disponibile',
-                                   throttle_duration_sec=3.0)
-            return
-        try:
-            seg = self.bridge.imgmsg_to_cv2(self.last_seg, desired_encoding='mono8')
-        except Exception as e:
-            self.get_logger().warn(f'[cam] errore lettura segmentazione: {e}',
-                                   throttle_duration_sec=3.0)
-            return
-        h, w = seg.shape
-        M = transform_to_matrix(T_cam)
-        origin = M[:3, 3]; R = M[:3, :3]
-        fx, fy = self.K[0, 0], self.K[1, 1]
-        cx, cy = self.K[0, 2], self.K[1, 2]
-
-        r0 = int(h * 0.4)
-        vs = np.arange(r0, h, 4); us = np.arange(0, w, 4)
-        uu, vv = np.meshgrid(us, vs); uu = uu.ravel(); vv = vv.ravel()
-        classes_seen = seg[vv, uu]
-        is_dyn = self.dyn_lut[classes_seen]
-        cam_pts = np.empty((0, 2))
-        if is_dyn.any():
-            uu = uu[is_dyn]; vv = vv[is_dyn]
-            dir_opt = np.stack([(uu - cx) / fx, (vv - cy) / fy, np.ones_like(uu, float)], axis=1)
-            dir_w = dir_opt @ R.T
-            dz = dir_w[:, 2]
-            val = dz < -1e-6
-            t = np.full(uu.shape, -1.0); t[val] = -origin[2] / dz[val]
-            ok = val & (t > 0)
-            gpts = origin[None, :] + t[:, None] * dir_w
-            cam_pts = gpts[ok][:, :2]
-
-        # DIAGNOSTICA: quali classi vede la camera, quanti pixel dinamici
-        uniq = np.unique(classes_seen)
-        n_dyn_px = int(is_dyn.sum())
-        self.get_logger().info(
-            f'[cam] seg {w}x{h} | classi viste={list(uniq)[:12]} | '
-            f'pixel_dinamici={n_dyn_px} | punti_terra={len(cam_pts)} | track={len(self.tracks)}',
-            throttle_duration_sec=1.0)
-
-        cam_x, cam_y = origin[0], origin[1]
-        cam_yaw = np.arctan2(R[1, 0], R[0, 0])
-        for tr in self.tracks:
-            dx = tr['x'] - cam_x; dy = tr['y'] - cam_y
-            dist = np.hypot(dx, dy)
-            bearing = np.arctan2(dy, dx) - cam_yaw
-            bearing = (bearing + np.pi) % (2 * np.pi) - np.pi
-            in_fov = (dist < self.max_range) and (abs(bearing) < self.cam_fov)
-            if not in_fov:
-                continue    # fuori campo camera: mantiene l'etichetta (persistenza)
-            if len(cam_pts) > 0:
-                d = np.hypot(cam_pts[:, 0] - tr['x'], cam_pts[:, 1] - tr['y'])
-                if np.min(d) <= self.cam_assoc:
-                    tr['label'] = 'dynamic'
-                    continue
-            tr['label'] = 'static'
 
     def build_cost(self, ox, oy):
         cost = np.zeros((self.n, self.n), dtype=np.uint8)
@@ -390,21 +274,14 @@ class DynamicTracker(Node):
         for tr in self.tracks:
             if tr['n'] < self.min_obs:
                 continue
-            if self.use_camera:
-                is_dyn = (tr['label'] == 'dynamic') or \
-                         (tr['label'] == 'unknown' and self.cone_if_unknown)
-            else:
-                is_dyn = True
-            if not is_dyn:
-                continue
             speed = np.hypot(tr['vx'], tr['vy'])
             # DISCRIMINAZIONE PER MOVIMENTO: un track fermo (statico) non produce
             # nulla, ne' nucleo ne' cono. Il gate velocita' viene PRIMA del timbro
-            # del nucleo -> muri e aiuole (velocita' ~ 0) non vengono piu' marcati.
+            # del nucleo -> muri e aiuole (velocita' ~ 0) non vengono marcati.
             if speed < self.min_speed:
                 continue
             if self.mark_obstacle:
-                self._stamp(cost, tr['x'], tr['y'], ox, oy, self.cone_halfwidth, self.max_cost)
+                self._stamp(cost, tr['x'], tr['y'], ox, oy, self.nucleus_radius, self.max_cost)
             # in rotazione rapida la DIREZIONE della velocita' e' inaffidabile:
             # marca il nucleo (posizione attuale, valida) ma non proiettare il cono.
             if spinning:
@@ -425,7 +302,9 @@ class DynamicTracker(Node):
 
     def _paint_cone(self, cost, tr, ox, oy, speed):
         ux, uy = tr['vx'] / speed, tr['vy'] / speed
-        length = min(speed * self.horizon_s, self.size_m)
+        # lunghezza minima: anche un dinamico lento lascia un cono usabile,
+        # abbastanza lungo da far reagire il controller PRIMA del nucleo.
+        length = min(max(self.cone_min_length, speed * self.horizon_s), self.size_m)
         n_steps = max(1, int(length / self.res))
         px = (tr['x'] - ox) / self.res
         py = (tr['y'] - oy) / self.res
@@ -436,11 +315,18 @@ class DynamicTracker(Node):
             cx = px + ux * s
             cy = py + uy * s
             half = half0 * (1.0 + self.cone_spread * frac)
-            val = int(self.max_cost * (1.0 - 0.5 * frac))
+            # costo longitudinale: base (sul pedone) -> punta. Tenuto <100 apposta:
+            # nella costmap resta SOTTO il letale, quindi il controller lo evita
+            # fortissimo ma se ci finisce dentro trova ancora traiettorie valide per uscire.
+            base_val = self.cone_base_cost - (self.cone_base_cost - self.cone_tip_cost) * frac
             wv = -half
             while wv <= half + 1e-6:
                 gx = int(round(cx + nx * wv))
                 gy = int(round(cy + ny * wv))
+                # gradiente LATERALE: massimo al centro, cala verso i bordi -> chi e'
+                # dentro il cono ha un verso "in discesa" per uscire di lato al piu' presto.
+                lat = abs(wv) / half if half > 1e-6 else 0.0
+                val = int(base_val * (1.0 - self.cone_lateral_falloff * lat))
                 if 0 <= gx < self.n and 0 <= gy < self.n and cost[gy, gx] < val:
                     cost[gy, gx] = val
                 wv += 1.0
