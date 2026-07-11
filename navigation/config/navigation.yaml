@@ -13,15 +13,6 @@ bt_navigator:
       plugin: "nav2_bt_navigator::NavigateToPoseNavigator"
     navigate_through_poses:
       plugin: "nav2_bt_navigator::NavigateThroughPosesNavigator"
-    # 'default_nav_through_poses_bt_xml' and 'default_nav_to_pose_bt_xml' are use defaults:
-    # nav2_bt_navigator/navigate_to_pose_w_replanning_and_recovery.xml
-    # nav2_bt_navigator/navigate_through_poses_w_replanning_and_recovery.xml
-    # They can be set here or via a RewrittenYaml remap from a parent launch file to Nav2.
-
-    # plugin_lib_names is used to add custom BT plugins to the executor (vector of strings).
-    # Built-in plugins are added automatically
-    # plugin_lib_names: []
-
     error_code_names:
       - compute_path_error_code
       - follow_path_error_code
@@ -40,12 +31,10 @@ controller_server:
     controller_plugins: ["FollowPath"]
     use_realtime_priority: false
 
-    # Progress checker parameters
     progress_checker:
       plugin: "nav2_controller::SimpleProgressChecker"
       required_movement_radius: 0.2
       movement_time_allowance: 30.0
-    # Goal checker parameters
     general_goal_checker:
       stateful: True
       plugin: "nav2_controller::SimpleGoalChecker"
@@ -53,99 +42,56 @@ controller_server:
       yaw_goal_tolerance: 3.14
 
     # ============================================================
-    #  FollowPath = RotationShimController che WRAPPA il DWB.
+    #  FollowPath = RotationShim che ora WRAPPA MPPI (non piu' DWB).
     #
-    #  Come funziona: quando la direzione richiesta dal path devia dall'heading
-    #  del robot piu' di 'angular_dist_threshold', il RotationShim prende il
-    #  controllo e fa RUOTARE il robot SUL POSTO (vx=0 garantito) finche' non e'
-    #  allineato al path; poi passa il controllo al primary_controller (DWB), che
-    #  segue il percorso normalmente. Risolve il caso "spazio stretto: gira sul
-    #  posto invece di avanzare sull'erba/ostacolo".
+    #  - Il RotationShim CONSERVA il gira-sul-posto negli spazi stretti:
+    #    quando il path devia > angular_dist_threshold ruota sul posto,
+    #    poi molla il controllo al primary_controller.
+    #  - Il primary_controller ora e' MPPI: guida normale + EVITAMENTO.
+    #    MPPI pesa il costo della costmap (il cono) lungo TUTTA la
+    #    traiettoria e campiona deviazioni laterali -> cura attorno al cono
+    #    invece di restare incollato al path come il DWB.
     #
-    #  IMPORTANTE (annidamento): il plugin FollowPath e' il RotationShim; i suoi
-    #  parametri E TUTTI i parametri del DWB stanno SOTTO lo stesso namespace
-    #  FollowPath. Il DWB e' indicato da 'primary_controller'.
+    #  PER TORNARE AL DWB: rimetti primary_controller a
+    #  "dwb_core::DWBLocalPlanner" e riattiva il blocco DWB in fondo
+    #  (togli i # e commenta i parametri MPPI).
     # ============================================================
     FollowPath:
       plugin: "nav2_rotation_shim_controller::RotationShimController"
-      primary_controller: "dwb_core::DWBLocalPlanner"
+      primary_controller: "nav2_mppi_controller::MPPIController"
 
-      # ----- parametri del RotationShim -----
-      angular_dist_threshold: 0.785        # [rad] ~45°: se il path devia piu' di cosi', ruota sul posto prima di seguire.
-                                           # Abbassa (0.5≈30°) per ruotare sul posto piu' spesso; alza (1.0≈57°) per meno.
-      forward_sampling_distance: 0.5       # [m] quanto avanti sul path guarda per calcolare la direzione da raggiungere
-      angular_disengage_threshold: 0.3925  # [rad] ~22°: sotto questo errore molla il controllo al DWB (isteresi anti-flip)
-      rotate_to_heading_angular_vel: 1.8   # [rad/s] velocita' di rotazione sul posto
-      max_angular_accel: 3.2               # [rad/s^2] accel. angolare max (= acc_lim_theta)
-      rotate_to_heading_once: false        # ruota ad ogni deviazione grande, non solo all'inizio
-      simulate_ahead_time: 1.0             # [s] simula avanti per il check collisione durante la rotazione (sicurezza)
-      rotate_to_goal_heading: false        # se true, ruota anche verso l'heading del goal alla fine (qui yaw_goal_tolerance e' 3.14 = libero)
-      closed_loop: true                    # usa l'odometria per chiudere l'anello sulla rotazione
+      # ----- RotationShim (INVARIATO rispetto a prima) -----
+      angular_dist_threshold: 0.785        # ~45°: sopra questa deviazione ruota sul posto
+      forward_sampling_distance: 0.5
+      angular_disengage_threshold: 0.3925  # ~22°: isteresi, sotto molla al primary
+      rotate_to_heading_angular_vel: 1.8
+      max_angular_accel: 3.2
+      rotate_to_heading_once: false
+      simulate_ahead_time: 1.0
+      rotate_to_goal_heading: false
+      closed_loop: true
 
-      # ============================================================
-      #  Sotto: il TUO DWB (primary_controller) con TUTTI i parametri.
-      #  Restano identici a prima, cosi' quando il shim molla il controllo,
-      #  DWB si comporta come lo hai gia' tarato.
-      # ============================================================
-      debug_trajectory_details: True
-      min_vel_x: 0.0
-      min_vel_y: 0.0
-      max_vel_x: 0.30
-      max_vel_y: 0.0
-      max_vel_theta: 2.84
-      min_speed_xy: 0.0
-      max_speed_xy: 0.30
-      min_speed_theta: 0.0
-      acc_lim_x: 2.5
-      acc_lim_y: 0.0
-      acc_lim_theta: 3.2
-      decel_lim_x: -2.5
-      decel_lim_y: 0.0
-      decel_lim_theta: -3.2
-      vx_samples: 20
-      vy_samples: 5
-      vtheta_samples: 20
-      sim_time: 3.0
-      linear_granularity: 0.05
-      angular_granularity: 0.025
-      transform_tolerance: 0.5
-      xy_goal_tolerance: 0.15
-      trans_stopped_velocity: 0.25
-      short_circuit_trajectory_evaluation: True
-      stateful: True
-      critics: ["RotateToGoal", "Oscillation", "BaseObstacle", "GoalAlign", "PathAlign", "PathDist", "GoalDist"]
-      BaseObstacle.scale: 12.0               # penalizza avanzare su celle costose (erba/ostacoli)
-      PathAlign.scale: 32.0
-      PathAlign.forward_point_distance: 0.1
-      GoalAlign.scale: 24.0
-      GoalAlign.forward_point_distance: 0.1
-      PathDist.scale: 32.0
-      GoalDist.scale: 24.0
-      RotateToGoal.scale: 32.0
-      RotateToGoal.slowing_factor: 7.0
-      RotateToGoal.lookahead_time: -1.0
-      publish_cost_grid_pc: True
-    # MPPI parameters, default controller is DWB above
-    FollowPathMPPI:
-      plugin: "nav2_mppi_controller::MPPIController"
-      time_steps: 56
-      model_dt: 0.05
+      # ----- MPPI (primary_controller) -----
+      time_steps: 90              # orizzonte = time_steps * model_dt = 4.5 s
+      model_dt: 0.05              #   -> ~1.2 m di lookahead a 0.30 m/s (era 56 = 0.84 m)
       batch_size: 2000
       ax_max: 3.0
       ax_min: -3.0
       ay_max: 3.0
       az_max: 3.5
       vx_std: 0.2
-      vy_std: 0.2
+      vy_std: 0.0                 # diff drive: niente componente laterale
       wz_std: 0.4
-      vx_max: 0.5
-      vx_min: -0.35
-      vy_max: 0.5
+      vx_max: 0.30                # allineato al max tarato del robot (era 0.5)
+      vx_min: 0.0                 # niente retro (come il tuo DWB); metti -0.35 per consentirlo
+      vy_max: 0.0                 # diff drive
       wz_max: 1.9
-      iteration_count: 1
+      iteration_count: 2          # era 1: rifinisce la scelta (aiuta a impegnarsi su un lato)
       prune_distance: 1.7
       transform_tolerance: 0.1
-      temperature: 0.3
+      temperature: 0.1            # era 0.3: PIU' BASSO = si concentra sulla traiettoria migliore
+                                  # e SCEGLIE un lato, invece di mediare sx+dx -> dritto.
+                                  # Se diventa nervoso/oscilla, risali verso 0.2
       gamma: 0.015
       motion_model: "DiffDrive"
       visualize: true
@@ -154,7 +100,7 @@ controller_server:
         trajectory_step: 5
         time_step: 3
       AckermannConstraints:
-        min_turning_r: 0.2
+        min_turning_r: 0.2         # inerte con DiffDrive, tenuto per completezza
       critics: [
         "ConstraintCritic", "CostCritic", "GoalCritic",
         "GoalAngleCritic", "PathAlignCritic", "PathFollowCritic",
@@ -178,19 +124,22 @@ controller_server:
         cost_power: 1
         cost_weight: 5.0
         threshold_to_consider: 0.5
+      # >>>>> CostCritic = LA MANOPOLA DELL'EVITAMENTO <<<<<
       CostCritic:
         enabled: true
         cost_power: 1
-        cost_weight: 3.81
+        cost_weight: 25.0          # era 8.0: alzato MOLTO per deviare in anticipo dal cono.
+                                   # se vaga fuori dal path SENZA pedoni, scendi verso 15-20
         critical_cost: 300.0
-        consider_footprint: true
+        consider_footprint: false  # robot circolare (robot_radius): check su raggio/centro, non poligono
         collision_cost: 1000000.0
         near_goal_distance: 1.0
         trajectory_point_step: 2
       PathAlignCritic:
         enabled: true
         cost_power: 1
-        cost_weight: 14.0
+        cost_weight: 6.0           # era 14.0: abbassato per lasciare che si stacchi dal path
+                                   # e aggiri il cono. Se vaga senza motivo, rialza verso 10-12
         max_path_occupancy_ratio: 0.05
         trajectory_point_step: 4
         threshold_to_consider: 0.5
@@ -210,10 +159,52 @@ controller_server:
         threshold_to_consider: 0.5
         max_angle_to_furthest: 1.0
         mode: 0
-      # TwirlingCritic:
-      #   enabled: true
-      #   twirling_cost_power: 1
-      #   twirling_cost_weight: 10.0
+
+    # ============================================================
+    #  FALLBACK: DWB (INATTIVO, conservato). Il tuo DWB tarato.
+    #  Per riattivarlo: sopra rimetti
+    #    primary_controller: "dwb_core::DWBLocalPlanner"
+    #  commenta i parametri MPPI e togli i # qui sotto (spostando questi
+    #  parametri sotto FollowPath).
+    # ------------------------------------------------------------
+    #   debug_trajectory_details: True
+    #   min_vel_x: 0.0
+    #   min_vel_y: 0.0
+    #   max_vel_x: 0.30
+    #   max_vel_y: 0.0
+    #   max_vel_theta: 2.84
+    #   min_speed_xy: 0.0
+    #   max_speed_xy: 0.30
+    #   min_speed_theta: 0.0
+    #   acc_lim_x: 2.5
+    #   acc_lim_y: 0.0
+    #   acc_lim_theta: 3.2
+    #   decel_lim_x: -2.5
+    #   decel_lim_y: 0.0
+    #   decel_lim_theta: -3.2
+    #   vx_samples: 20
+    #   vy_samples: 5
+    #   vtheta_samples: 20
+    #   sim_time: 3.0
+    #   linear_granularity: 0.05
+    #   angular_granularity: 0.025
+    #   transform_tolerance: 0.5
+    #   xy_goal_tolerance: 0.15
+    #   trans_stopped_velocity: 0.25
+    #   short_circuit_trajectory_evaluation: True
+    #   stateful: True
+    #   critics: ["RotateToGoal", "Oscillation", "BaseObstacle", "GoalAlign", "PathAlign", "PathDist", "GoalDist"]
+    #   BaseObstacle.scale: 12.0
+    #   PathAlign.scale: 32.0
+    #   PathAlign.forward_point_distance: 0.1
+    #   GoalAlign.scale: 24.0
+    #   GoalAlign.forward_point_distance: 0.1
+    #   PathDist.scale: 32.0
+    #   GoalDist.scale: 24.0
+    #   RotateToGoal.scale: 32.0
+    #   RotateToGoal.slowing_factor: 7.0
+    #   RotateToGoal.lookahead_time: -1.0
+    #   publish_cost_grid_pc: True
 
 local_costmap:
   local_costmap:
@@ -228,8 +219,17 @@ local_costmap:
       height: 6
       resolution: 0.05
       robot_radius: 0.22
-      plugins: ["obstacle_layer", "dynamic_layer", "inflation_layer"]
-       # --- OBSTACLE LAYER = ostacoli fisici dal LiDAR ---
+      plugins: ["semantic_layer", "obstacle_layer", "dynamic_layer", "inflation_layer"]
+      # --- SEMANTIC LAYER = la TUA mappa semantica SSRL (marciapiede/erba/strada + confinement) ---
+      #  Plugin C++ dedicato: trasforma map->odom via TF e riempie la finestra ROLLING
+      #  (lo StaticLayer nativo riceveva la mappa ma non la applicava sul rolling).
+      #  Porta l'ambiente DENTRO la local: MPPI sa dove costa poco (marciapiede 0),
+      #  dove di piu' (erba 80 < strada 90) e schiva verso il lato piu' economico.
+      semantic_layer:
+        plugin: "dynamic_costmap_layer/SemanticLayer"
+        enabled: true
+        map_topic: /ssrl_costmap
+      # --- OBSTACLE LAYER = ostacoli fisici dal LiDAR ---
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer"
         enabled: True
@@ -240,10 +240,11 @@ local_costmap:
           clearing: True
           marking: True
           data_type: "LaserScan"
-          raytrace_max_range: 8.0     # Era 3.0
+          raytrace_max_range: 8.0
           raytrace_min_range: 0.0
-          obstacle_max_range: 6.0     # Era 2.5
+          obstacle_max_range: 6.0
           obstacle_min_range: 0.0
+      # --- DYNAMIC LAYER = cono anticipatorio dei dinamici (plugin C++) ---
       dynamic_layer:
         plugin: "dynamic_costmap_layer/DynamicLayer"
         enabled: true
@@ -254,7 +255,7 @@ local_costmap:
         cost_scaling_factor: 3.0
         inflation_radius: 0.4
       always_send_full_costmap: True
-     
+
 global_costmap:
   global_costmap:
     ros__parameters:
@@ -268,15 +269,15 @@ global_costmap:
       robot_radius: 0.22
       resolution: 0.05
       track_unknown_space: true
-      trinary_costmap: false 
-      plugins: ["static_layer", "inflation_layer"]    # <-- niente obstacle_layer
+      trinary_costmap: false
+      plugins: ["static_layer", "inflation_layer"]
 
       # --- STATIC LAYER = il tuo costmap semantico SSRL ---
       static_layer:
         plugin: "nav2_costmap_2d::StaticLayer"
-        map_topic: /ssrl_costmap            # <-- legge il TUO costmap, non /map (SLAM)
-        map_subscribe_transient_local: False # il costmap SSRL si aggiorna in continuo (QoS volatile)
-        trinary_costmap: false              # <-- IMPORTANTE: preserva il gradiente 1..99 (confinamento), non lo riduce a solo libero/occupato
+        map_topic: /ssrl_costmap
+        map_subscribe_transient_local: False
+        trinary_costmap: false
         subscribe_to_updates: false
 
       # --- OBSTACLE LAYER = ostacoli fisici dal LiDAR ---
@@ -290,9 +291,9 @@ global_costmap:
           clearing: True
           marking: True
           data_type: "LaserScan"
-          raytrace_max_range: 8.0     # Era 3.0
+          raytrace_max_range: 8.0
           raytrace_min_range: 0.0
-          obstacle_max_range: 6.0     # Era 2.5
+          obstacle_max_range: 6.0
           obstacle_min_range: 0.0
 
       inflation_layer:
@@ -301,35 +302,31 @@ global_costmap:
         inflation_radius: 0.4
       always_send_full_costmap: True
 
-
-planner_server:
 planner_server:
   ros__parameters:
-    use_sim_time: true                 # IMPORTANTE: in sim (lezione gia' imparata)
+    use_sim_time: true
     expected_planner_frequency: 1.0
     planner_plugins: ["GridBased"]
- 
+
     GridBased:
       plugin: "nav2_smac_planner/SmacPlanner2D"
-      tolerance: 0.125                 # m: quanto vicino al goal basta arrivare se irraggiungibile esatto
-      downsample_costmap: false        # non ridurre la risoluzione della costmap
+      tolerance: 0.125
+      downsample_costmap: false
       downsampling_factor: 1
-      allow_unknown: true              # puo' pianificare in celle ignote (utile ai bordi mappa)
-      max_iterations: 1000000          # tetto iterazioni (alto = non si arrende su mappe grandi)
-      max_on_approach_iterations: 1000 # iterazioni extra vicino al goal
-      max_planning_time: 2.0           # s: tempo massimo per pianificare
- 
-      cost_travel_multiplier: 30.0    # Preferire i path a basso costo piuttosto quello più corto
- 
-      use_final_approach_orientation: false
- 
-      # ---- smoother del percorso (rende la traiettoria fluida) ----
+      allow_unknown: true
+      max_iterations: 1000000
+      max_on_approach_iterations: 1000
+      max_planning_time: 2.0
+      cost_travel_multiplier: 30.0
+      # true = l'orientamento finale del percorso segue la DIREZIONE DI ARRIVO,
+      # non l'heading comandato nel goal -> il robot arriva gia' rivolto giusto e
+      # non fa il 180 sul posto per allinearsi a un heading all'indietro.
+      use_final_approach_orientation: true
       smoother:
         max_iterations: 1000
         w_smooth: 0.3
         w_data: 0.2
         tolerance: 1.0e-10
-
 
 smoother_server:
   ros__parameters:
@@ -350,7 +347,6 @@ behavior_server:
     global_footprint_topic: global_costmap/published_footprint
     cycle_frequency: 10.0
     behavior_plugins: ["spin", "backup", "drive_on_heading", "assisted_teleop", "wait"]
-
     spin:
       plugin: "nav2_behaviors/Spin"
     backup:
@@ -361,7 +357,6 @@ behavior_server:
       plugin: "nav2_behaviors/Wait"
     assisted_teleop:
       plugin: "nav2_behaviors/AssistedTeleop"
-
     local_frame: odom
     global_frame: map
     robot_base_frame: base_link
@@ -409,8 +404,6 @@ collision_monitor:
     source_timeout: 1.0
     base_shift_correction: True
     stop_pub_timeout: 2.0
-    # Polygons represent zone around the robot for "stop", "slowdown" and "limit" action types,
-    # and robot footprint for "approach" action type.
     polygons: ["FootprintApproach"]
     FootprintApproach:
       type: "polygon"
@@ -442,17 +435,14 @@ docking_server:
     fixed_frame: "odom"
     dock_backwards: false
     dock_prestaging_tolerance: 0.5
-
-    # Types of docks
     dock_plugins: ['simple_charging_dock']
     simple_charging_dock:
       plugin: 'opennav_docking::SimpleChargingDock'
       docking_threshold: 0.05
       staging_x_offset: -0.7
       use_external_detection_pose: true
-      use_battery_status: false # true
-      use_stall_detection: false # true
-
+      use_battery_status: false
+      use_stall_detection: false
       external_detection_timeout: 1.0
       external_detection_translation_x: -0.18
       external_detection_translation_y: 0.0
@@ -460,15 +450,6 @@ docking_server:
       external_detection_rotation_pitch: -1.57
       external_detection_rotation_yaw: 0.0
       filter_coef: 0.1
-
-    # Dock instances
-    # The following example illustrates configuring dock instances.
-    # docks: ['home_dock']  # Input your docks here
-    # home_dock:
-    #   type: 'simple_charging_dock'
-    #   frame: map
-    #   pose: [0.0, 0.0, 0.0]
-
     controller:
       k_phi: 3.0
       k_delta: 2.0
