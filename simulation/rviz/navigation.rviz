@@ -509,7 +509,7 @@ Visualization Manager:
       Class: rviz_default_plugins/Map
       Color Scheme: map
       Draw Behind: false
-      Enabled: true
+      Enabled: false
       Name: Dynamic cost
       Topic:
         Depth: 5
@@ -525,9 +525,9 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /dynamic_cost_updates
       Use Timestamp: false
-      Value: true
+      Value: false
     - Class: rviz_default_plugins/MarkerArray
-      Enabled: true
+      Enabled: false
       Name: MarkerArray
       Namespaces:
         {}
@@ -537,7 +537,7 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /dynamic_tracks
-      Value: true
+      Value: false
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
@@ -580,18 +580,18 @@ Visualization Manager:
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: -3.9576077461242676
-        Y: -2.3036561012268066
-        Z: -5.564547061920166
+        X: 2.2911388874053955
+        Y: -1.9336220026016235
+        Z: -4.0265302658081055
       Focal Shape Fixed Size: false
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 1.3297966718673706
+      Pitch: 1.1347968578338623
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz)
-      Yaw: 2.9153990745544434
+      Yaw: 3.115400552749634
     Saved: ~
 Window Geometry:
   Displays:
