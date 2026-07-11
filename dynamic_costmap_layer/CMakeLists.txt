@@ -12,16 +12,23 @@ find_package(std_msgs REQUIRED)
 find_package(nav2_costmap_2d REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(pluginlib REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(tf2 REQUIRED)
+find_package(tf2_ros REQUIRED)
 
 set(dependencies
   rclcpp
   nav2_costmap_2d
   nav_msgs
+  geometry_msgs
   pluginlib
+  tf2
+  tf2_ros
 )
 
 add_library(${PROJECT_NAME} SHARED
   src/dynamic_layer.cpp
+  src/semantic_layer.cpp
 )
 
 target_include_directories(${PROJECT_NAME} PUBLIC
