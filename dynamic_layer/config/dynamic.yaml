@@ -40,3 +40,16 @@ dynamic_esdf_layer:
     cone_lateral_falloff: 0.35 # quanto cala il costo dal centro ai bordi (via di fuga laterale)
     mark_obstacle: true        # marca il nucleo dell'oggetto dinamico
     gate_ang_vel: 1.0          # [rad/s] sopra: sospendi coni (rotazione rapida)
+
+    # ----- FILTRO DI KALMAN (modello a velocita' costante) -----
+    # Sostituisce la doppia EMA (pos_ema/vel_ema, ora DEPRECATE ma lasciate per compatibilita').
+    # Stima velocita' + covarianza: direzione del cono STABILE, coasting durante le occlusioni.
+    kf_sigma_a: 0.6      # [m/s^2] quanto il pedone puo' accelerare/svoltare.
+                         #   ALTO  = filtro reattivo ma nervoso (direzione balla)
+                         #   BASSO = liscio ma in ritardo sulle svolte. 0.6 = pedone normale.
+    kf_sigma_z: 0.12     # [m] quanto BALLA il centroide del cluster LiDAR (gambe, forma).
+                         #   Se il cono e' ancora nervoso: ALZA (0.15-0.20) = fidati meno della singola misura, il filtro liscia di piu'.
+    kf_v_init: 1.0       # [m/s] incertezza iniziale sulla velocita' di una traccia nuova
+    kf_min_snr: 1.0      # velocita' >= N * sigma_v per fidarsi della DIREZIONE del cono.
+                         #   Sotto questa soglia: marca il nucleo ma NIENTE cono (la direzione sarebbe rumore, non informazione). 0 = disattiva.
+

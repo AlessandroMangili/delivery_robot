@@ -55,8 +55,13 @@ class DynamicTracker(Node):
         self.declare_parameter('cluster_min_pts', 2)
         self.declare_parameter('cluster_max_size_m', 1.5)
         self.declare_parameter('gate_dist_m', 0.7)
-        self.declare_parameter('vel_ema', 0.4)
-        self.declare_parameter('pos_ema', 0.5)
+        self.declare_parameter('vel_ema', 0.4)        # DEPRECATO (sostituito dal Kalman)
+        self.declare_parameter('pos_ema', 0.5)        # DEPRECATO (sostituito dal Kalman)
+        # ----- Filtro di Kalman (modello a velocita' costante) -----
+        self.declare_parameter('kf_sigma_a', 0.6)     # [m/s^2] quanto il pedone puo' accelerare/svoltare
+        self.declare_parameter('kf_sigma_z', 0.12)    # [m] quanto BALLA il centroide del cluster LiDAR
+        self.declare_parameter('kf_v_init', 1.0)      # [m/s] incertezza iniziale sulla velocita'
+        self.declare_parameter('kf_min_snr', 1.0)     # velocita' >= N * sigma_v per fidarsi della DIREZIONE
         self.declare_parameter('min_obs', 3)
         self.declare_parameter('track_timeout_s', 0.6)
         self.declare_parameter('min_speed', 0.30)
@@ -86,8 +91,12 @@ class DynamicTracker(Node):
         self.cluster_min_pts = int(gp('cluster_min_pts').value)
         self.cluster_max_size = float(gp('cluster_max_size_m').value)
         self.gate_dist = float(gp('gate_dist_m').value)
-        self.vel_ema = float(gp('vel_ema').value)
-        self.pos_ema = float(gp('pos_ema').value)
+        self.vel_ema = float(gp('vel_ema').value)     # DEPRECATO (non piu' usato)
+        self.pos_ema = float(gp('pos_ema').value)     # DEPRECATO (non piu' usato)
+        self.kf_sigma_a = float(gp('kf_sigma_a').value)
+        self.kf_sigma_z = float(gp('kf_sigma_z').value)
+        self.kf_v_init = float(gp('kf_v_init').value)
+        self.kf_min_snr = float(gp('kf_min_snr').value)
         self.min_obs = int(gp('min_obs').value)
         self.track_timeout = float(gp('track_timeout_s').value)
         self.min_speed = float(gp('min_speed').value)
@@ -236,36 +245,98 @@ class DynamicTracker(Node):
                              'size': float(size)})
         return clusters
 
+    # ================== FILTRO DI KALMAN (modello a VELOCITA' COSTANTE) ==================
+    # PERCHE': prima la velocita' era la derivata frame-a-frame del centroide del cluster
+    # LiDAR, ripulita con due EMA in cascata. Ma il centroide di un pedone BALLA (le gambe si
+    # muovono, il cluster cambia forma, i punti visibili cambiano): derivare quel segnale
+    # AMPLIFICA il rumore, e le due EMA lo attenuavano aggiungendo ritardo. Risultato: la
+    # DIREZIONE del cono oscillava (e con un cono di 4 m, pochi gradi alla base = decine di cm
+    # alla punta).
+    # Il Kalman e' il modo principiato di fare la stessa cosa: sa che un pedone si muove a
+    # velocita' quasi costante (modello CV), quindi distingue il MOTO VERO dal RUMORE di
+    # misura invece di derivare tutto ciecamente. In piu' regala due cose:
+    #   1) COASTING: predice anche quando la detection manca (occlusione breve) -> il track
+    #      non muore e non riparte da velocita' zero, il cono non si spegne;
+    #   2) COVARIANZA: sappiamo QUANTO ci fidiamo della velocita' -> serve ora per non
+    #      disegnare coni su stime insignificanti, e servira' per il critic spazio-temporale
+    #      (l'incertezza che cresce con l'orizzonte giustifica l'allargamento del cono).
+    #
+    # Stato: s = [x, y, vx, vy]   Misura: z = [x, y] (solo posizione, dal centroide)
+    def _kf_predict(self, tr, dt):
+        F = np.array([[1, 0, dt, 0],
+                      [0, 1, 0, dt],
+                      [0, 0, 1,  0],
+                      [0, 0, 0,  1]], dtype=float)
+        # Q = rumore di processo: il pedone puo' accelerare/svoltare (accelerazione casuale).
+        # sigma_a alto = filtro piu' reattivo ma piu' nervoso; basso = piu' liscio ma in ritardo.
+        q = self.kf_sigma_a ** 2
+        dt2 = dt * dt; dt3 = dt2 * dt; dt4 = dt3 * dt
+        Q = q * np.array([[dt4 / 4, 0, dt3 / 2, 0],
+                          [0, dt4 / 4, 0, dt3 / 2],
+                          [dt3 / 2, 0, dt2, 0],
+                          [0, dt3 / 2, 0, dt2]], dtype=float)
+        tr['s'] = F @ tr['s']
+        tr['P'] = F @ tr['P'] @ F.T + Q
+
+    def _kf_update(self, tr, z):
+        H = np.array([[1, 0, 0, 0],
+                      [0, 1, 0, 0]], dtype=float)
+        R = (self.kf_sigma_z ** 2) * np.eye(2)   # quanto BALLA il centroide del cluster
+        y = z - H @ tr['s']                      # innovazione
+        S = H @ tr['P'] @ H.T + R
+        K = tr['P'] @ H.T @ np.linalg.inv(S)     # guadagno di Kalman
+        tr['s'] = tr['s'] + K @ y
+        tr['P'] = (np.eye(4) - K @ H) @ tr['P']
+
     def track(self, dets, now_s):
+        # 1) PREDIZIONE: porta ogni traccia all'istante corrente (anche senza detection).
+        for tr in self.tracks:
+            dt = max(1e-3, min(now_s - tr['t'], 1.0))
+            self._kf_predict(tr, dt)
+            tr['t'] = now_s
+
+        # 2) ASSOCIAZIONE: il gate usa la posizione PREDETTA, non l'ultima vista.
+        #    Per un oggetto in movimento e' molto piu' corretto: cerchiamo la detection
+        #    dove il pedone DOVREBBE essere ora, non dove era prima.
         used = set()
         for tr in self.tracks:
             best = None; bd = self.gate_dist
             for j, (dx, dy) in enumerate(dets):
                 if j in used:
                     continue
-                d = np.hypot(dx - tr['x'], dy - tr['y'])
+                d = np.hypot(dx - tr['s'][0], dy - tr['s'][1])
                 if d < bd:
                     bd = d; best = j
             if best is not None:
-                dx, dy = dets[best]
-                dt = max(1e-2, now_s - tr['t'])
-                xs = self.pos_ema * dx + (1 - self.pos_ema) * tr['x']
-                ys = self.pos_ema * dy + (1 - self.pos_ema) * tr['y']
-                vx_i = (xs - tr['x']) / dt
-                vy_i = (ys - tr['y']) / dt
-                tr['vx'] = self.vel_ema * vx_i + (1 - self.vel_ema) * tr['vx']
-                tr['vy'] = self.vel_ema * vy_i + (1 - self.vel_ema) * tr['vy']
-                tr['x'] = xs; tr['y'] = ys; tr['t'] = now_s
+                self._kf_update(tr, np.array(dets[best], dtype=float))
+                tr['t_seen'] = now_s
                 tr['n'] = min(tr['n'] + 1, 999)
                 used.add(best)
+            # se non associata: nessun update -> la traccia CONTINUA in coasting sulla
+            # sola predizione, e P cresce (il filtro sa di essere sempre meno sicuro).
+
+        # 3) NUOVE TRACCE: velocita' ignota -> P grande sulla velocita' (kf_v_init).
         for j, (dx, dy) in enumerate(dets):
             if j in used:
                 continue
-            self.tracks.append(dict(id=self.next_id, x=dx, y=dy, vx=0.0, vy=0.0,
-                                    n=1, t=now_s))
+            s = np.array([dx, dy, 0.0, 0.0], dtype=float)
+            P = np.diag([self.kf_sigma_z ** 2, self.kf_sigma_z ** 2,
+                         self.kf_v_init ** 2, self.kf_v_init ** 2]).astype(float)
+            self.tracks.append(dict(id=self.next_id, s=s, P=P,
+                                    n=1, t=now_s, t_seen=now_s))
             self.next_id += 1
+
+        # 4) SCADENZA: sul tempo dell'ultima MISURA (non dell'ultima predizione),
+        #    cosi' il coasting dura al massimo track_timeout.
         self.tracks = [tr for tr in self.tracks
-                       if now_s - tr['t'] <= self.track_timeout]
+                       if now_s - tr['t_seen'] <= self.track_timeout]
+
+        # 5) Espone lo stato con le stesse chiavi di prima (il resto del nodo non cambia)
+        #    + 'sv' = deviazione standard della velocita' stimata (dalla covarianza).
+        for tr in self.tracks:
+            tr['x'] = float(tr['s'][0]); tr['y'] = float(tr['s'][1])
+            tr['vx'] = float(tr['s'][2]); tr['vy'] = float(tr['s'][3])
+            tr['sv'] = float(np.sqrt(max(tr['P'][2, 2] + tr['P'][3, 3], 1e-9)))
 
     def build_cost(self, ox, oy):
         cost = np.zeros((self.n, self.n), dtype=np.uint8)
@@ -285,6 +356,13 @@ class DynamicTracker(Node):
             # in rotazione rapida la DIREZIONE della velocita' e' inaffidabile:
             # marca il nucleo (posizione attuale, valida) ma non proiettare il cono.
             if spinning:
+                continue
+            # GATE DI SIGNIFICATIVITA' (dalla covarianza del Kalman): se la velocita' non
+            # supera N volte la propria incertezza, la sua DIREZIONE non e' informazione, e'
+            # rumore. Marca il nucleo (dove il pedone e', che sappiamo) ma NON proiettare un
+            # cono in una direzione che non conosciamo. Questo e' cio' che prima mancava:
+            # con la doppia EMA non c'era modo di sapere QUANTO fidarsi della direzione.
+            if self.kf_min_snr > 0.0 and speed < self.kf_min_snr * tr.get('sv', 0.0):
                 continue
             self._paint_cone(cost, tr, ox, oy, speed)
             self.arrows.append((tr['x'], tr['y'], tr['vx'], tr['vy']))
