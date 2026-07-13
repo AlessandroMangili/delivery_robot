@@ -968,114 +968,6 @@
         <label>3</label>
       </plugin>
     </model>
-    <model name="pothole_3">
-      <pose>-18.000 0.700 0.000 0.000 0.000 0.000</pose>
-      <static>true</static>
-      <link name="link">
-        <visual name="visual">
-          <pose>0.000 0.000 -0.018 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.420</radius>
-              <length>0.010</length>
-            </cylinder>
-          </geometry>
-          <material>
-            <ambient>0.280 0.280 0.280 1.000</ambient>
-            <diffuse>0.350 0.350 0.350 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <visual name="visual_patch">
-          <pose>0.000 0.000 -0.016 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.567</radius>
-              <length>0.004</length>
-            </cylinder>
-          </geometry>
-          <material>
-            <ambient>0.440 0.440 0.440 1.000</ambient>
-            <diffuse>0.550 0.550 0.550 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
-        <label>1</label>
-      </plugin>
-    </model>
-    <model name="pothole_4">
-      <pose>-3.000 0.000 0.000 0.000 0.000 0.000</pose>
-      <static>true</static>
-      <link name="link">
-        <visual name="visual">
-          <pose>0.000 0.000 -0.018 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.280</radius>
-              <length>0.010</length>
-            </cylinder>
-          </geometry>
-          <material>
-            <ambient>0.280 0.280 0.280 1.000</ambient>
-            <diffuse>0.350 0.350 0.350 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <visual name="visual_patch">
-          <pose>0.000 0.000 -0.016 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.378</radius>
-              <length>0.004</length>
-            </cylinder>
-          </geometry>
-          <material>
-            <ambient>0.440 0.440 0.440 1.000</ambient>
-            <diffuse>0.550 0.550 0.550 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
-        <label>1</label>
-      </plugin>
-    </model>
-    <model name="pothole_5">
-      <pose>23.000 1.200 0.000 0.000 0.000 0.000</pose>
-      <static>true</static>
-      <link name="link">
-        <visual name="visual">
-          <pose>0.000 0.000 -0.018 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.350</radius>
-              <length>0.010</length>
-            </cylinder>
-          </geometry>
-          <material>
-            <ambient>0.280 0.280 0.280 1.000</ambient>
-            <diffuse>0.350 0.350 0.350 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-        <visual name="visual_patch">
-          <pose>0.000 0.000 -0.016 0.000 0.000 0.000</pose>
-          <geometry>
-            <cylinder>
-              <radius>0.473</radius>
-              <length>0.004</length>
-            </cylinder>
-          </geometry>
-          <material>
-            <ambient>0.440 0.440 0.440 1.000</ambient>
-            <diffuse>0.550 0.550 0.550 1.000</diffuse>
-            <specular>0.050 0.050 0.050 1.000</specular>
-          </material>
-        </visual>
-      </link>      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
-        <label>1</label>
-      </plugin>
-    </model>
     <model name="planter_2">
       <pose>-34.000 -0.200 0.160 0.000 0.000 0.000</pose>
       <static>true</static>
@@ -1401,7 +1293,7 @@
       </plugin>
     </model>
 
-     <actor name="ped_7">
+    <actor name="ped_1">
       <skin><filename>https://fuel.gazebosim.org/1.0/Mingfei/models/actor/tip/files/meshes/walk.dae</filename><scale>1.0</scale></skin>
       <animation name="walk"><filename>https://fuel.gazebosim.org/1.0/Mingfei/models/actor/tip/files/meshes/walk.dae</filename><interpolate_x>true</interpolate_x></animation>
       <script>
@@ -1417,7 +1309,7 @@
       <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>12</label></plugin>
     </actor>
 
-    <actor name="ped_3">
+    <actor name="ped_2">
       <skin><filename>https://fuel.gazebosim.org/1.0/Mingfei/models/actor/tip/files/meshes/walk.dae</filename><scale>1.0</scale></skin>
       <animation name="walk"><filename>https://fuel.gazebosim.org/1.0/Mingfei/models/actor/tip/files/meshes/walk.dae</filename><interpolate_x>true</interpolate_x></animation>
       <script>
@@ -1432,7 +1324,7 @@
       </script>
       <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>12</label></plugin>
     </actor>
-    <actor name="ped_4">
+    <actor name="ped_3">
       <skin><filename>https://fuel.gazebosim.org/1.0/Mingfei/models/actor/tip/files/meshes/walk.dae</filename><scale>1.0</scale></skin>
       <animation name="walk"><filename>https://fuel.gazebosim.org/1.0/Mingfei/models/actor/tip/files/meshes/walk.dae</filename><interpolate_x>true</interpolate_x></animation>
       <script>
@@ -1447,7 +1339,7 @@
       </script>
       <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>12</label></plugin>
     </actor>
-    <actor name="ped_6">
+    <actor name="ped_4">
       <skin><filename>https://fuel.gazebosim.org/1.0/Mingfei/models/actor/tip/files/meshes/walk.dae</filename><scale>1.0</scale></skin>
       <animation name="walk"><filename>https://fuel.gazebosim.org/1.0/Mingfei/models/actor/tip/files/meshes/walk.dae</filename><interpolate_x>true</interpolate_x></animation>
       <script>
@@ -1477,6 +1369,17 @@
       </script>
       <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>12</label></plugin>
     </actor>
+    <!--<actor name="ped_6">
+      <skin><filename>https://fuel.gazebosim.org/1.0/Mingfei/models/actor/tip/files/meshes/walk.dae</filename><scale>1.0</scale></skin>
+      <animation name="walk"><filename>https://fuel.gazebosim.org/1.0/Mingfei/models/actor/tip/files/meshes/walk.dae</filename><interpolate_x>true</interpolate_x></animation>
+      <script>
+        <loop>true</loop><delay_start>2.20</delay_start><auto_start>true</auto_start>
+        <trajectory id="0" type="walk" tension="0.6">
+        <waypoint><time>0.00</time><pose>0.000 0.000 1.0 0 0 0.0</pose></waypoint>
+        </trajectory>
+      </script>
+      <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>12</label></plugin>
+    </actor>-->
     <include>
       <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/SUV</uri>
       <name>car_2</name>
