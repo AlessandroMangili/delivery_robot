@@ -1,15 +1,3 @@
-#!/usr/bin/env python3
-"""
-Proiezione semantica -> costmap del marciapiede.
-Mappa PERSISTENTE (frame 'map') con:
-  - fusione a confidenza (peso = vicinanza x non-occlusione; gate stabilita'/plasticita');
-  - GESTIONE DINAMICI: gli oggetti di classi dinamiche (persona, veicoli...) vengono
-    tracciati frame-per-frame e ne viene stimata la VELOCITA' nel mondo. Se si muovono
-    (sopra soglia) i loro pixel sono ESCLUSI dalla mappa statica; se sono fermi/
-    parcheggiati entrano come ostacoli. Un dinamico non ancora confermato fermo viene
-    escluso in via cautelativa (evita scie di chi e' in movimento).
-"""
-
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
@@ -24,15 +12,13 @@ from rclpy.duration import Duration
 from std_srvs.srv import Trigger
 import os
 
-
 CLASS_COST = {
     1: 0, 9: 70, 8: 80, 0: 90,
     2: 100, 3: 100, 4: 100, 5: 100, 7: 100,
     11: 100, 12: 100, 13: 100, 14: 100, 15: 100, 16: 100, 17: 100, 18: 100,
 }
 DEFAULT_BLOCKERS = [2, 3, 4, 5, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18]
-DEFAULT_DYNAMIC = [11, 12, 13, 14, 15, 16, 17, 18]   # persona, rider, veicoli
-
+DEFAULT_DYNAMIC = [11, 12, 13, 14, 15, 16, 17, 18]
 
 def transform_to_matrix(t):
     q = t.transform.rotation
@@ -46,16 +32,15 @@ def transform_to_matrix(t):
     M = np.eye(4); M[:3, :3] = R; M[:3, 3] = [tr.x, tr.y, tr.z]
     return M
 
-
 class Tracker:
-    """Tracking NN in coordinate mondo + stima velocita' + classificazione moving/static."""
+    """Nearest-neighbour world tracking + velocity estimate + moving/static classification."""
     def __init__(self, gate=1.0, v_thresh=0.3, min_obs=3, timeout=1.0, beta=0.6):
         self.gate = gate; self.v_thresh = v_thresh; self.min_obs = min_obs
         self.timeout = timeout; self.beta = beta
         self.tracks = []; self.next_id = 0
 
     def update(self, dets, t):
-        """dets: lista (x,y) nel mondo. Ritorna lista di track allineata a dets."""
+        """dets: list of (x,y) in world frame. Returns a track list aligned to dets."""
         assign = [None] * len(dets)
         used = set()
         for tr in self.tracks:
@@ -84,51 +69,52 @@ class Tracker:
     def confirmed_static(self, tr):
         return tr['n'] >= self.min_obs and np.hypot(tr['vx'], tr['vy']) <= self.v_thresh
 
-
 class SemanticCostmapNode(Node):
     def __init__(self):
         super().__init__('semantic_costmap_node')
 
         self.declare_parameter('target_frame', 'map')
-        # ===== GATE LOCALIZZAZIONE ROBUSTO (isteresi + EMA, non soffoca) =====
-        # Sospende la mappatura SOLO su perdita GRAVE di localizzazione:
-        #  - la covarianza viene SMUSSATA (EMA) per ignorare i picchi isolati;
-        #  - ISTERESI: sospende sopra loc_std_suspend_m, riprende sotto
-        #    loc_std_resume_m (evita accendi-spegni continuo);
-        #  - posa AMCL "vecchia" NON blocca (AMCL non pubblica da fermo):
-        #    si mantiene l'ultimo stato noto.
         self.declare_parameter('use_loc_quality_gate', True)
-        self.declare_parameter('loc_pose_topic', '/amcl_pose')   # EKF: /odometry/filtered
-        self.declare_parameter('loc_cov_source', 'pose_with_cov')  # 'odometry' per EKF
-        self.declare_parameter('loc_std_suspend_m', 1.0)  # EMA std sopra -> SOSPENDI
-        self.declare_parameter('loc_std_resume_m', 0.5)   # EMA std sotto -> RIPRENDI
-        self.declare_parameter('loc_cov_ema', 0.4)        # smoothing covarianza (0..1)
+        self.declare_parameter('loc_pose_topic', '/amcl_pose')
+        self.declare_parameter('loc_cov_source', 'pose_with_cov')
+        self.declare_parameter('loc_std_suspend_m', 1.0)
+        self.declare_parameter('loc_std_resume_m', 0.5)
+        self.declare_parameter('loc_cov_ema', 0.4)
         self.declare_parameter('camera_optical_frame', 'camera_rgb_optical_frame')
         self.declare_parameter('base_frame', 'base_footprint')
         self.declare_parameter('resolution', 0.05)
-        self.declare_parameter('initial_size_m', 10.0)   # m, griglia iniziale (poi cresce da sola)
-        self.declare_parameter('grow_margin_m', 3.0)     # m, margine aggiunto a ogni espansione
+        self.declare_parameter('initial_size_m', 10.0)
+        self.declare_parameter('grow_margin_m', 3.0)
         self.declare_parameter('pixel_stride', 4)
         self.declare_parameter('max_range', 5.0)
         self.declare_parameter('min_row_frac', 0.62)
-        # anti-spalmamento: scarta i raggi troppo orizzontali (vicini all'orizzonte)
-        # che proiettano lontano e impreciso. min |dz| = elevazione minima.
-        self.declare_parameter('min_ray_downness', 0.08)   # ~4.5 gradi
-        # scrivo in mappa solo entro questa distanza (dove l'IPM e' accurato)
+        self.declare_parameter('min_ray_downness', 0.08)
         self.declare_parameter('map_write_max_range', 4.0)
         self.declare_parameter('occ_sector_deg', 2.0)
         self.declare_parameter('occ_margin', 0.15)
         self.declare_parameter('occ_weak', 0.10)
         self.declare_parameter('w_dist_min', 0.03)
-        self.declare_parameter('gate_ratio', 0.5)
+        self.declare_parameter('conf_decay', 0.99)
+        self.declare_parameter('conf_max', 8.0)
+        self.declare_parameter('conf_init', 2.0)
+        self.declare_parameter('confirm_gain', 1.0)
+        self.declare_parameter('deny_penalty', 2.0)
+        self.declare_parameter('new_hits', 2)
+        self.declare_parameter('change_hits', 2)
+        self.declare_parameter('use_depth_projection', True)
+        self.declare_parameter('depth_topic', '/camera/depth_image')
+        self.declare_parameter('max_obstacle_height', 0.60)
+        self.declare_parameter('depth_max_age_s', 0.5)
+        self.declare_parameter('veto_verbose', False)
         self.declare_parameter('blocker_classes', DEFAULT_BLOCKERS)
-        # --- dinamici ---
         self.declare_parameter('dynamic_classes', DEFAULT_DYNAMIC)
-        self.declare_parameter('dyn_v_thresh', 0.3)   # m/s sopra cui = in movimento
-        self.declare_parameter('dyn_gate', 1.0)       # m, associazione tracce
-        self.declare_parameter('dyn_min_obs', 3)      # frame prima di fidarsi della velocita'
-        self.declare_parameter('dyn_timeout', 1.0)    # s prima di scartare una traccia
-        self.declare_parameter('dyn_vel_beta', 0.6)   # smoothing velocita'
+        self.declare_parameter('dyn_v_thresh', 0.3)
+        self.declare_parameter('dyn_gate', 1.0)
+        self.declare_parameter('dyn_min_obs', 3)
+        self.declare_parameter('dyn_timeout', 1.0)
+        self.declare_parameter('dyn_vel_beta', 0.6)
+        self.declare_parameter('map_static_dynamics', False)
+        self.declare_parameter('dyn_dilate_px', 6)
 
         gp = self.get_parameter
         self.target = gp('target_frame').value
@@ -142,21 +128,32 @@ class SemanticCostmapNode(Node):
         self.min_row_frac = gp('min_row_frac').value
         self.min_ray_downness = float(gp('min_ray_downness').value)
         self.map_write_max_range = float(gp('map_write_max_range').value)
+        self.conf_decay = float(gp('conf_decay').value)
+        self.conf_max = float(gp('conf_max').value)
+        self.conf_init = float(gp('conf_init').value)
+        self.confirm_gain = float(gp('confirm_gain').value)
+        self.deny_penalty = float(gp('deny_penalty').value)
+        self.new_hits = int(gp('new_hits').value)
+        self.change_hits = int(gp('change_hits').value)
+        self.get_logger().info(
+            f'A cell enters the map after {self.new_hits} CONSECUTIVE observations '
+            f'(the counter that keeps noise out of the map)')
         self.occ_dth = np.deg2rad(gp('occ_sector_deg').value)
         self.occ_nsec = int(np.ceil(2 * np.pi / self.occ_dth))
         self.occ_margin = gp('occ_margin').value
         self.occ_weak = gp('occ_weak').value
         self.w_dist_min = gp('w_dist_min').value
-        self.gate_ratio = gp('gate_ratio').value
-        # gate localizzazione robusto
+        self.map_static_dynamics = bool(gp('map_static_dynamics').value)
+        self.dyn_dilate_px = int(gp('dyn_dilate_px').value)
         self.use_loc_gate = bool(gp('use_loc_quality_gate').value)
         self.loc_pose_topic = gp('loc_pose_topic').value
         self.loc_cov_source = gp('loc_cov_source').value
         self.loc_std_suspend = float(gp('loc_std_suspend_m').value)
         self.loc_std_resume = float(gp('loc_std_resume_m').value)
         self.loc_cov_ema = float(gp('loc_cov_ema').value)
-        self.loc_std_smooth = 0.0   # EMA della deviazione std di posa
-        self.loc_ok = True          # PARTE ATTIVO: sospende solo su perdita grave
+        self.loc_std_smooth = 0.0
+        self.loc_ok = True
+        self._loc_msgs = 0
         if self.use_loc_gate:
             from geometry_msgs.msg import PoseWithCovarianceStamped
             from nav_msgs.msg import Odometry as _Odom
@@ -166,6 +163,21 @@ class SemanticCostmapNode(Node):
             else:
                 self.create_subscription(PoseWithCovarianceStamped, self.loc_pose_topic,
                                          self.loc_cb_pwc, 10)
+        self.use_depth_veto = bool(gp('use_depth_projection').value)
+        self.max_obs_h = float(gp('max_obstacle_height').value)
+        self._veto_stats = [0, 0]
+        self._depth_msgs = 0
+        self._veto_last = -1
+        self._depth_shape = None
+        self.create_timer(5.0, self._depth_watchdog)
+        self.depth_max_age = float(gp('depth_max_age_s').value)
+        self.veto_verbose = bool(gp('veto_verbose').value)
+        self.depth = None
+        self.depth_t = -1e9
+        self._veto_warned = False
+        if self.use_depth_veto:
+            self.create_subscription(Image, gp('depth_topic').value, self.depth_cb, 1)
+
         blockers = gp('blocker_classes').value
         dynamic = gp('dynamic_classes').value
 
@@ -180,12 +192,15 @@ class SemanticCostmapNode(Node):
                                min_obs=gp('dyn_min_obs').value, timeout=gp('dyn_timeout').value,
                                beta=gp('dyn_vel_beta').value)
 
-        self.gnx = int(self.initial_size_m / self.res)   # colonne (x), cresce da sola
-        self.gny = int(self.initial_size_m / self.res)   # righe (y)
+        self.gnx = int(self.initial_size_m / self.res)
+        self.gny = int(self.initial_size_m / self.res)
         self.gox = -self.initial_size_m / 2.0
         self.goy = -self.initial_size_m / 2.0
         self.grid = np.full((self.gny, self.gnx), -1.0, dtype=np.float32)
         self.conf = np.zeros((self.gny, self.gnx), dtype=np.float32)
+        self.cls = np.full((self.gny, self.gnx), 255, dtype=np.uint8)
+        self.cand = np.full((self.gny, self.gnx), 255, dtype=np.uint8)
+        self.cand_n = np.zeros((self.gny, self.gnx), dtype=np.uint8)
 
         self.bridge = CvBridge()
         self.K = None
@@ -198,25 +213,18 @@ class SemanticCostmapNode(Node):
                              history=HistoryPolicy.KEEP_LAST, depth=1)
         self.create_subscription(Image, '/semantic/segmentation', self.seg_cb, seg_qos)
 
-        # --- PUBBLICAZIONE MAPPA (due canali) ---
-        # 1) /semantic_costmap : FULL MAP latched (transient_local) a bassa
-        #    frequenza. Confinement e SSRL la ricevono COMPLETA (per il global
-        #    planner) e aggiornata ogni full_map_period_s. Il latching fa si' che
-        #    un subscriber che si connette dopo riceva subito l'ultima mappa intera.
         latched_qos = QoSProfile(reliability=ReliabilityPolicy.RELIABLE,
                                  durability=DurabilityPolicy.TRANSIENT_LOCAL,
                                  history=HistoryPolicy.KEEP_LAST, depth=1)
         self.pub = self.create_publisher(OccupancyGrid, '/semantic_costmap', latched_qos)
-        # marker del raggio/area mappabile (giallo)
         self.pub_range = self.create_publisher(Marker, '/semantic_map_range', 1)
 
-        # ogni quanto ripubblicare la FULL map (bassa freq -> non rallenta)
         self.declare_parameter('full_map_period_s', 1.5)
         self.full_map_period = float(self.get_parameter('full_map_period_s').value)
         self._last_full_pub = 0.0
-        self._map_dirty = True   # la full map va ripubblicata (qualcosa e' cambiato)
-        self._significant_change = 0   # n. celle cambiate in modo rilevante
-        # soglia: sopra questo n. di celle "rilevanti", pubblica SUBITO la full map
+        self._map_dirty = True
+        self._last_decay_t = None
+        self._significant_change = 0
         self.declare_parameter('significant_change_cells', 15)
         self.significant_thresh = int(self.get_parameter('significant_change_cells').value)
 
@@ -224,11 +232,9 @@ class SemanticCostmapNode(Node):
         for cls, c in CLASS_COST.items():
             self.cost_lut[cls] = c
 
-        # --- persistenza mappa (salva/carica grid + confidenza) ---
-        # Si indicano solo i NOMI dei file; vengono risolti nella cartella maps/
-        # del SORGENTE del pacchetto 'semantic' (persiste tra le colcon build).
-        self.declare_parameter('map_load_name', '')   # nome file da caricare all'avvio (vuoto = no)
-        self.declare_parameter('map_save_name', '')    # nome file usato dal servizio ~/save_map (vuoto = chiede un nome)
+        self.declare_parameter('map_load_name', '')
+        self.declare_parameter('map_save_name', '')
+        self.declare_parameter('autosave', False)
         self.maps_dir = self.resolve_maps_dir()
         load_name = self.get_parameter('map_load_name').value
         save_name = self.get_parameter('map_save_name').value
@@ -240,31 +246,43 @@ class SemanticCostmapNode(Node):
             if os.path.isfile(load_path):
                 self.load_map(load_path)
             else:
-                self.get_logger().warn(f'Mappa da caricare non trovata: {load_path}')
+                self.get_logger().warn(f'Map to load not found: {load_path}')
         self.create_service(Trigger, '~/save_map', self.save_map_cb)
-        self.get_logger().info(f'Cartella mappe: {self.maps_dir}')
+
+        self.create_timer(self.full_map_period, self._full_map_timer)
+        self.create_timer(5.0, self._loc_watchdog)
+
+        self.autosave = bool(self.get_parameter('autosave').value)
+        if self.autosave and not save_name:
+            self.get_logger().warn(
+                'autosave: true but map_save_name is EMPTY -> autosave DISABLED. '
+                'Set a name in map_save_name.')
+            self.autosave = False
+
+        self.get_logger().info(f'Maps folder: {self.maps_dir}')
         save_hint = self.map_save_path if self.map_save_path else f'{self.maps_dir}/semantic_map.npz'
+        if self.autosave:
+            self.get_logger().info(
+                f'AUTOSAVE on node SHUTDOWN (Ctrl-C) -> {save_hint}')
         self.get_logger().info(
-            'SALVATAGGIO MANUALE (niente autosave). Per salvare la mappa: '
+            'Save on demand: '
             f'ros2 service call /semantic_costmap_node/save_map std_srvs/srv/Trigger  ->  {save_hint}')
 
         self.get_logger().info(
-            f'Semantic costmap (confidenza + dinamici) pronto. frame={self.target}.')
+            f'Semantic costmap (confidence + dynamics) ready. frame={self.target}.')
 
     def resolve_maps_dir(self):
-        """Trova (o crea) la cartella maps/ nel SORGENTE del pacchetto semantic.
-        Cerca una cartella 'semantic' OVUNQUE sotto <ws>/src (anche in sottocartelle),
-        riconoscendola dal package.xml. Se non la trova, ripiega sulla share installata."""
+        """Find (or create) the maps/ folder in the semantic package SOURCE tree.
+        Searches for a 'semantic' folder ANYWHERE under <ws>/src (including subfolders),
+        recognised via package.xml. Falls back to the installed share if not found."""
         try:
             from ament_index_python.packages import get_package_share_directory
-            share = get_package_share_directory('semantic')  # .../install/.../share/semantic
-            # risali fino a trovare la radice del workspace (quella che contiene 'src')
+            share = get_package_share_directory('semantic')
             ws = share
             for _ in range(8):
                 ws = os.path.dirname(ws)
                 src = os.path.join(ws, 'src')
                 if os.path.isdir(src):
-                    # cammina sotto src/ cercando una cartella 'semantic' con package.xml
                     for root, dirs, files in os.walk(src):
                         if (os.path.basename(root) == 'semantic'
                                 and 'package.xml' in files):
@@ -272,7 +290,7 @@ class SemanticCostmapNode(Node):
                             os.makedirs(d, exist_ok=True)
                             return d
                     break
-            d = os.path.join(share, 'maps')          # ripiego: share installata
+            d = os.path.join(share, 'maps')
             os.makedirs(d, exist_ok=True)
             return d
         except Exception:
@@ -285,17 +303,25 @@ class SemanticCostmapNode(Node):
             d = np.load(path)
             if float(d['res']) != self.res:
                 self.get_logger().warn(
-                    'Mappa salvata con risoluzione diversa: ignorata.')
+                    'Saved map has a different resolution: ignored.')
                 return
-            # con l'auto-grow adotto direttamente la griglia salvata (qualsiasi dimensione)
             self.grid = d['grid'].astype(np.float32)
             self.conf = d['conf'].astype(np.float32)
             self.gny, self.gnx = self.grid.shape
             self.gox = float(d['gox']); self.goy = float(d['goy'])
+
+            if 'cls' in d.files and d['cls'].shape == self.grid.shape:
+                self.cls = d['cls'].astype(np.uint8)
+            else:
+                self.cls = np.full(self.grid.shape, 255, dtype=np.uint8)
+                for c, cost in CLASS_COST.items():
+                    self.cls[np.isclose(self.grid, cost)] = c
+            self.cand = np.full(self.grid.shape, 255, dtype=np.uint8)
+            self.cand_n = np.zeros(self.grid.shape, dtype=np.uint8)
             self.get_logger().info(
-                f'Mappa semantica caricata da {path} ({self.gnx}x{self.gny}).')
+                f'Semantic map loaded from {path} ({self.gnx}x{self.gny}).')
         except Exception as e:
-            self.get_logger().warn(f'Caricamento mappa fallito: {e}')
+            self.get_logger().warn(f'Map load failed: {e}')
 
     def save_map(self, path):
         try:
@@ -303,19 +329,20 @@ class SemanticCostmapNode(Node):
                 path = path + '.npz'
             os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
             np.savez_compressed(path, grid=self.grid, conf=self.conf,
+                                cls=self.cls,
                                 gnx=self.gnx, gny=self.gny, res=self.res,
                                 gox=self.gox, goy=self.goy)
-            self.get_logger().info(f'Mappa semantica salvata in {path}.')
+            self.get_logger().info(f'Semantic map saved to {path}.')
             return path
         except Exception as e:
-            self.get_logger().error(f'Salvataggio mappa fallito: {e}')
+            self.get_logger().error(f'Map save failed: {e}')
             return None
 
     def save_map_cb(self, request, response):
         path = self.map_save_path or os.path.join(self.maps_dir, 'semantic_map')
         saved = self.save_map(path)
         response.success = saved is not None
-        response.message = (f'Mappa salvata in {saved}' if saved else 'Salvataggio fallito')
+        response.message = (f'Map saved to {saved}' if saved else 'Save failed')
         return response
 
     def info_cb(self, msg: CameraInfo):
@@ -326,13 +353,13 @@ class SemanticCostmapNode(Node):
             return self.tf_buffer.lookup_transform(
                 self.target, frame, rclpy.time.Time(), timeout=Duration(seconds=0.2))
         except Exception as e:
-            self.get_logger().warn(f'TF non disponibile {frame}->{self.target}: {e}',
+            self.get_logger().warn(f'TF unavailable {frame}->{self.target}: {e}',
                                    throttle_duration_sec=2.0)
             return None
 
     def ensure_capacity(self, X, Y):
-        """Espande la griglia (auto-grow) se le coordinate mondo X,Y cadono fuori.
-        Copia i dati esistenti nella nuova griglia, aggiorna origine e dimensioni."""
+        """Grow the grid (auto-grow) if world X,Y fall outside it.
+        Copies existing data into the new grid, updates origin and size."""
         gi_min = int(np.floor((X.min() - self.gox) / self.res))
         gi_max = int(np.floor((X.max() - self.gox) / self.res))
         gj_min = int(np.floor((Y.min() - self.goy) / self.res))
@@ -348,30 +375,54 @@ class SemanticCostmapNode(Node):
         new_gny = self.gny + pb + pt
         new_grid = np.full((new_gny, new_gnx), -1.0, dtype=np.float32)
         new_conf = np.zeros((new_gny, new_gnx), dtype=np.float32)
+        new_cls = np.full((new_gny, new_gnx), 255, dtype=np.uint8)
+        new_cand = np.full((new_gny, new_gnx), 255, dtype=np.uint8)
+        new_cand_n = np.zeros((new_gny, new_gnx), dtype=np.uint8)
         new_grid[pb:pb + self.gny, pl:pl + self.gnx] = self.grid
         new_conf[pb:pb + self.gny, pl:pl + self.gnx] = self.conf
+        new_cls[pb:pb + self.gny, pl:pl + self.gnx] = self.cls
+        new_cand[pb:pb + self.gny, pl:pl + self.gnx] = self.cand
+        new_cand_n[pb:pb + self.gny, pl:pl + self.gnx] = self.cand_n
         self.grid = new_grid; self.conf = new_conf
+        self.cls = new_cls; self.cand = new_cand; self.cand_n = new_cand_n
         self.gnx = new_gnx; self.gny = new_gny
         self.gox -= pl * self.res; self.goy -= pb * self.res
         self.get_logger().info(
-            f'Griglia espansa -> {self.gnx}x{self.gny} celle, origine '
+            f'Grid expanded -> {self.gnx}x{self.gny} cells, origin '
             f'({self.gox:.1f},{self.goy:.1f}).', throttle_duration_sec=2.0)
 
     def loc_cb_pwc(self, msg):
-        """Covarianza posa da AMCL (PoseWithCovarianceStamped)."""
+        """Pose covariance from AMCL (PoseWithCovarianceStamped)."""
         self._update_loc_quality(msg.pose.covariance)
 
     def loc_cb_odom(self, msg):
-        """Covarianza posa da EKF (Odometry). Stesso layout 6x6."""
+        """Pose covariance from EKF (Odometry). Same 6x6 layout."""
         self._update_loc_quality(msg.pose.covariance)
 
+    def _loc_watchdog(self):
+        """A gate that NEVER receives a pose is not a gate: it's a fiction.
+
+        If loc_pose_topic and loc_cov_source don't match (e.g. topic /odometry/filtered but
+        type PoseWithCovarianceStamped), the subscription receives nothing -- silently.
+        loc_ok stays True forever and mapping never suspends, not even with a lost pose.
+        This says it out loud instead of letting you believe you're protected."""
+        if not self.use_loc_gate:
+            return
+        if self._loc_msgs == 0:
+            self.get_logger().error(
+                f"LOCALIZATION GATE BLIND: no pose received on '{self.loc_pose_topic}'. "
+                f"The gate will NEVER suspend mapping. Check that loc_pose_topic and "
+                f"loc_cov_source are CONSISTENT (AMCL: /amcl_pose + pose_with_cov | "
+                f"EKF/UKF: /odometry/filtered + odometry) and that the localization node runs.",
+                throttle_duration_sec=10.0)
+
     def _update_loc_quality(self, cov):
-        """Gate ROBUSTO: EMA sulla std di posa + ISTERESI.
-        - EMA: i picchi isolati di covarianza (tipici di AMCL) non sospendono;
-          conta la TENDENZA.
-        - Isteresi: sospende sopra loc_std_suspend, riprende sotto loc_std_resume.
-        - Posa 'vecchia' non blocca: se AMCL non pubblica (robot fermo), lo stato
-          resta l'ultimo noto."""
+        self._loc_msgs += 1
+        """ROBUST gate: EMA on pose std + HYSTERESIS.
+        - EMA: isolated covariance spikes (typical of AMCL) don't suspend; the TREND counts.
+        - Hysteresis: suspends above loc_std_suspend, resumes below loc_std_resume.
+        - A 'stale' pose doesn't block: if AMCL stops publishing (robot idle), the state
+          keeps its last known value."""
         var_x = max(0.0, float(cov[0]))
         var_y = max(0.0, float(cov[7]))
         std_xy = float(np.sqrt(max(var_x, var_y)))
@@ -380,20 +431,61 @@ class SemanticCostmapNode(Node):
         if self.loc_ok and self.loc_std_smooth > self.loc_std_suspend:
             self.loc_ok = False
             self.get_logger().warn(
-                f'LOCALIZZAZIONE PERSA (std smussata {self.loc_std_smooth:.2f}m > '
-                f'{self.loc_std_suspend}m) -> MAPPATURA SOSPESA. La mappa esistente '
-                f'resta pubblicata; ricalibrare la localizzazione per riprendere.')
+                f'LOCALIZATION LOST (smoothed std {self.loc_std_smooth:.2f}m > '
+                f'{self.loc_std_suspend}m) -> MAPPING SUSPENDED. The existing map '
+                f'stays published; recalibrate localization to resume.')
         elif (not self.loc_ok) and self.loc_std_smooth < self.loc_std_resume:
             self.loc_ok = True
             self.get_logger().info(
-                f'Localizzazione RECUPERATA (std smussata {self.loc_std_smooth:.2f}m < '
-                f'{self.loc_std_resume}m) -> mappatura RIPRESA.')
+                f'Localization RECOVERED (smoothed std {self.loc_std_smooth:.2f}m < '
+                f'{self.loc_std_resume}m) -> mapping RESUMED.')
+
+    def _depth_watchdog(self):
+        """Says OUT LOUD whether anti-smearing is working. Without this, it can fail in THREE
+        different ways silently: depth never received, seg_cb returning before reaching it,
+        or depth received but never valid."""
+        if not self.use_depth_veto:
+            return
+        usati, tot = self._veto_stats
+        if self._depth_msgs == 0:
+            self.get_logger().error(
+                f'DEPTH MISSING: ZERO depth messages received. The topic is not '
+                f'reaching the node. Check: ros2 topic hz /camera/depth_image')
+        elif tot == 0:
+            self.get_logger().error(
+                f'DEPTH NOT USED: received ({self._depth_msgs} msg, '
+                f'shape {self._depth_shape}) but seg_cb never reaches the depth step '
+                f'(missing map TF, or camera_info, or the localization gate blocks).')
+        elif usati == 0:
+            self.get_logger().error(
+                f'DEPTH NEVER USED: {tot} frames processed (shape {self._depth_shape} differs '
+                f'from segmentation, or timestamps out of sync).')
+        else:
+            self.get_logger().info(
+                f'Depth ACTIVE: used in {usati}/{tot} frames, {self._veto_last} pixels '
+                f'positioned by MEASUREMENT in the last frame (rest: IPM fallback)')
+        self._veto_stats = [0, 0]
+
+    def depth_cb(self, msg: Image):
+        """Depth camera: stored and used in seg_cb to position pixels by height."""
+        try:
+            d = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
+        except Exception:
+            return
+        d = np.asarray(d, dtype=np.float32)
+        if d.ndim != 2:
+            return
+        if np.nanmedian(d[np.isfinite(d) & (d > 0)]) > 100.0:
+            d = d / 1000.0
+        self.depth = d
+        self.depth_t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        self._depth_msgs += 1
+        self._depth_shape = d.shape
 
     def seg_cb(self, msg: Image):
+        stamp_sec = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
         if self.K is None:
             return
-        # GATE: localizzazione persa gravemente -> NON aggiornare la mappa
-        # (evita di rovinarla), ma continua a pubblicarla per la navigazione.
         if self.use_loc_gate and not self.loc_ok:
             T_base = self.lookup(self.base_frame)
             if T_base is not None:
@@ -410,6 +502,9 @@ class SemanticCostmapNode(Node):
         M = transform_to_matrix(T_cam)
         origin = M[:3, 3]; R = M[:3, :3]
         bx, by = T_base.transform.translation.x, T_base.transform.translation.y
+        qb = T_base.transform.rotation
+        yaw_b = np.arctan2(2.0 * (qb.w * qb.z + qb.x * qb.y),
+                           1.0 - 2.0 * (qb.y * qb.y + qb.z * qb.z))
 
         r0 = int(h * self.min_row_frac)
         vs = np.arange(r0, h, self.stride)
@@ -424,56 +519,92 @@ class SemanticCostmapNode(Node):
         dz = dir_world[:, 2]
 
         valid = dz < -1e-6
-        # ANTI-SPALMAMENTO: scarta i raggi troppo orizzontali (vicini all'orizzonte),
-        # che proiettano lontano e con enorme imprecisione (un errore di 0.5 gradi a
-        # 2 gradi sposta il punto di metri). Tengo solo raggi ben inclinati in giu'.
         valid = valid & (dz < -self.min_ray_downness)
         t = np.full(uu.shape, -1.0)
         t[valid] = -origin[2] / dz[valid]
         ok = valid & (t > 0)
         pts = origin[None, :] + t[:, None] * dir_world
         X, Y = pts[:, 0], pts[:, 1]
-        dist = np.hypot(X - bx, Y - by)
-        # scrivo in mappa solo entro map_write_max_range (dove l'IPM e' accurato):
-        # i pixel piu' lontani proiettano imprecisi e, con drift, si spalmano.
-        ok = ok & (dist < self.map_write_max_range)
 
-        # registro il range di distanza REALE dei punti scritti in mappa, per
-        # disegnare il raggio giallo esatto (non stimato).
-        if np.any(ok):
-            dok = dist[ok]
-            self._range_near_est = float(np.percentile(dok, 5))
-            self._range_far_est = float(np.percentile(dok, 95))
+        n_depth = 0
+        if self.use_depth_veto and self.depth is not None:
+            if self.depth.shape != seg.shape:
+                self.get_logger().error(
+                    f'DEPTH UNUSABLE: {self.depth.shape} != segmentation {seg.shape}.',
+                    throttle_duration_sec=10.0)
+            elif (stamp_sec - self.depth_t) > self.depth_max_age:
+                self.get_logger().warn('DEPTH too old in this frame.',
+                                       throttle_duration_sec=10.0)
+            else:
+                bz = T_base.transform.translation.z
+                dd = self.depth[vv, uu].astype(np.float64)
+                dvalid = np.isfinite(dd) & (dd > 0.05) & (dd < 30.0)
+                dd = np.where(dvalid, dd, 0.0)
+                P_map = (dir_opt * dd[:, None]) @ R.T + origin[None, :]
+                z_rel = P_map[:, 2] - bz
+
+                overhead = dvalid & (z_rel > self.max_obs_h)
+
+                use_d = dvalid & ~overhead
+                X = np.where(use_d, P_map[:, 0], X)
+                Y = np.where(use_d, P_map[:, 1], Y)
+                ok = (ok | use_d) & ~overhead
+                n_depth = int(np.count_nonzero(use_d))
+
+                self._veto_stats[0] += 1
+                self._veto_last = n_depth
+                if self.veto_verbose:
+                    self.get_logger().info(
+                        f'Depth: {n_depth} pixels positioned by MEASUREMENT, '
+                        f'{int(np.count_nonzero(overhead))} discarded because above '
+                        f'{self.max_obs_h:.2f} m (robot passes underneath)',
+                        throttle_duration_sec=2.0)
+        elif self.use_depth_veto:
+            self.get_logger().error(
+                'NO DEPTH: positions guessed with IPM -> smearing.',
+                throttle_duration_sec=10.0)
+        self._veto_stats[1] += 1
+
+        dist = np.hypot(X - bx, Y - by)
+        ok = ok & (dist < self.map_write_max_range)
 
         classes = seg[vv, uu]
         costs = self.cost_lut[classes]
         ok = ok & (costs >= 0)
 
-        # ---------- DINAMICI: traccia, stima velocita', escludi quelli in movimento ----------
-        stamp_sec = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
-        dyn_pix = self.dyn_lut[classes] & ok
-        if dyn_pix.any():
-            full_dyn = self.dyn_lut[seg].astype(np.uint8)
-            _, lbl = cv2.connectedComponents(full_dyn)
-            comp_s = lbl[vv, uu]                       # id componente per pixel campionato
-            dets = []; det_cids = []
-            for cid in np.unique(comp_s[dyn_pix]):
-                if cid == 0:
-                    continue
-                m = (comp_s == cid) & ok
-                if not m.any():
-                    continue
-                idx = np.where(m)[0]
-                base_i = idx[np.argmax(vv[idx])]       # pixel piu' basso = base a terra
-                dets.append((float(X[base_i]), float(Y[base_i]))); det_cids.append(cid)
-            assign = self.tracker.update(dets, stamp_sec)
-            exclude_cids = [cid for cid, tr in zip(det_cids, assign)
-                            if not self.tracker.confirmed_static(tr)]
-            if exclude_cids:
-                excl = np.isin(comp_s, exclude_cids) & dyn_pix
-                ok = ok & (~excl)
+        full_dyn = self.dyn_lut[seg].astype(np.uint8)
+        if full_dyn.any():
+            if self.dyn_dilate_px > 0:
+                k = 2 * self.dyn_dilate_px + 1
+                kern = np.ones((k, k), np.uint8)
+                dyn_mask = cv2.dilate(full_dyn, kern, iterations=1)
+            else:
+                dyn_mask = full_dyn
+            in_dyn = dyn_mask[vv, uu].astype(bool)
 
-        # ---------- OCCLUSIONE -> peso ----------
+            if not self.map_static_dynamics:
+                ok = ok & (~in_dyn)
+            else:
+                _, lbl = cv2.connectedComponents(full_dyn)
+                comp_s = lbl[vv, uu]
+                dyn_pix = self.dyn_lut[classes] & ok
+                dets = []; det_cids = []
+                for cid in np.unique(comp_s[dyn_pix]):
+                    if cid == 0:
+                        continue
+                    m = (comp_s == cid) & ok
+                    if not m.any():
+                        continue
+                    idx = np.where(m)[0]
+                    base_i = idx[np.argmax(vv[idx])]
+                    dets.append((float(X[base_i]), float(Y[base_i]))); det_cids.append(cid)
+                assign = self.tracker.update(dets, stamp_sec)
+                keep = np.zeros_like(in_dyn)
+                for cid, tr in zip(det_cids, assign):
+                    if self.tracker.confirmed_static(tr):
+                        keep |= (comp_s == cid)
+                ok = ok & (~(in_dyn & ~keep))
+
         camx, camy = origin[0], origin[1]
         ang = np.arctan2(Y - camy, X - camx)
         rad = np.hypot(X - camx, Y - camy)
@@ -488,7 +619,6 @@ class SemanticCostmapNode(Node):
         w_occ = np.where(occluded, self.occ_weak, 1.0)
         wpix = w_dist * w_occ
 
-        # AUTO-GROW: se le osservazioni valide cadono fuori griglia, espandi
         okx = ok & np.isfinite(X) & np.isfinite(Y)
         if okx.any():
             self.ensure_capacity(X[okx], Y[okx])
@@ -497,8 +627,80 @@ class SemanticCostmapNode(Node):
         gj = ((Y - self.goy) / self.res).astype(int)
         inside = ok & (gi >= 0) & (gi < self.gnx) & (gj >= 0) & (gj < self.gny)
 
+        full_dyn = self.dyn_lut[seg].astype(np.uint8)
+        if full_dyn.any():
+            if self.dyn_dilate_px > 0:
+                k = 2 * self.dyn_dilate_px + 1
+                kern = np.ones((k, k), np.uint8)
+                dyn_mask = cv2.dilate(full_dyn, kern, iterations=1)
+            else:
+                dyn_mask = full_dyn
+            in_dyn = dyn_mask[vv, uu].astype(bool)
+
+            if not self.map_static_dynamics:
+                ok = ok & (~in_dyn)
+            else:
+                _, lbl = cv2.connectedComponents(full_dyn)
+                comp_s = lbl[vv, uu]
+                dyn_pix = self.dyn_lut[classes] & ok
+                dets = []; det_cids = []
+                for cid in np.unique(comp_s[dyn_pix]):
+                    if cid == 0:
+                        continue
+                    m = (comp_s == cid) & ok
+                    if not m.any():
+                        continue
+                    idx = np.where(m)[0]
+                    base_i = idx[np.argmax(vv[idx])]
+                    dets.append((float(X[base_i]), float(Y[base_i]))); det_cids.append(cid)
+                assign = self.tracker.update(dets, stamp_sec)
+                keep = np.zeros_like(in_dyn)
+                for cid, tr in zip(det_cids, assign):
+                    if self.tracker.confirmed_static(tr):
+                        keep |= (comp_s == cid)
+                ok = ok & (~(in_dyn & ~keep))
+
+        camx, camy = origin[0], origin[1]
+        ang = np.arctan2(Y - camy, X - camx)
+        rad = np.hypot(X - camx, Y - camy)
+        sec = np.clip(((ang + np.pi) / self.occ_dth).astype(int), 0, self.occ_nsec - 1)
+        is_block = self.block_lut[classes] & ok
+        occ_r = np.full(self.occ_nsec, np.inf, dtype=np.float64)
+        if is_block.any():
+            np.minimum.at(occ_r, sec[is_block], rad[is_block])
+        occluded = rad > (occ_r[sec] + self.occ_margin)
+
+        w_dist = np.clip(1.0 - dist / self.max_range, self.w_dist_min, 1.0)
+        w_occ = np.where(occluded, self.occ_weak, 1.0)
+        wpix = w_dist * w_occ
+
+        okx = ok & np.isfinite(X) & np.isfinite(Y)
+        if okx.any():
+            self.ensure_capacity(X[okx], Y[okx])
+
+        gi = ((X - self.gox) / self.res).astype(int)
+        gj = ((Y - self.goy) / self.res).astype(int)
+        inside = ok & (gi >= 0) & (gi < self.gnx) & (gj >= 0) & (gj < self.gny)
+
+        if np.any(inside):
+            dxr = X[inside] - bx; dyr = Y[inside] - by
+            cy_, sy_ = np.cos(yaw_b), np.sin(yaw_b)
+            fwd = dxr * cy_ + dyr * sy_
+            lat = -dxr * sy_ + dyr * cy_
+            f_lo, f_hi = float(fwd.min()), float(fwd.max())
+            if f_hi - f_lo > 0.2:
+                band = 0.25 * (f_hi - f_lo)
+                near = fwd <= (f_lo + band)
+                far = fwd >= (f_hi - band)
+                if np.any(near) and np.any(far):
+                    self._hull = (
+                        f_lo, float(lat[near].min()), float(lat[near].max()),
+                        f_hi, float(lat[far].min()), float(lat[far].max()),
+                        float(bx), float(by), float(yaw_b))
+
         gi_u = gi[inside]; gj_u = gj[inside]
         co_u = costs[inside].astype(np.float32)
+        cl_u = classes[inside].astype(np.uint8)
         w_u = wpix[inside].astype(np.float32)
         if gi_u.size == 0:
             self.publish_map(bx, by, msg.header.stamp)
@@ -514,35 +716,89 @@ class SemanticCostmapNode(Node):
         frame_w[flat_s] = w_u[order]
         seen = frame_w >= 0.0
 
+        frame_cls = np.full(N, 255, dtype=np.uint8)
+        frame_cls[flat_s] = cl_u[order]
+
         V = self.grid.ravel(); C = self.conf.ravel()
-        V_before = V.copy()   # per rilevare cambiamenti rilevanti (pubblica subito)
-        accept = seen & (frame_w >= self.gate_ratio * C)
-        unknown = accept & (V < 0)
-        knownup = accept & (V >= 0)
-        V[unknown] = frame_cost[unknown]
-        fa = frame_w[knownup] / (frame_w[knownup] + C[knownup])
-        V[knownup] = (1.0 - fa) * V[knownup] + fa * frame_cost[knownup]
-        C[accept] = np.maximum(C[accept], frame_w[accept])
+        CL = self.cls.ravel(); CD = self.cand.ravel(); CN = self.cand_n.ravel()
+        V_before = V.copy()
+        w = np.where(seen, frame_w, 0.0).astype(np.float32)
+
+        known = seen & (CL != 255)
+        agree = known & (frame_cls == CL)
+        deny = known & (frame_cls != CL)
+        fresh = seen & (CL == 255)
+
+        C[agree] = np.minimum(C[agree] + self.confirm_gain * w[agree], self.conf_max)
+        CD[agree] = 255
+        CN[agree] = 0
+
+        C[deny] = C[deny] - self.deny_penalty * w[deny]
+        same_cand = deny & (CD == frame_cls)
+        new_cand = deny & (CD != frame_cls)
+        CN[same_cand] = np.minimum(CN[same_cand] + 1, 255)
+        CD[new_cand] = frame_cls[new_cand]
+        CN[new_cand] = 1
+
+        CD[fresh & (CD != frame_cls)] = frame_cls[fresh & (CD != frame_cls)]
+        CN[fresh & (CD != frame_cls)] = 0
+        CN[fresh] = np.minimum(CN[fresh] + 1, 255)
+
+        commit = ((fresh & (CN >= self.new_hits)) |
+                  (deny & (C <= 0.0) & (CN >= self.change_hits)))
+        if commit.any():
+            CL[commit] = frame_cls[commit]
+            V[commit] = self.cost_lut[frame_cls[commit]].astype(np.float32)
+            C[commit] = self.conf_init
+            CD[commit] = 255
+            CN[commit] = 0
+
+        np.clip(C, 0.0, self.conf_max, out=C)
+        accept = commit
+
         if accept.any():
-            self._map_dirty = True   # la mappa e' cambiata -> ripubblica la full
-            # conta i cambiamenti RILEVANTI: celle che passano da libero a ostacolo
-            # o viceversa (non piccoli aggiustamenti di costo). Un cambiamento
-            # rilevante (nuovo ostacolo!) merita pubblicazione IMMEDIATA.
-            old_vals = V_before[accept]
-            new_vals = V[accept]
-            # "rilevante" = attraversa la soglia ostacolo (es. 50): appare/sparisce
-            # qualcosa di solido dove prima non c'era.
+            self._map_dirty = True
+            self._dirty_since_save = True
+            old_vals = V_before[accept]; new_vals = V[accept]
             crossed = ((old_vals < 50) & (new_vals >= 50)) | \
                       ((old_vals >= 50) & (new_vals < 50)) | (old_vals < 0)
             self._significant_change = int(np.count_nonzero(crossed))
 
+        if self.conf_decay < 1.0:
+            if self._last_decay_t is not None:
+                dt = stamp_sec - self._last_decay_t
+                if dt > 0.0:
+                    C[~seen] *= self.conf_decay ** dt
+            self._last_decay_t = stamp_sec
+
         self.grid = V.reshape(self.gny, self.gnx)
         self.conf = C.reshape(self.gny, self.gnx)
+        self.cls = CL.reshape(self.gny, self.gnx)
+        self.cand = CD.reshape(self.gny, self.gnx)
+        self.cand_n = CN.reshape(self.gny, self.gnx)
         self.publish_map(bx, by, msg.header.stamp)
 
+    def _full_map_timer(self):
+        """Republish the full map periodically, INDEPENDENTLY of camera and TF.
+
+        Republishing a map that EXISTS is unconditional: whether or not the robot is mapping,
+        whether or not localization is ready. Confinement, ssrl_combiner and Nav2 depend on it.
+        Publishing here does not depend on the map->camera TF (with GPS the 'map' frame is
+        published by the EKF) nor on a dirty flag (with evidence-based fusion a consolidated
+        map stays 'clean': cells are only confirmed, cost doesn't change).
+        """
+        if self.grid is None:
+            return
+        stamp = self.get_clock().now().to_msg()
+        full = self._grid_to_msg(self.grid, self.gox, self.goy,
+                                 self.gnx, self.gny, stamp)
+        self.pub.publish(full)
+        self._last_full_pub = self.get_clock().now().nanoseconds * 1e-9
+        self._map_dirty = False
+
     def _grid_to_msg(self, sub, ox, oy, width, height, stamp):
-        """Converte una porzione di griglia in OccupancyGrid. Usa tobytes (112x
-        piu' veloce di .tolist() sulle mappe grandi)."""
+        """Convert a grid slice into an OccupancyGrid. Uses tobytes (112x faster
+        than .tolist() on large maps)."""
         msg = OccupancyGrid()
         msg.header.stamp = stamp
         msg.header.frame_id = self.target
@@ -559,74 +815,51 @@ class SemanticCostmapNode(Node):
     def publish_map(self, bx, by, stamp):
         now_s = self.get_clock().now().nanoseconds * 1e-9
 
-        # --- FULL MAP latched (per confinement/SSRL/global planner) ---
-        # Pubblico la full map completa quando:
-        #  (a) e' passato full_map_period_s dall'ultima (aggiornamento periodico), OPPURE
-        #  (b) c'e' stato un CAMBIAMENTO RILEVANTE (nuovo ostacolo!) -> pubblico
-        #      SUBITO, anche se ho appena pubblicato: un ostacolo nuovo non puo'
-        #      aspettare 1.5s, il planner deve saperlo ora.
         periodic_due = (now_s - self._last_full_pub) >= self.full_map_period
         urgent = self._significant_change >= self.significant_thresh
-        if self._map_dirty and (periodic_due or urgent):
+        if urgent:
             full = self._grid_to_msg(self.grid, self.gox, self.goy,
                                      self.gnx, self.gny, stamp)
             self.pub.publish(full)
-            if urgent:
-                self.get_logger().info(
-                    f'Cambiamento rilevante ({self._significant_change} celle) '
-                    f'-> full map pubblicata SUBITO', throttle_duration_sec=1.0)
+            self.get_logger().info(
+                f'Significant change ({self._significant_change} cells) '
+                f'-> full map published IMMEDIATELY', throttle_duration_sec=1.0)
             self._last_full_pub = now_s
             self._map_dirty = False
             self._significant_change = 0
 
-        # --- MARKER: raggio/area mappabile (giallo) ---
         self.publish_range_marker(bx, by, stamp)
 
     def publish_range_marker(self, bx, by, stamp):
-        """Area mappabile REALE: un anello nel settore frontale, tra il limite
-        VICINO (i raggi piu' inclinati, bordo basso immagine) e quello LONTANO
-        (map_write_max_range). Rispecchia dove il robot scrive davvero in mappa."""
-        T = self.lookup(self.base_frame)
-        if T is None:
+        """Outline of the area actually written to the map: a quadrilateral (near L/R,
+        far L/R) measured on the points that were actually mapped.
+
+        Uses the pose SAVED WITH the hull, not the TF at draw time: otherwise the outline
+        gets rotated relative to the points that generated it (the robot has moved) and
+        deforms. The reference frame must travel with the data.
+        """
+        h = getattr(self, '_hull', None)
+        if h is None or len(h) != 9:
             return
-        q = T.transform.rotation
-        yaw = np.arctan2(2.0 * (q.w * q.z + q.x * q.y),
-                         1.0 - 2.0 * (q.y * q.y + q.z * q.z))
-        # limiti REALI misurati dai punti effettivamente scritti in mappa
-        # (percentili 5-95 delle distanze), non stime fisse.
-        r_far = getattr(self, '_range_far_est', self.map_write_max_range)
-        r_near = getattr(self, '_range_near_est', 0.3)
-        # apertura angolare = FOV orizzontale reale (ricavato da K se disponibile)
-        if self.K is not None:
-            fx = self.K[0, 0]; cx = self.K[0, 2]
-            half_fov = np.arctan(cx / fx)   # meta' FOV orizzontale
-        else:
-            half_fov = np.deg2rad(30.0)
+        f_lo, ln_min, ln_max, f_hi, lf_min, lf_max, hx, hy, hyaw = h
 
         from geometry_msgs.msg import Point
+        c, sn = np.cos(hyaw), np.sin(hyaw)
+
+        def P(f, l):
+            return Point(x=float(hx + f * c - l * sn),
+                         y=float(hy + f * sn + l * c), z=0.05)
+
         m = Marker()
         m.header.frame_id = self.target
         m.header.stamp = stamp
         m.ns = 'map_range'; m.id = 0
         m.type = Marker.LINE_STRIP; m.action = Marker.ADD
-        m.scale.x = 0.04
-        m.color.r = 1.0; m.color.g = 0.9; m.color.b = 0.0; m.color.a = 0.7
-        pts = []
-        angs = np.linspace(-half_fov, half_fov, 24)
-        # arco lontano
-        for a in angs:
-            ang = yaw + a
-            pts.append(Point(x=float(bx + r_far * np.cos(ang)),
-                             y=float(by + r_far * np.sin(ang)), z=0.05))
-        # arco vicino (tornando indietro) -> chiude l'anello
-        for a in reversed(angs):
-            ang = yaw + a
-            pts.append(Point(x=float(bx + r_near * np.cos(ang)),
-                             y=float(by + r_near * np.sin(ang)), z=0.05))
-        pts.append(pts[0])   # chiudi
-        m.points = pts
+        m.scale.x = 0.05
+        m.color.r = 1.0; m.color.g = 0.9; m.color.b = 0.0; m.color.a = 0.9
+        m.points = [P(f_lo, ln_max), P(f_hi, lf_max),
+                    P(f_hi, lf_min), P(f_lo, ln_min), P(f_lo, ln_max)]
         self.pub_range.publish(m)
-
 
 def main():
     rclpy.init()
@@ -640,7 +873,6 @@ def main():
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
-
 
 if __name__ == '__main__':
     main()

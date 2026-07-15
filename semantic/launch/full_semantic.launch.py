@@ -9,7 +9,6 @@ def generate_launch_description():
         get_package_share_directory('semantic'), 'config', 'params.yaml')
     use_sim_time = {'use_sim_time': True}
 
-    # --- nodi gia' presenti nel launch originale ---
     gt_relay = Node(
         package='semantic', executable='gt_segmentation_node',
         name='gt_segmentation_node', output='screen',
@@ -26,7 +25,6 @@ def generate_launch_description():
         parameters=[use_sim_time],
     )
 
-    # --- nodi aggiunti: confinamento + combinatore SSRL ---
     confinement = Node(
         package='semantic', executable='confinement_layer',
         name='confinement_layer', output='screen',

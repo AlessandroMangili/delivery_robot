@@ -1,88 +1,122 @@
-# ============================================================
-#  Pipeline SEGMENTAZIONE GROUND-TRUTH (Gazebo) -> COSTMAP SSRL
-#
-#  Catena: camera semantica Gazebo -> gt_segmentation_relay ->
-#          semantic_costmap_node -> confinement_layer -> ssrl_combiner
-#          -> /ssrl_costmap (global costmap di Nav2)
-# ============================================================
-
 gt_segmentation_relay:
   ros__parameters:
-    labels_topic: /semantic/labels_map     # topic della camera semantica di Gazebo (input)
-    out_topic: /semantic/segmentation      # topic segmentazione in ID Cityscapes (output)
-    publish_overlay: true                  # pubblica anche l'overlay colorato per debug
+    labels_topic: /semantic/labels_map     # Gazebo semantic camera topic (input)
+    out_topic: /semantic/segmentation      # segmentation in Cityscapes IDs (output)
+    publish_overlay: true                  # also publish the coloured debug overlay
 
 semantic_costmap_node:
   ros__parameters:
-    # ----- frame -----
-    target_frame: map                      # frame della mappa persistente (fisso, globale)
-    camera_optical_frame: camera_rgb_optical_frame  # frame ottico della camera (per l'IPM)
-    base_frame: base_footprint             # frame base del robot (per posizione/finestra)
+    # ----- frames -----
+    target_frame: map                      # persistent map frame (fixed, global)
+    camera_optical_frame: camera_rgb_optical_frame   # camera optical frame (for IPM)
+    base_frame: base_footprint             # robot base frame (pose / window)
 
-    # ----- griglia -----
-    resolution: 0.05                       # [m/cella] risoluzione della mappa (5 cm)
-    initial_size_m: 10.0                   # [m] lato della griglia iniziale; poi AUTO-GROW
-    grow_margin_m: 3.0                     # [m] margine aggiunto a ogni espansione automatica
+    # ----- grid -----
+    resolution: 0.05                       # [m/cell] map resolution (5 cm)
+    initial_size_m: 10.0                   # [m] initial grid side; then AUTO-GROW
+    grow_margin_m: 3.0                     # [m] margin added on each auto expansion
 
-    # ----- proiezione IPM (pixel camera -> terra) -----
-    pixel_stride: 4                        # campiona 1 pixel ogni N (4 = -94% pixel, veloce)
-    max_range: 5.0                         # [m] distanza max considerata per la VISTA/occlusione
-    min_row_frac: 0.55                     # campiona l'immagine da questa frazione in giu' (0.55 = solo la meta' bassa: il suolo)
-    min_ray_downness: 0.06                 # ANTI-SPALMAMENTO: scarta raggi con inclinazione verso il basso i raggi quasi-orizzontali proiettano lontano e impreciso
-    map_write_max_range: 4.5               # [m] SCRIVE in mappa solo entro questa distanza (dove l'IPM e' accurato); oltre = solo vista
+    # ----- IPM projection (camera pixel -> ground) -----
+    pixel_stride: 4                        # sample 1 pixel every N (4 = -94% pixels, fast)
+    max_range: 5.5                         # [m] max distance considered for view/occlusion
+    min_row_frac: 0.55                     # sample the image from this fraction downward (0.55 = lower half = the ground)
+    min_ray_downness: 0.06                 # ANTI-SMEAR: drop near-horizontal rays (they project far and imprecise)
+    map_write_max_range: 5.0               # [m] WRITE to map only within this range (where IPM is accurate); beyond = view only
 
-    # ----- pubblicazione full map (latched) -----
-    full_map_period_s: 1.5                 # [s] ripubblica la full map ogni N secondi (aggiornamento periodico, leggero)
-    significant_change_cells: 15           # se cambiano >= N celle in modo RILEVANTE (appare/sparisce un ostacolo), pubblica SUBITO senza aspettare il periodo.
+    # ----- full map publishing (latched) -----
+    full_map_period_s: 1.0                 # [s] republish the full map every N seconds (periodic, cheap)
+    significant_change_cells: 15           # if >= N cells change meaningfully (obstacle appears/disappears), publish IMMEDIATELY
 
-    # ----- occlusione (z-buffer polare) -----
-    occ_sector_deg: 2.0                    # [deg] ampiezza dei settori angolari dello z-buffer
-    occ_margin: 0.15                       # [m] oltre il primo ostacolo prima di dire "occluso"
-    occ_weak: 0.10                         # peso di un'osservazione occlusa (0.1 = quasi ignorata, ma non scartata: puo' confermare nel tempo)
+    # ----- occlusion (polar z-buffer) -----
+    occ_sector_deg: 2.0                    # [deg] angular width of z-buffer sectors
+    occ_margin: 0.15                       # [m] beyond the first obstacle before calling it "occluded"
+    occ_weak: 0.10                         # weight of an occluded observation (0.1 = nearly ignored, but not dropped: can still confirm over time)
 
-    # ----- pesi e confidenza (fusione temporale) -----
-    w_dist_min: 0.03                       # peso minimo di un'osservazione a max_range (vicino pesa ~1, lontano pesa poco)
-    gate_ratio: 0.7                        # per cambiare una cella serve peso >= gate_ratio * confidenza esistente (protegge le celle consolidate)
+    # ----- weights and confidence (temporal fusion) -----
+    w_dist_min: 0.03                       # min weight of an observation at max_range (near ~1, far small)
 
-    # classi VERTICALI che bloccano la vista (usate SOLO per l'occlusione):
-    # 2=building 3=wall 4=fence 5=pole 7=sign 8=vegetation 11=person 12=rider 13-18=veicoli
+    # VERTICAL classes that block the view (used ONLY for occlusion):
+    # 2=building 3=wall 4=fence 5=pole 7=sign 8=vegetation 11=person 12=rider 13-18=vehicles
+    # NOTE: this means "OCCLUDES THE VIEW", NOT "stands upright". Class 8 (vegetation)
+    # includes grass, which is FLAT: don't treat it as a vertical LiDAR echo.
     blocker_classes: [2,3,4,5,7,8,11,12,13,14,15,16,17,18]
 
-    # ----- persistenza mappa (file .npz in semantic/maps/) -----
-    map_save_name: 'map1'                  # Vuoto = niente.
-    map_load_name: 'map1'                  # Vuoto = parte da zero.
+    # ----- ANTI-SMEAR: true pixel position from depth -----
+    # IPM assumes every pixel lies on the ground: a pixel at height h, camera at height H,
+    # lands at d*H/(H-h) -> a trunk pixel at 0.16 m projects an object from 2 m out to 34 m.
+    # That's the smear, and it worsens up close. With depth we don't GUESS the position, we
+    # MEASURE it: all pixels of a trunk fall on the trunk cell. IPM stays only where depth
+    # is missing (fallback, never worse).
+    use_depth_projection: true             # true = position pixels by depth measurement; false = IPM only (smears)
+    depth_topic: /camera/depth_image
+    max_obstacle_height: 0.60              # [m] above this, don't write: canopies, roofs, signs the robot passes under
+    depth_max_age_s: 0.5                   # depth older than this = not used (and it says so)
+    veto_verbose: false                    # true = log how many pixels are measured/discarded per frame
 
-    # ----- oggetti dinamici (ESCLUSI dalla mappa persistente) -----
-    dynamic_classes: [11,12,13,14,15,16,17,18]  # persona, rider, veicoli
-    dyn_v_thresh: 0.3                      # [m/s] sopra = oggetto 'in movimento' -> non mappato
-    dyn_gate: 1.0                          # [m] distanza max per associare una traccia tra frame
-    dyn_min_obs: 3                         # frame minimi prima di fidarsi della velocita' stimata
-    dyn_timeout: 1.0                       # [s] eta' max di una traccia non piu' vista
-    dyn_vel_beta: 0.6                      # smoothing (EMA) della velocita' stimata
+    # ----- map persistence (.npz file in semantic/maps/) -----
+    map_save_name: 'map2'                  # empty = don't save
+    map_load_name: 'map2'                  # empty = start from scratch
+    autosave: false                        # true = save the map on node SHUTDOWN (Ctrl-C); needs map_save_name set
 
-    # ----- GATE LOCALIZZAZIONE ROBUSTO (isteresi + EMA) -----
-    # Sospende la mappatura SOLO su perdita GRAVE e PERSISTENTE della
-    # localizzazione (i picchi isolati di covarianza AMCL non sospendono).
-    # La mappa esistente resta pubblicata; riprende da sola quando la
-    # localizzazione torna buona.
-    use_loc_quality_gate: true             # attiva/disattiva il gate
-    loc_pose_topic: /amcl_pose             # topic della posa con covarianza (per GPS+EKF: /odometry/filtered)
-    loc_cov_source: pose_with_cov          # 'pose_with_cov' per AMCL, 'odometry' per EKF (robot_localization)
-    loc_std_suspend_m: 1.0                 # [m] se la std SMUSSATA supera questo -> SOSPENDI
-    loc_std_resume_m: 0.5                  # [m] se scende sotto questo -> RIPRENDI (isteresi)
-    loc_cov_ema: 0.4                       # smoothing della covarianza (0..1; piu' alto = piu' reattivo, piu' basso = piu' filtrato)
+    # ----- dynamic objects (EXCLUDED from the persistent map) -----
+    dynamic_classes: [11,12,13,14,15,16,17,18]   # person, rider, vehicles
+    dyn_v_thresh: 0.3                      # [m/s] above = "moving" -> not mapped
+    dyn_gate: 1.0                          # [m] max distance to associate a track across frames
+    dyn_min_obs: 3                         # min frames before trusting the estimated velocity
+    dyn_timeout: 1.0                       # [s] max age of a track no longer seen
+    dyn_vel_beta: 0.6                      # velocity smoothing (EMA)
+
+    # ----- dynamics SILENCE zone (no footprints in the map) -----
+    map_static_dynamics: false             # false = a dynamic-class object NEVER writes to the map, even when still
+    dyn_dilate_px: 6                       # [px] halo around dynamics where nothing is written (catches mis-segmented edge pixels and IPM smear of the body)
+
+    # ----- EVIDENCE: the map defends a cell in proportion to how much it has been seen -----
+    # The map remembers the cell CLASS, not just the cost -> "agree/disagree" is an exact
+    # match. Confidence C is an EVIDENCE COUNTER (no longer the max weight ever seen, which
+    # was blind to repetition):
+    #    AGREEING observation    -> C rises  (+confirm_gain * weight)
+    #    DISAGREEING observation -> C falls  (-deny_penalty * weight)
+    #    C <= 0 -> the cell lost its defence and the new class replaces it OUTRIGHT.
+    # Trust costs more than it earns, and there's a ceiling: no cell becomes immortal.
+    #    fresh cell (C=2) -> falls after 2 close disagreements
+    #    mature cell (C=8) -> needs 4, CONSECUTIVE and CLOSE
+    conf_max: 8.0          # evidence CEILING (no cell is immortal)
+    conf_init: 2.0         # defence of a just-entered cell (low: must earn it)
+    confirm_gain: 1.0      # one confirmation is worth +1 * weight
+    deny_penalty: 2.0      # one denial is worth -2 * weight  <- ASYMMETRY: denying costs double
+                           #   RAISE (3-4) if noise stays in the map too long
+                           #   LOWER (1.5) if true cells flip too easily
+    conf_decay: 0.99       # evidence of unseen cells ages (-1%/s)
+
+    # ----- MAP ENTRY: only after N CONSECUTIVE confirmations, then written OUTRIGHT -----
+    # The counter that keeps NOISE out of the map: a new cell enters only after being seen
+    # N times IN A ROW. Random noise doesn't repeat N times in a row. When it enters, it
+    # enters at FULL cost: no gradients.
+    new_hits: 4            # 2 = permissive (short range, must cover ground) / 4 = strict (map already built)
+    change_hits: 2         # consecutive confirmations of the OPPOSITE class to flip a cell (on top of C reaching 0)
+
+    # ----- ROBUST localization gate (EMA + hysteresis) -----
+    # Suspends mapping ONLY on SEVERE, PERSISTENT localization loss (isolated covariance
+    # spikes don't suspend). The existing map stays published; resumes on its own when
+    # localization recovers.
+    use_loc_quality_gate: true             # enable/disable the gate
+    loc_pose_topic: /odometry/filtered     # pose-with-covariance topic (/amcl_pose for AMCL)
+    loc_cov_source: odometry               # 'pose_with_cov' for AMCL, 'odometry' for EKF (robot_localization)
+    loc_std_suspend_m: 1.0                 # [m] smoothed std above this -> SUSPEND
+    loc_std_resume_m: 0.5                  # [m] below this -> RESUME (hysteresis)
+    loc_cov_ema: 0.4                       # covariance smoothing (0..1; higher = more reactive)
 
 confinement_layer:
   ros__parameters:
-    in_topic: /semantic_costmap            # mappa semantica in ingresso (latched)
-    out_topic: /confinement_cost           # campo di confinamento in uscita (latched)
-    sidewalk_cost_max: 15                  # celle con costo <= questo = marciapiede
-    conf_max: 50.0                         # costo di confinamento AL BORDO del marciapiede
-    falloff: 0.4                           # [m] decadimento esponenziale verso il centro (a 0.4m dal bordo il costo e' ~30, a 1m ~7)
-    include_unknown_as_edge: true          # l'ignoto (-1) conta come "fuori marciapiede" (prudente: il bordo verso l'ignoto respinge)
+    in_topic: /semantic_costmap            # semantic map in (latched)
+    out_topic: /confinement_cost           # confinement field out (latched)
+    sidewalk_cost_max: 15                  # cells with cost <= this = sidewalk
+    conf_max: 50.0                         # confinement cost AT the sidewalk edge
+    falloff: 0.4                           # [m] exponential decay toward the centre (at 0.4 m ~30, at 1 m ~7)
+    include_unknown_as_edge: false         # false = unknown does NOT repel, so the robot explores it
 
 ssrl_combiner:
   ros__parameters:
-    semantic_topic: /semantic_costmap      # mappa-misura (classi -> costi)
-    layer_topics: ['/confinement_cost']    # layer di rischio da sommare (in futuro: aggiungere qui i dinamici)
-    out_topic: /ssrl_costmap               # costmap finale per il global costmap di Nav2
+    semantic_topic: /semantic_costmap      # measure map (classes -> costs)
+    layer_topics: ['/confinement_cost']    # risk layers to add (future: add dynamics here)
+    out_topic: /ssrl_costmap               # final costmap for the Nav2 global costmap
