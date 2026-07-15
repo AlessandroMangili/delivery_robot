@@ -24,7 +24,7 @@ def generate_launch_description():
     )
 
     rviz_config_arg = DeclareLaunchArgument(
-        'rviz_config', default_value='navigation.rviz',
+        'rviz_config', default_value='navigation_gps.rviz',
         description='RViz config file'
     )
 
