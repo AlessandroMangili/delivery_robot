@@ -58,10 +58,9 @@ def generate_launch_description():
         description='Flag to enable use_sim_time'
     )
 
-    # NUOVO: headless. Se true -> Gazebo parte SENZA GUI (solo server) = molto piu' leggero.
     headless_arg = DeclareLaunchArgument(
         'headless', default_value='false',
-        description='Se true avvia Gazebo senza GUI (server-only), molto piu' + "'" + 'leggero'
+        description='If true, starts Gazebo without GUI'
     )
 
     urdf_file_path = PathJoinSubstitution([
@@ -70,9 +69,6 @@ def generate_launch_description():
         LaunchConfiguration('model')
     ])
 
-    # gli argomenti gz: '-s' = server only (headless), altrimenti server+gui.
-    #   -r = run subito, -v -v1 = verbosita'
-    # PythonExpression sceglie la stringa in base a 'headless'.
     gz_args_value = PythonExpression([
         "'-s -r -v -v1' if '",
         LaunchConfiguration('headless'),
@@ -136,32 +132,6 @@ def generate_launch_description():
             {'use_sim_time': LaunchConfiguration('use_sim_time')},
         ]
     )
-    
-    # EKF globale: fonde odom + imu + gps -> pubblica map->odom
-    ekf_params = PathJoinSubstitution([pkg_simulation, 'config', 'ekf_gps.yaml'])
-    ekf_node = Node(
-        package='robot_localization',
-        executable='ekf_node',
-        name='ekf_filter_node',
-        output='screen',
-        parameters=[ekf_params, {'use_sim_time': LaunchConfiguration('use_sim_time')}],
-        # l'EKF pubblica /odometry/filtered (default) e la TF map->odom
-    )
-
-    # navsat_transform: GPS (lat/lon) -> /odometry/gps nel frame map
-    navsat_transform_node = Node(
-        package='robot_localization',
-        executable='navsat_transform_node',
-        name='navsat_transform_node',
-        output='screen',
-        parameters=[ekf_params, {'use_sim_time': LaunchConfiguration('use_sim_time')}],
-        remappings=[
-            ('imu', '/imu'),                          # heading
-            ('gps/fix', '/navsat'),                   # NavSatFix dal bridge
-            ('odometry/filtered', '/odometry/filtered'),  # uscita dell'EKF globale
-            ('odometry/gps', '/odometry/gps'),        # ingresso odom1 dell'EKF
-        ],
-    )
 
     gz_bridge_node = Node(
         package="ros_gz_bridge",
@@ -204,7 +174,5 @@ def generate_launch_description():
     launchDescriptionObject.add_action(spawn_urdf_node)
     launchDescriptionObject.add_action(gz_bridge_node)
     launchDescriptionObject.add_action(robot_state_publisher_node)
-    #launchDescriptionObject.add_action(ekf_node)
-    #launchDescriptionObject.add_action(navsat_transform_node)
 
     return launchDescriptionObject

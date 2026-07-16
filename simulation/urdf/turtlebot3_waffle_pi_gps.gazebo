@@ -91,11 +91,6 @@
                <gz_frame_id>camera_link</gz_frame_id>
           </sensor>
 
-          <!-- ===== Segmentation camera ground-truth =====
-          STESSA risoluzione / FOV / clip / optical_frame della rgbd_camera,
-          cosi' gli intrinseci (/camera/camera_info) e la TF coincidono e il
-          semantic_costmap_node funziona senza modifiche.
-          Pubblica i topic gz:  /semantic/labels_map  e  /semantic/colored_map -->
           <sensor name="semantic_camera" type="segmentation">
                <topic>semantic</topic>
                <camera>

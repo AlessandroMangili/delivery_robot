@@ -6,74 +6,67 @@ gt_segmentation_relay:
 
 semantic_costmap_node:
   ros__parameters:
-    # ----- frames -----
-    target_frame: map                      # persistent map frame (fixed, global)
-    camera_optical_frame: camera_rgb_optical_frame   # camera optical frame (for IPM)
-    base_frame: base_footprint             # robot base frame (pose / window)
+    # Frames
+    target_frame: map                                 # persistent map frame (fixed, global)
+    camera_optical_frame: camera_rgb_optical_frame    # camera optical frame (for IPM)
+    base_frame: base_footprint                        # robot base frame (pose / window)
 
-    # ----- grid -----
+    # Grid
     resolution: 0.05                       # [m/cell] map resolution (5 cm)
-    initial_size_m: 10.0                   # [m] initial grid side; then AUTO-GROW
+    initial_size_m: 10.0                   # [m] initial grid side, then auto grow
     grow_margin_m: 3.0                     # [m] margin added on each auto expansion
 
-    # ----- IPM projection (camera pixel -> ground) -----
-    pixel_stride: 4                        # sample 1 pixel every N (4 = -94% pixels, fast)
+    # IPM projection (camera pixel to the ground)
+    pixel_stride: 4                        # sample 1 pixel every N
     max_range: 5.5                         # [m] max distance considered for view/occlusion
     min_row_frac: 0.55                     # sample the image from this fraction downward (0.55 = lower half = the ground)
     min_ray_downness: 0.06                 # ANTI-SMEAR: drop near-horizontal rays (they project far and imprecise)
-    map_write_max_range: 5.0               # [m] WRITE to map only within this range (where IPM is accurate); beyond = view only
+    map_write_max_range: 5.0               # [m] WRITE to map only within this range (where IPM is accurate)
 
-    # ----- full map publishing (latched) -----
-    full_map_period_s: 1.0                 # [s] republish the full map every N seconds (periodic, cheap)
-    significant_change_cells: 15           # if >= N cells change meaningfully (obstacle appears/disappears), publish IMMEDIATELY
+    # Full map publishing
+    full_map_period_s: 1.0                 # [s] republish the full map every N seconds
+    significant_change_cells: 15           # if >= N cells change meaningfully, publish IMMEDIATELY
 
-    # ----- occlusion (polar z-buffer) -----
+    # Occlusion (polar z-buffer)
     occ_sector_deg: 2.0                    # [deg] angular width of z-buffer sectors
     occ_margin: 0.15                       # [m] beyond the first obstacle before calling it "occluded"
     occ_weak: 0.10                         # weight of an occluded observation (0.1 = nearly ignored, but not dropped: can still confirm over time)
 
-    # ----- weights and confidence (temporal fusion) -----
+    # Weights and confidence -----
     w_dist_min: 0.03                       # min weight of an observation at max_range (near ~1, far small)
 
-    # VERTICAL classes that block the view (used ONLY for occlusion):
-    # 2=building 3=wall 4=fence 5=pole 7=sign 8=vegetation 11=person 12=rider 13-18=vehicles
-    # NOTE: this means "OCCLUDES THE VIEW", NOT "stands upright". Class 8 (vegetation)
-    # includes grass, which is FLAT: don't treat it as a vertical LiDAR echo.
+    # VERTICAL classes that block the view, this means "OCCLUDES THE VIEW", NOT "stands upright"
     blocker_classes: [2,3,4,5,7,8,11,12,13,14,15,16,17,18]
 
-    # ----- ANTI-SMEAR: true pixel position from depth -----
-    # IPM assumes every pixel lies on the ground: a pixel at height h, camera at height H,
-    # lands at d*H/(H-h) -> a trunk pixel at 0.16 m projects an object from 2 m out to 34 m.
-    # That's the smear, and it worsens up close. With depth we don't GUESS the position, we
-    # MEASURE it: all pixels of a trunk fall on the trunk cell. IPM stays only where depth
-    # is missing (fallback, never worse).
-    use_depth_projection: true             # true = position pixels by depth measurement; false = IPM only (smears)
+    # ANTI-SMEAR: true pixel position from depth
+    # IPM assumes every pixel lies on the ground: a pixel at height h, camera at height H lands at d*H/(H-h) 
+    # With depth we don't GUESS the position, we MEASURE it: all pixels of a trunk fall on the trunk cell. IPM stays only where depth is missing
+    use_depth_projection: true             # true = position pixels by depth measurement; false = IPM only
     depth_topic: /camera/depth_image
     max_obstacle_height: 0.60              # [m] above this, don't write: canopies, roofs, signs the robot passes under
-    depth_max_age_s: 0.5                   # depth older than this = not used (and it says so)
+    depth_max_age_s: 0.5                   # depth older than this = not used
     veto_verbose: false                    # true = log how many pixels are measured/discarded per frame
 
-    # ----- map persistence (.npz file in semantic/maps/) -----
+    # Map persistence
     map_save_name: 'map2'                  # empty = don't save
     map_load_name: 'map2'                  # empty = start from scratch
-    autosave: false                        # true = save the map on node SHUTDOWN (Ctrl-C); needs map_save_name set
+    autosave: false                        # true = save the map on node SHUTDOWN
 
-    # ----- dynamic objects (EXCLUDED from the persistent map) -----
-    dynamic_classes: [11,12,13,14,15,16,17,18]   # person, rider, vehicles
-    dyn_v_thresh: 0.3                      # [m/s] above = "moving" -> not mapped
-    dyn_gate: 1.0                          # [m] max distance to associate a track across frames
-    dyn_min_obs: 3                         # min frames before trusting the estimated velocity
-    dyn_timeout: 1.0                       # [s] max age of a track no longer seen
-    dyn_vel_beta: 0.6                      # velocity smoothing (EMA)
+    # Dynamic objects exclusion -----
+    dynamic_classes: [11,12,13,14,15,16,17,18]
+    dyn_v_thresh: 0.3                             # [m/s] above = "moving"
+    dyn_gate: 1.0                                 # [m] max distance to associate a track across frames
+    dyn_min_obs: 3                                # min frames before trusting the estimated velocity
+    dyn_timeout: 1.0                              # [s] max age of a track no longer seen
+    dyn_vel_beta: 0.6                             # velocity smoothing (EMA)
 
-    # ----- dynamics SILENCE zone (no footprints in the map) -----
+    # Dynamics SILENCE zone (no footprints in the map) -----
     map_static_dynamics: false             # false = a dynamic-class object NEVER writes to the map, even when still
     dyn_dilate_px: 6                       # [px] halo around dynamics where nothing is written (catches mis-segmented edge pixels and IPM smear of the body)
 
-    # ----- EVIDENCE: the map defends a cell in proportion to how much it has been seen -----
-    # The map remembers the cell CLASS, not just the cost -> "agree/disagree" is an exact
-    # match. Confidence C is an EVIDENCE COUNTER (no longer the max weight ever seen, which
-    # was blind to repetition):
+    # EVIDENCE: the map defends a cell in proportion to how much it has been seen
+    # The map remembers the cell CLASS, not just the cost. 
+    # Confidence C is an EVIDENCE COUNTER:
     #    AGREEING observation    -> C rises  (+confirm_gain * weight)
     #    DISAGREEING observation -> C falls  (-deny_penalty * weight)
     #    C <= 0 -> the cell lost its defence and the new class replaces it OUTRIGHT.
@@ -88,17 +81,13 @@ semantic_costmap_node:
                            #   LOWER (1.5) if true cells flip too easily
     conf_decay: 0.99       # evidence of unseen cells ages (-1%/s)
 
-    # ----- MAP ENTRY: only after N CONSECUTIVE confirmations, then written OUTRIGHT -----
-    # The counter that keeps NOISE out of the map: a new cell enters only after being seen
-    # N times IN A ROW. Random noise doesn't repeat N times in a row. When it enters, it
-    # enters at FULL cost: no gradients.
-    new_hits: 4            # 2 = permissive (short range, must cover ground) / 4 = strict (map already built)
+    # MAP ENTRY: only after N CONSECUTIVE confirmations, then written OUTRIGHT
+    # The counter that keeps NOISE out of the map: a new cell enters only after being seen N times IN A ROW. 
+    new_hits: 4            # 2 = permissive / 4 = strict
     change_hits: 2         # consecutive confirmations of the OPPOSITE class to flip a cell (on top of C reaching 0)
 
-    # ----- ROBUST localization gate (EMA + hysteresis) -----
-    # Suspends mapping ONLY on SEVERE, PERSISTENT localization loss (isolated covariance
-    # spikes don't suspend). The existing map stays published; resumes on its own when
-    # localization recovers.
+    # ROBUST localization gate (EMA + hysteresis)
+    # Suspends mapping ONLY on SEVERE, PERSISTENT localization loss. The existing map stays published; resumes on its own when localization recovers.
     use_loc_quality_gate: true             # enable/disable the gate
     loc_pose_topic: /odometry/filtered     # pose-with-covariance topic (/amcl_pose for AMCL)
     loc_cov_source: odometry               # 'pose_with_cov' for AMCL, 'odometry' for EKF (robot_localization)

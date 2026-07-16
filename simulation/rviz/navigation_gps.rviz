@@ -320,7 +320,7 @@ Visualization Manager:
       Class: rviz_default_plugins/Map
       Color Scheme: map
       Draw Behind: false
-      Enabled: true
+      Enabled: false
       Name: Ssrl - costmap
       Topic:
         Depth: 5
@@ -336,7 +336,7 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /ssrl_costmap_updates
       Use Timestamp: false
-      Value: true
+      Value: false
     - Class: rviz_default_plugins/Image
       Enabled: true
       Max Value: 1
@@ -563,9 +563,9 @@ Visualization Manager:
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: 3.05106782913208
-        Y: -1.5665314197540283
-        Z: -3.6770780086517334
+        X: 2.498939275741577
+        Y: -1.6657376289367676
+        Z: -3.9330170154571533
       Focal Shape Fixed Size: false
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
@@ -574,7 +574,7 @@ Visualization Manager:
       Pitch: 1.1347968578338623
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz)
-      Yaw: 3.115400552749634
+      Yaw: 3.100400447845459
     Saved: ~
 Window Geometry:
   Displays:
