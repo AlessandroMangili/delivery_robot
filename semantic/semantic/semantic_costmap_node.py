@@ -153,7 +153,6 @@ class SemanticCostmapNode(Node):
         self.loc_cov_ema = float(gp('loc_cov_ema').value)
         self.loc_std_smooth = 0.0
         self.loc_ok = True
-        self._loc_msgs = 0
         if self.use_loc_gate:
             from geometry_msgs.msg import PoseWithCovarianceStamped
             from nav_msgs.msg import Odometry as _Odom
@@ -165,11 +164,6 @@ class SemanticCostmapNode(Node):
                                          self.loc_cb_pwc, 10)
         self.use_depth_veto = bool(gp('use_depth_projection').value)
         self.max_obs_h = float(gp('max_obstacle_height').value)
-        self._veto_stats = [0, 0]
-        self._depth_msgs = 0
-        self._veto_last = -1
-        self._depth_shape = None
-        self.create_timer(5.0, self._depth_watchdog)
         self.depth_max_age = float(gp('depth_max_age_s').value)
         self.veto_verbose = bool(gp('veto_verbose').value)
         self.depth = None
@@ -250,7 +244,6 @@ class SemanticCostmapNode(Node):
         self.create_service(Trigger, '~/save_map', self.save_map_cb)
 
         self.create_timer(self.full_map_period, self._full_map_timer)
-        self.create_timer(5.0, self._loc_watchdog)
 
         self.autosave = bool(self.get_parameter('autosave').value)
         if self.autosave and not save_name:
@@ -399,30 +392,12 @@ class SemanticCostmapNode(Node):
         """Pose covariance from EKF (Odometry). Same 6x6 layout."""
         self._update_loc_quality(msg.pose.covariance)
 
-    def _loc_watchdog(self):
-        """A gate that NEVER receives a pose is not a gate: it's a fiction.
-
-        If loc_pose_topic and loc_cov_source don't match (e.g. topic /odometry/filtered but
-        type PoseWithCovarianceStamped), the subscription receives nothing -- silently.
-        loc_ok stays True forever and mapping never suspends, not even with a lost pose.
-        This says it out loud instead of letting you believe you're protected."""
-        if not self.use_loc_gate:
-            return
-        if self._loc_msgs == 0:
-            self.get_logger().error(
-                f"LOCALIZATION GATE BLIND: no pose received on '{self.loc_pose_topic}'. "
-                f"The gate will NEVER suspend mapping. Check that loc_pose_topic and "
-                f"loc_cov_source are CONSISTENT (AMCL: /amcl_pose + pose_with_cov | "
-                f"EKF/UKF: /odometry/filtered + odometry) and that the localization node runs.",
-                throttle_duration_sec=10.0)
-
     def _update_loc_quality(self, cov):
-        self._loc_msgs += 1
         """ROBUST gate: EMA on pose std + HYSTERESIS.
         - EMA: isolated covariance spikes (typical of AMCL) don't suspend; the TREND counts.
         - Hysteresis: suspends above loc_std_suspend, resumes below loc_std_resume.
-        - A 'stale' pose doesn't block: if AMCL stops publishing (robot idle), the state
-          keeps its last known value."""
+        - A 'stale' pose doesn't block: if the source stops publishing, the state keeps
+          its last known value."""
         var_x = max(0.0, float(cov[0]))
         var_y = max(0.0, float(cov[7]))
         std_xy = float(np.sqrt(max(var_x, var_y)))
@@ -440,32 +415,6 @@ class SemanticCostmapNode(Node):
                 f'Localization RECOVERED (smoothed std {self.loc_std_smooth:.2f}m < '
                 f'{self.loc_std_resume}m) -> mapping RESUMED.')
 
-    def _depth_watchdog(self):
-        """Says OUT LOUD whether anti-smearing is working. Without this, it can fail in THREE
-        different ways silently: depth never received, seg_cb returning before reaching it,
-        or depth received but never valid."""
-        if not self.use_depth_veto:
-            return
-        usati, tot = self._veto_stats
-        if self._depth_msgs == 0:
-            self.get_logger().error(
-                f'DEPTH MISSING: ZERO depth messages received. The topic is not '
-                f'reaching the node. Check: ros2 topic hz /camera/depth_image')
-        elif tot == 0:
-            self.get_logger().error(
-                f'DEPTH NOT USED: received ({self._depth_msgs} msg, '
-                f'shape {self._depth_shape}) but seg_cb never reaches the depth step '
-                f'(missing map TF, or camera_info, or the localization gate blocks).')
-        elif usati == 0:
-            self.get_logger().error(
-                f'DEPTH NEVER USED: {tot} frames processed (shape {self._depth_shape} differs '
-                f'from segmentation, or timestamps out of sync).')
-        else:
-            self.get_logger().info(
-                f'Depth ACTIVE: used in {usati}/{tot} frames, {self._veto_last} pixels '
-                f'positioned by MEASUREMENT in the last frame (rest: IPM fallback)')
-        self._veto_stats = [0, 0]
-
     def depth_cb(self, msg: Image):
         """Depth camera: stored and used in seg_cb to position pixels by height."""
         try:
@@ -479,8 +428,6 @@ class SemanticCostmapNode(Node):
             d = d / 1000.0
         self.depth = d
         self.depth_t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
-        self._depth_msgs += 1
-        self._depth_shape = d.shape
 
     def seg_cb(self, msg: Image):
         stamp_sec = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
@@ -551,8 +498,6 @@ class SemanticCostmapNode(Node):
                 ok = (ok | use_d) & ~overhead
                 n_depth = int(np.count_nonzero(use_d))
 
-                self._veto_stats[0] += 1
-                self._veto_last = n_depth
                 if self.veto_verbose:
                     self.get_logger().info(
                         f'Depth: {n_depth} pixels positioned by MEASUREMENT, '
@@ -563,7 +508,6 @@ class SemanticCostmapNode(Node):
             self.get_logger().error(
                 'NO DEPTH: positions guessed with IPM -> smearing.',
                 throttle_duration_sec=10.0)
-        self._veto_stats[1] += 1
 
         dist = np.hypot(X - bx, Y - by)
         ok = ok & (dist < self.map_write_max_range)
