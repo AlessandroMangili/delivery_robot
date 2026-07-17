@@ -67,10 +67,8 @@ class DynamicTracker(Node):
         self.declare_parameter('track_timeout_s', 0.6)
         self.declare_parameter('min_speed', 0.30)
         # --- conferma dinamico con isteresi (anti-falsi-positivi statici) ---
-        self.declare_parameter('promote_frames', 4)         # frame veloci consecutivi per promuovere
-        self.declare_parameter('promote_min_disp_m', 0.25)  # [m] spostamento minimo sulla finestra
-        self.declare_parameter('demote_frames', 8)          # frame lenti consecutivi per retrocedere
-        self.declare_parameter('disp_window_s', 1.0)        # [s] finestra su cui misurare lo spostamento persistente
+        self.declare_parameter('promote_frames', 4)         # frame in movimento consecutivi per promuovere a dinamico
+        self.declare_parameter('demote_frames', 8)          # frame lenti consecutivi per retrocedere a statico
         self.declare_parameter('horizon_s', 3.0)
         self.declare_parameter('cone_min_length', 4.0)   # [m] lunghezza minima anche a bassa velocita'
         self.declare_parameter('cone_halfwidth_m', 0.4)
@@ -107,9 +105,7 @@ class DynamicTracker(Node):
         self.track_timeout = float(gp('track_timeout_s').value)
         self.min_speed = float(gp('min_speed').value)
         self.promote_frames = int(gp('promote_frames').value)
-        self.promote_min_disp = float(gp('promote_min_disp_m').value)
         self.demote_frames = int(gp('demote_frames').value)
-        self.disp_window_s = float(gp('disp_window_s').value)
         self.horizon_s = float(gp('horizon_s').value)
         self.cone_min_length = float(gp('cone_min_length').value)
         self.cone_halfwidth = float(gp('cone_halfwidth_m').value)
@@ -337,11 +333,10 @@ class DynamicTracker(Node):
                          self.kf_v_init ** 2, self.kf_v_init ** 2]).astype(float)
             self.tracks.append(dict(id=self.next_id, s=s, P=P,
                                     n=1, t=now_s, t_seen=now_s,
-                                    # --- stato di conferma dinamico (isteresi) ---
+                                    # --- stato di conferma dinamico (N frame + isteresi) ---
                                     is_dynamic=False,     # confermato dinamico?
-                                    mov_count=0,          # frame veloci consecutivi
-                                    still_count=0,        # frame lenti consecutivi
-                                    pos_hist=[(dx, dy, now_s)]))  # storia (x,y,t) per lo spostamento su finestra
+                                    mov_count=0,          # frame in movimento consecutivi
+                                    still_count=0))       # frame lenti consecutivi
             self.next_id += 1
 
         # 4) SCADENZA: sul tempo dell'ultima MISURA (non dell'ultima predizione),
@@ -357,49 +352,27 @@ class DynamicTracker(Node):
             tr['sv'] = float(np.sqrt(max(tr['P'][2, 2] + tr['P'][3, 3], 1e-9)))
             tr['sp'] = float(np.sqrt(max(tr['P'][0, 0] + tr['P'][1, 1], 1e-9)))
 
-            # --- CONFERMA DINAMICO con isteresi + spostamento su FINESTRA ---
-            # Il discriminante NON e' la direzione istantanea (un pedone a zigzag
-            # per schivare la gente la cambia continuamente, ma e' comunque
-            # dinamico!). E' lo SPOSTAMENTO PERSISTENTE nel tempo:
-            #   - un pedone, anche a zigzag, in ~1s si allontana molto da dov'era;
-            #   - uno statico rumoroso oscilla attorno a un punto: spostamento ~0.
-            # Cosi' teniamo i pedoni imprevedibili e blocchiamo il rumore.
-            # Regola di sicurezza: nel dubbio, dinamico (un falso negativo -pedone
-            # non visto- e' molto peggio di un falso positivo -statico evitato-).
+            # --- CONFERMA DINAMICO: N frame consecutivi di movimento (con isteresi) ---
+            # Un track diventa dinamico solo dopo essere stato visto "in movimento"
+            # (velocita' sopra soglia E sopra il rumore del Kalman) per promote_frames
+            # frame consecutivi. Evita che un cluster appena nato, con velocita'
+            # rumorosa, venga promosso subito. Isteresi: torna statico solo dopo
+            # demote_frames frame lenti consecutivi, cosi' il cono non lampeggia.
             speed = np.hypot(tr['vx'], tr['vy'])
-            fast_enough = (speed >= self.min_speed) and \
-                          (self.kf_min_snr <= 0.0 or speed >= self.kf_min_snr * tr['sv'])
+            moving = (speed >= self.min_speed) and \
+                     (self.kf_min_snr <= 0.0 or speed >= self.kf_min_snr * tr['sv'])
 
-            # aggiorna la storia delle posizioni e scarta quelle piu' vecchie
-            # della finestra (tengo un po' di margine oltre disp_window_s)
-            tr['pos_hist'].append((tr['x'], tr['y'], now_s))
-            tmin = now_s - max(self.disp_window_s * 1.5, self.disp_window_s + 0.2)
-            tr['pos_hist'] = [p for p in tr['pos_hist'] if p[2] >= tmin]
-
-            # spostamento sulla finestra: distanza tra la posizione di ~window_s fa
-            # e quella attuale. Cerco il campione piu' vicino a (now - window).
-            t_target = now_s - self.disp_window_s
-            ref = min(tr['pos_hist'], key=lambda p: abs(p[2] - t_target))
-            win_disp = np.hypot(tr['x'] - ref[0], tr['y'] - ref[1])
-            # e' valida solo se la finestra e' davvero coperta (track abbastanza vecchio)
-            window_covered = (now_s - tr['pos_hist'][0][2]) >= (self.disp_window_s * 0.8)
-
-            if fast_enough:
+            if moving:
                 tr['mov_count'] += 1
                 tr['still_count'] = 0
             else:
                 tr['still_count'] += 1
                 tr['mov_count'] = 0
 
-            # PROMOZIONE: serve TUTTO insieme:
-            #   - visto per abbastanza frame (min_obs): Kalman stabilizzato;
-            #   - abbastanza frame veloci (mov_count);
-            #   - la finestra temporale e' coperta (track abbastanza vecchio);
-            #   - spostamento PERSISTENTE sulla finestra (win_disp): il pedone,
-            #     anche a zigzag, si e' allontanato; lo statico rumoroso no.
+            # PROMOZIONE: visto abbastanza a lungo (min_obs, Kalman stabilizzato)
+            # E in movimento per promote_frames frame consecutivi.
             if (not tr['is_dynamic']) and tr['n'] >= self.min_obs \
-                    and tr['mov_count'] >= self.promote_frames \
-                    and window_covered and win_disp >= self.promote_min_disp:
+                    and tr['mov_count'] >= self.promote_frames:
                 tr['is_dynamic'] = True
 
             # RETROCESSIONE: fermo per abbastanza frame consecutivi (isteresi:
