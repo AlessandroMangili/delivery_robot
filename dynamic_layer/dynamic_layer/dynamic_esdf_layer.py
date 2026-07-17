@@ -19,6 +19,7 @@ from sensor_msgs.msg import LaserScan
 from nav_msgs.msg import OccupancyGrid, Odometry
 from visualization_msgs.msg import Marker, MarkerArray
 from geometry_msgs.msg import Point
+from dynamic_tracker_msgs.msg import Track, TrackArray
 
 import tf2_ros
 
@@ -65,6 +66,11 @@ class DynamicTracker(Node):
         self.declare_parameter('min_obs', 3)
         self.declare_parameter('track_timeout_s', 0.6)
         self.declare_parameter('min_speed', 0.30)
+        # --- conferma dinamico con isteresi (anti-falsi-positivi statici) ---
+        self.declare_parameter('promote_frames', 4)         # frame veloci consecutivi per promuovere
+        self.declare_parameter('promote_min_disp_m', 0.25)  # [m] spostamento minimo sulla finestra
+        self.declare_parameter('demote_frames', 8)          # frame lenti consecutivi per retrocedere
+        self.declare_parameter('disp_window_s', 1.0)        # [s] finestra su cui misurare lo spostamento persistente
         self.declare_parameter('horizon_s', 3.0)
         self.declare_parameter('cone_min_length', 4.0)   # [m] lunghezza minima anche a bassa velocita'
         self.declare_parameter('cone_halfwidth_m', 0.4)
@@ -100,6 +106,10 @@ class DynamicTracker(Node):
         self.min_obs = int(gp('min_obs').value)
         self.track_timeout = float(gp('track_timeout_s').value)
         self.min_speed = float(gp('min_speed').value)
+        self.promote_frames = int(gp('promote_frames').value)
+        self.promote_min_disp = float(gp('promote_min_disp_m').value)
+        self.demote_frames = int(gp('demote_frames').value)
+        self.disp_window_s = float(gp('disp_window_s').value)
         self.horizon_s = float(gp('horizon_s').value)
         self.cone_min_length = float(gp('cone_min_length').value)
         self.cone_halfwidth = float(gp('cone_halfwidth_m').value)
@@ -137,6 +147,8 @@ class DynamicTracker(Node):
                              history=HistoryPolicy.KEEP_LAST)
         self.pub = self.create_publisher(OccupancyGrid, self.out_topic, qos_map)
         self.markers_pub = self.create_publisher(MarkerArray, '/dynamic_tracks', 1)
+        # Tracce Kalman per il critic spazio-temporale MPPI (topic dedicato e leggero).
+        self.tracks_pub = self.create_publisher(TrackArray, '/dynamic_tracks_state', 10)
         self.timer = self.create_timer(1.0 / self.rate_hz, self.update)
 
         self.get_logger().info(
@@ -179,6 +191,7 @@ class DynamicTracker(Node):
         cost = self.build_cost(ox, oy)
         self.publish_cost(cost, ox, oy)
         self.publish_arrows()
+        self.publish_tracks()
 
     def scan_points_world(self, scan, rx, ry):
         # TF al timestamp dello scan (non l'ultima): allinea i punti al momento
@@ -323,7 +336,12 @@ class DynamicTracker(Node):
             P = np.diag([self.kf_sigma_z ** 2, self.kf_sigma_z ** 2,
                          self.kf_v_init ** 2, self.kf_v_init ** 2]).astype(float)
             self.tracks.append(dict(id=self.next_id, s=s, P=P,
-                                    n=1, t=now_s, t_seen=now_s))
+                                    n=1, t=now_s, t_seen=now_s,
+                                    # --- stato di conferma dinamico (isteresi) ---
+                                    is_dynamic=False,     # confermato dinamico?
+                                    mov_count=0,          # frame veloci consecutivi
+                                    still_count=0,        # frame lenti consecutivi
+                                    pos_hist=[(dx, dy, now_s)]))  # storia (x,y,t) per lo spostamento su finestra
             self.next_id += 1
 
         # 4) SCADENZA: sul tempo dell'ultima MISURA (non dell'ultima predizione),
@@ -337,6 +355,57 @@ class DynamicTracker(Node):
             tr['x'] = float(tr['s'][0]); tr['y'] = float(tr['s'][1])
             tr['vx'] = float(tr['s'][2]); tr['vy'] = float(tr['s'][3])
             tr['sv'] = float(np.sqrt(max(tr['P'][2, 2] + tr['P'][3, 3], 1e-9)))
+            tr['sp'] = float(np.sqrt(max(tr['P'][0, 0] + tr['P'][1, 1], 1e-9)))
+
+            # --- CONFERMA DINAMICO con isteresi + spostamento su FINESTRA ---
+            # Il discriminante NON e' la direzione istantanea (un pedone a zigzag
+            # per schivare la gente la cambia continuamente, ma e' comunque
+            # dinamico!). E' lo SPOSTAMENTO PERSISTENTE nel tempo:
+            #   - un pedone, anche a zigzag, in ~1s si allontana molto da dov'era;
+            #   - uno statico rumoroso oscilla attorno a un punto: spostamento ~0.
+            # Cosi' teniamo i pedoni imprevedibili e blocchiamo il rumore.
+            # Regola di sicurezza: nel dubbio, dinamico (un falso negativo -pedone
+            # non visto- e' molto peggio di un falso positivo -statico evitato-).
+            speed = np.hypot(tr['vx'], tr['vy'])
+            fast_enough = (speed >= self.min_speed) and \
+                          (self.kf_min_snr <= 0.0 or speed >= self.kf_min_snr * tr['sv'])
+
+            # aggiorna la storia delle posizioni e scarta quelle piu' vecchie
+            # della finestra (tengo un po' di margine oltre disp_window_s)
+            tr['pos_hist'].append((tr['x'], tr['y'], now_s))
+            tmin = now_s - max(self.disp_window_s * 1.5, self.disp_window_s + 0.2)
+            tr['pos_hist'] = [p for p in tr['pos_hist'] if p[2] >= tmin]
+
+            # spostamento sulla finestra: distanza tra la posizione di ~window_s fa
+            # e quella attuale. Cerco il campione piu' vicino a (now - window).
+            t_target = now_s - self.disp_window_s
+            ref = min(tr['pos_hist'], key=lambda p: abs(p[2] - t_target))
+            win_disp = np.hypot(tr['x'] - ref[0], tr['y'] - ref[1])
+            # e' valida solo se la finestra e' davvero coperta (track abbastanza vecchio)
+            window_covered = (now_s - tr['pos_hist'][0][2]) >= (self.disp_window_s * 0.8)
+
+            if fast_enough:
+                tr['mov_count'] += 1
+                tr['still_count'] = 0
+            else:
+                tr['still_count'] += 1
+                tr['mov_count'] = 0
+
+            # PROMOZIONE: serve TUTTO insieme:
+            #   - visto per abbastanza frame (min_obs): Kalman stabilizzato;
+            #   - abbastanza frame veloci (mov_count);
+            #   - la finestra temporale e' coperta (track abbastanza vecchio);
+            #   - spostamento PERSISTENTE sulla finestra (win_disp): il pedone,
+            #     anche a zigzag, si e' allontanato; lo statico rumoroso no.
+            if (not tr['is_dynamic']) and tr['n'] >= self.min_obs \
+                    and tr['mov_count'] >= self.promote_frames \
+                    and window_covered and win_disp >= self.promote_min_disp:
+                tr['is_dynamic'] = True
+
+            # RETROCESSIONE: fermo per abbastanza frame consecutivi (isteresi:
+            # non retrocede al primo frame lento, cosi' il cono non lampeggia)
+            if tr['is_dynamic'] and tr['still_count'] >= self.demote_frames:
+                tr['is_dynamic'] = False
 
     def build_cost(self, ox, oy):
         cost = np.zeros((self.n, self.n), dtype=np.uint8)
@@ -346,10 +415,12 @@ class DynamicTracker(Node):
             if tr['n'] < self.min_obs:
                 continue
             speed = np.hypot(tr['vx'], tr['vy'])
-            # DISCRIMINAZIONE PER MOVIMENTO: un track fermo (statico) non produce
-            # nulla, ne' nucleo ne' cono. Il gate velocita' viene PRIMA del timbro
-            # del nucleo -> muri e aiuole (velocita' ~ 0) non vengono marcati.
-            if speed < self.min_speed:
+            # DISCRIMINAZIONE PER MOVIMENTO CONFERMATO: non basta la velocita'
+            # istantanea (uno statico rumoroso a volte la supera). Serve la
+            # conferma con isteresi accumulata in track(): un track e' dinamico
+            # solo dopo essersi mosso in modo coerente e con spostamento reale.
+            # Muri e aiuole (che ballano ma non si spostano) non passano mai.
+            if not tr.get('is_dynamic', False):
                 continue
             if self.mark_obstacle:
                 self._stamp(cost, tr['x'], tr['y'], ox, oy, self.nucleus_radius, self.max_cost)
@@ -408,6 +479,26 @@ class DynamicTracker(Node):
                 if 0 <= gx < self.n and 0 <= gy < self.n and cost[gy, gx] < val:
                     cost[gy, gx] = val
                 wv += 1.0
+
+    def publish_tracks(self):
+        """Pubblica le tracce Kalman (posizione, velocita', incertezza) per il critic
+        spazio-temporale MPPI. E' un topic dedicato e leggero, separato dal cono
+        (OccupancyGrid) e dalle frecce (MarkerArray di RViz): il critic ha bisogno dei
+        NUMERI, non di una griglia o di un marker."""
+        msg = TrackArray()
+        msg.header.frame_id = self.world_frame
+        msg.header.stamp = self.get_clock().now().to_msg()
+        for tr in self.tracks:
+            if not tr.get('is_dynamic', False):
+                continue   # solo dinamici confermati vanno al critic (niente statici)
+            t = Track()
+            t.id = int(tr['id'])
+            t.x = float(tr['x']); t.y = float(tr['y'])
+            t.vx = float(tr['vx']); t.vy = float(tr['vy'])
+            t.pos_std = float(tr.get('sp', 0.0))
+            t.vel_std = float(tr.get('sv', 0.0))
+            msg.tracks.append(t)
+        self.tracks_pub.publish(msg)
 
     def publish_arrows(self):
         arr = MarkerArray()

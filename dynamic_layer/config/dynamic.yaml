@@ -26,7 +26,22 @@ dynamic_esdf_layer:
     pos_ema: 0.5               # smoothing posizione
     min_obs: 3                 # frame min prima di fidarsi del track
     track_timeout_s: 0.6
-    min_speed: 0.30            # [m/s] sotto = fermo, niente nucleo ne' cono (statico)
+    min_speed: 0.30            # [m/s] soglia di velocita' per considerare "in movimento"
+
+    # --- conferma dinamico con isteresi (anti-falsi-positivi statici) ---
+    # Un track diventa "dinamico" solo se si e' SPOSTATO in modo PERSISTENTE su
+    # una finestra di ~1s (disp_window_s), non solo se va veloce in un istante.
+    # Un pedone, anche a zigzag per schivare la gente, in 1s si allontana molto:
+    # viene preso. Uno statico rumoroso oscilla attorno a un punto (spostamento
+    # ~0 sulla finestra): non passa mai. Regola di sicurezza: nel dubbio dinamico
+    # (perdere un pedone e' peggio che evitare uno statico per un attimo).
+    # Isteresi: torna statico solo dopo demote_frames fermo (cono non lampeggia).
+    # Tuning: passano statici -> alza promote_min_disp_m o disp_window_s;
+    # pedoni lenti persi -> abbassa promote_min_disp_m o min_speed.
+    promote_frames: 4          # ~0.4s a 10Hz di movimento
+    promote_min_disp_m: 0.25   # [m] spostamento minimo SULLA FINESTRA per promuovere
+    demote_frames: 8           # ~0.8s fermo prima di tornare statico
+    disp_window_s: 1.0         # [s] finestra su cui misurare lo spostamento persistente
  
     # --- proiezione cono ---
     horizon_s: 3.0             # [s] lunghezza cono ~ velocita' x horizon
@@ -52,4 +67,3 @@ dynamic_esdf_layer:
     kf_v_init: 1.0       # [m/s] incertezza iniziale sulla velocita' di una traccia nuova
     kf_min_snr: 1.0      # velocita' >= N * sigma_v per fidarsi della DIREZIONE del cono.
                          #   Sotto questa soglia: marca il nucleo ma NIENTE cono (la direzione sarebbe rumore, non informazione). 0 = disattiva.
-
