@@ -1,0 +1,9 @@
+<library path="spatiotemporal_critic">
+  <class type="mppi::critics::SpatioTemporalCritic" base_class_type="mppi::critics::CriticFunction">
+    <description>
+      Critic spazio-temporale: valuta le traiettorie MPPI contro la posizione
+      FUTURA dei pedoni (predizione Kalman) e premia le manovre verso lo spazio
+      libero. Passo 3: scheletro, non aggiunge ancora costo.
+    </description>
+  </class>
+</library>

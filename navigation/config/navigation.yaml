@@ -110,7 +110,21 @@ controller_server:
       critics: [
         "ConstraintCritic", "CostCritic", "GoalCritic",
         "GoalAngleCritic", "PathAlignCritic", "PathFollowCritic",
-        "PathAngleCritic", "PreferForwardCritic"]
+        "PathAngleCritic", "PreferForwardCritic", "SpatioTemporalCritic"]
+      SpatioTemporalCritic:
+        enabled: true
+        tracks_topic: "/dynamic_tracks_state"
+        cost_weight: 40.0
+        cost_power: 1
+        collision_radius: 0.5
+        vel_std_gain: 0.4
+        max_vel_std: 0.8
+        prediction_horizon_s: 3.0
+        max_radius: 1.5
+        min_ped_speed: 0.4
+        max_track_age_s: 0.5
+        publish_predictions: true
+        predictions_topic: "/spatiotemporal_critic/predictions"
       ConstraintCritic:
         enabled: true
         cost_power: 1

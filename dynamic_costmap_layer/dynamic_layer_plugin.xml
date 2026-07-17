@@ -1,13 +1,9 @@
 <library path="dynamic_costmap_layer">
-  <class name="dynamic_costmap_layer/DynamicLayer"
-         type="dynamic_costmap_layer::DynamicLayer"
-         base_class_type="nav2_costmap_2d::Layer">
+  <class name="dynamic_costmap_layer/DynamicLayer" type="dynamic_costmap_layer::DynamicLayer" base_class_type="nav2_costmap_2d::Layer">
     <description>Inietta la griglia /dynamic_cost (cono anticipatorio) nella local costmap
       rolling conservando il gradiente di costo, con semantica updateWithMax.</description>
   </class>
-  <class name="dynamic_costmap_layer/SemanticLayer"
-         type="dynamic_costmap_layer::SemanticLayer"
-         base_class_type="nav2_costmap_2d::Layer">
+  <class name="dynamic_costmap_layer/SemanticLayer" type="dynamic_costmap_layer::SemanticLayer" base_class_type="nav2_costmap_2d::Layer">
     <description>Mappa semantica SSRL nella local rolling</description>
   </class>
 </library>
