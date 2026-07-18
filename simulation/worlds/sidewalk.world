@@ -1265,20 +1265,13 @@
 
     <!-- ADD -->
     <model name="grass_patch">
-      <pose>8.000 0.000 0.046 0.000 0.000 0.000</pose>
+      <pose>8.000 0.000 0.060 0.000 0.000 0.000</pose>
       <static>true</static>
       <link name="link">
-        <collision name="collision">
-          <geometry>
-            <box>
-              <size>1.500 2.500 0.030</size>
-            </box>
-          </geometry>
-        </collision>
         <visual name="visual">
           <geometry>
             <box>
-              <size>1.500 2.500 0.030</size>
+              <size>1.500 2.500 0.010</size>
             </box>
           </geometry>
           <material>
