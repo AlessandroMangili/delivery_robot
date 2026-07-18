@@ -105,6 +105,11 @@ controller_server:
         max_track_age_s: 0.5
         publish_predictions: true
         predictions_topic: "/spatiotemporal_critic/predictions"
+        free_space_enabled: true
+        free_space_weight: 15.0
+        free_space_radius: 0.5
+        free_space_ratio: 1.0
+        free_space_unknown_cost: 0.3
 
       ConstraintCritic:
         enabled: true

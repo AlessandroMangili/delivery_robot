@@ -67,6 +67,10 @@ protected:
     const mppi::CriticData & data,
     float dt, size_t time);
 
+  // Termine 2: giudica ogni traiettoria per lo spazio libero attorno al punto
+  // in cui va a finire (campionando la costmap). Gira anche senza pedoni.
+  void scoreFreeSpace(mppi::CriticData & data, size_t batch, size_t time);
+
   // --- parametri (letti in initialize) ---
   bool enabled_{true};
   std::string tracks_topic_;
@@ -88,6 +92,20 @@ protected:
                                       //     anche se l'orizzonte MPPI e' piu' lungo.
                                       //     Un pedone non e' prevedibile oltre ~3s.
   float max_radius_{1.5f};            // [m] tetto massimo dell'alone di sicurezza
+
+  // --- termine 2: SPAZIO LIBERO A VALLE (scelta del lato di sorpasso) ---
+  // Il termine 1 dice DOVE NON andare (il pedone). Questo dice DOVE CONVIENE
+  // andare: giudica ogni traiettoria per il posto in cui va a FINIRE. Si campiona
+  // la costmap in un intorno del punto terminale: se la traiettoria finisce sul
+  // ciglio o in strada l'intorno costa molto -> penalita'; se finisce in
+  // marciapiede aperto costa poco -> nessuna penalita'. E' cosi' che MPPI acquista
+  // "coscienza" di quale lato conviene: dipende da dove si trova il robot ORA,
+  // perche' le traiettorie partono da li' e finiscono in posti diversi.
+  bool free_space_enabled_{true};
+  float free_space_weight_{15.0f};      // peso del termine
+  float free_space_radius_{0.5f};       // [m] raggio dell'intorno campionato attorno al punto finale
+  float free_space_ratio_{1.0f};        // 0..1: a che frazione dell'orizzonte valutare (1 = punto finale)
+  float free_space_unknown_cost_{0.3f}; // 0..1: quanto "costa" una cella sconosciuta/fuori mappa
 
   // --- visualizzazione (RViz) ---
   bool publish_predictions_{true};        // pubblica le scie predette dei pedoni
