@@ -4,8 +4,8 @@ bt_navigator:
     global_frame: map
     robot_base_frame: base_link
     odom_topic: /odom
-    bt_loop_duration: 10
-    default_server_timeout: 20
+    bt_loop_duration: 20
+    default_server_timeout: 200
     wait_for_service_timeout: 1000
     action_server_result_timeout: 900.0
     navigators: ["navigate_to_pose", "navigate_through_poses"]
@@ -105,11 +105,7 @@ controller_server:
         max_track_age_s: 0.5
         publish_predictions: true
         predictions_topic: "/spatiotemporal_critic/predictions"
-        free_space_enabled: true
-        free_space_weight: 15.0
-        free_space_radius: 0.5
-        free_space_ratio: 1.0
-        free_space_unknown_cost: 0.3
+        worst_case: false
 
       ConstraintCritic:
         enabled: true
