@@ -38,6 +38,14 @@ dynamic_esdf_layer:
     # -> abbassa promote_frames o min_speed; cono lampeggia -> alza demote_frames.
     promote_frames: 4          # ~0.4s a 10Hz di movimento consecutivo
     demote_frames: 8           # ~0.8s fermo prima di tornare statico
+
+    # --- cono di costo: disattivabile ---
+    # Il cono scrive costo davanti al pedone nella costmap, ma e' cieco al tempo.
+    # Il critic spazio-temporale fa la stessa cosa in modo piu' informato.
+    # enable_cone: false lascia il nucleo (il pedone e' un ostacolo fisico) ma
+    # toglie la proiezione: serve a misurare il critic da solo.
+    enable_cone: false
+
  
     # --- proiezione cono ---
     horizon_s: 3.0             # [s] lunghezza cono ~ velocita' x horizon

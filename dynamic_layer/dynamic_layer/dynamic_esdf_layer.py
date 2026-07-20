@@ -79,6 +79,11 @@ class DynamicTracker(Node):
         self.declare_parameter('cone_tip_cost', 90)       # costo alla PUNTA: alto = reagisce in anticipo
         self.declare_parameter('cone_lateral_falloff', 0.35)  # 0..1: quanto cala il costo dal centro ai bordi (per USCIRE)
         self.declare_parameter('mark_obstacle', True)
+        # Il cono di costo e' l'approccio "vecchio": scrive costo davanti al pedone
+        # nella costmap, ma e' cieco al tempo (non sa QUANDO il robot passera'
+        # di li'). La predizione nel critic fa la stessa cosa in modo piu'
+        # informato. Tenerlo a false permette di misurare il critic da solo.
+        self.declare_parameter('enable_cone', True)
         self.declare_parameter('gate_ang_vel', 1.0)
 
         gp = self.get_parameter
@@ -116,6 +121,7 @@ class DynamicTracker(Node):
         self.cone_tip_cost = int(gp('cone_tip_cost').value)
         self.cone_lateral_falloff = float(gp('cone_lateral_falloff').value)
         self.mark_obstacle = bool(gp('mark_obstacle').value)
+        self.enable_cone = bool(gp('enable_cone').value)
         self.gate_ang_vel = float(gp('gate_ang_vel').value)
 
         self.n = int(round(self.size_m / self.res))
@@ -397,6 +403,11 @@ class DynamicTracker(Node):
                 continue
             if self.mark_obstacle:
                 self._stamp(cost, tr['x'], tr['y'], ox, oy, self.nucleus_radius, self.max_cost)
+            # cono disattivabile: con enable_cone=false il nucleo resta (il pedone
+            # e' un ostacolo fisico e va marcato) ma non si proietta piu' nulla
+            # davanti a lui. Serve a misurare il critic spazio-temporale da solo.
+            if not self.enable_cone:
+                continue
             # in rotazione rapida la DIREZIONE della velocita' e' inaffidabile:
             # marca il nucleo (posizione attuale, valida) ma non proiettare il cono.
             if spinning:
