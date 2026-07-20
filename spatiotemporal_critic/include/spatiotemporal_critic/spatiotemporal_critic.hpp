@@ -1,13 +1,3 @@
-// Critic spazio-temporale per MPPI (Nav2 Humble).
-//
-// PASSO 3 (questo file): solo lo SCHELETRO. Il critic si carica come plugin,
-// legge i parametri e si iscrive al topic delle tracce, ma in score() NON
-// aggiunge ancora alcun costo. Serve a verificare che compili e che MPPI lo
-// carichi senza errori PRIMA di metterci la logica (passi 4 e 5).
-//
-// Eredita da mppi::critics::CriticFunction, l'interfaccia dei critic MPPI su
-// Humble: initialize() una volta all'avvio, score() a ogni ciclo di controllo
-// su tutte le traiettorie campionate.
 
 #ifndef SPATIOTEMPORAL_CRITIC__SPATIOTEMPORAL_CRITIC_HPP_
 #define SPATIOTEMPORAL_CRITIC__SPATIOTEMPORAL_CRITIC_HPP_
@@ -18,23 +8,14 @@
 #include <xtensor/xtensor.hpp>
 #include <xtensor/xview.hpp>
 
-// critic_function.hpp e' la classe base: porta con se' il tipo CriticData
-// (e' il parametro di score()). Non serve includerlo a parte -- e su Humble
-// il path 'models/critics_data.hpp' non esiste comunque.
 #include "nav2_mppi_controller/critic_function.hpp"
 #include "dynamic_tracker_msgs/msg/track_array.hpp"
 #include "builtin_interfaces/msg/time.hpp"
 #include "visualization_msgs/msg/marker_array.hpp"
 
-// La classe DEVE stare nel namespace mppi::critics: MPPI antepone questo
-// namespace al nome scritto nello YAML (es. "SpatioTemporalCritic" ->
-// cerca mppi::critics::SpatioTemporalCritic). Se sta in un namespace mio,
-// pluginlib la registra ma MPPI non la trova.
 namespace mppi::critics
 {
 
-// Copia locale e leggera di una traccia, protetta da mutex perche' arriva su un
-// thread diverso (la callback del subscriber) da quello che gira score().
 struct TrackSnapshot
 {
   double x, y;        // posizione al tempo di pubblicazione [m]
@@ -46,7 +27,6 @@ struct TrackSnapshot
 class SpatioTemporalCritic : public mppi::critics::CriticFunction
 {
 public:
-  // Chiamato una volta all'avvio: legge i parametri e crea il subscriber.
   void initialize() override;
 
   // Chiamato a ogni ciclo di controllo: qui, nei passi 4-5, aggiungeremo il
@@ -66,10 +46,6 @@ protected:
     const std::vector<TrackSnapshot> & tracks,
     const mppi::CriticData & data,
     float dt, size_t time);
-
-  // Termine 2: giudica ogni traiettoria per lo spazio libero attorno al punto
-  // in cui va a finire (campionando la costmap). Gira anche senza pedoni.
-  void scoreFreeSpace(mppi::CriticData & data, size_t batch, size_t time);
 
   // --- parametri (letti in initialize) ---
   bool enabled_{true};
@@ -93,19 +69,17 @@ protected:
                                       //     Un pedone non e' prevedibile oltre ~3s.
   float max_radius_{1.5f};            // [m] tetto massimo dell'alone di sicurezza
 
-  // --- termine 2: SPAZIO LIBERO A VALLE (scelta del lato di sorpasso) ---
-  // Il termine 1 dice DOVE NON andare (il pedone). Questo dice DOVE CONVIENE
-  // andare: giudica ogni traiettoria per il posto in cui va a FINIRE. Si campiona
-  // la costmap in un intorno del punto terminale: se la traiettoria finisce sul
-  // ciglio o in strada l'intorno costa molto -> penalita'; se finisce in
-  // marciapiede aperto costa poco -> nessuna penalita'. E' cosi' che MPPI acquista
-  // "coscienza" di quale lato conviene: dipende da dove si trova il robot ORA,
-  // perche' le traiettorie partono da li' e finiscono in posti diversi.
-  bool free_space_enabled_{true};
-  float free_space_weight_{15.0f};      // peso del termine
-  float free_space_radius_{0.5f};       // [m] raggio dell'intorno campionato attorno al punto finale
-  float free_space_ratio_{1.0f};        // 0..1: a che frazione dell'orizzonte valutare (1 = punto finale)
-  float free_space_unknown_cost_{0.3f}; // 0..1: quanto "costa" una cella sconosciuta/fuori mappa
+  // Come si aggrega la vicinanza al pedone lungo il tempo.
+  //   true  (WORST CASE): conta solo l'AVVICINAMENTO PEGGIORE dell'intera
+  //         traiettoria. La penalita' resta in [0,1] per traccia e misura
+  //         "quanto vicino ci passi", che e' cio' che conta per la sicurezza.
+  //         Permette di SUPERARE: stare accanto al pedone a distanza di
+  //         sicurezza per qualche secondo costa poco.
+  //   false (SOMMA): accumula a ogni istante -> misura "quanto tempo stai
+  //         vicino". Punisce il sorpasso quanto l'impatto, e rende il tornare
+  //         indietro sempre la scelta piu' economica. Lasciato solo per
+  //         confronto sperimentale (utile in tesi come A/B).
+  bool worst_case_{true};
 
   // --- visualizzazione (RViz) ---
   bool publish_predictions_{true};        // pubblica le scie predette dei pedoni

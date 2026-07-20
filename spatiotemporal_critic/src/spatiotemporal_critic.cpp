@@ -3,10 +3,8 @@
 // TERMINE 1 - collisione futura: confronta dove sara' il pedone e dove sara' il
 //   robot allo STESSO istante t, e penalizza l'incontro. E' cio' che il cono
 //   statico non puo' fare, perche' non sa QUANDO il robot passera' di li'.
-// TERMINE 2 - spazio libero a valle: giudica ogni traiettoria per il posto in
-//   cui va a FINIRE, campionando la costmap nel suo intorno. Da' a MPPI la
-//   "coscienza" di quale lato conviene (ciglio/strada = caro, marciapiede
-//   aperto = economico). Gira anche senza pedoni.
+//   La scelta di DOVE scartare (destra o sinistra) e' lasciata a MPPI e ai
+//   critic di costo gia' presenti: qui diciamo solo dove NON si puo' andare.
 
 #include "spatiotemporal_critic/spatiotemporal_critic.hpp"
 
@@ -15,8 +13,6 @@
 #include <utility>
 
 #include <xtensor/xmath.hpp>
-
-#include "nav2_costmap_2d/cost_values.hpp"
 
 // namespace mppi::critics: vedi la nota nell'header. MPPI cerca il critic
 // come mppi::critics::<nome-nello-yaml>.
@@ -41,13 +37,7 @@ void SpatioTemporalCritic::initialize()
   getParam(max_track_age_s_, "max_track_age_s", 0.5f);
   getParam(prediction_horizon_s_, "prediction_horizon_s", 3.0f);
   getParam(max_radius_, "max_radius", 1.5f);
-
-  // Parametri del termine 2 (spazio libero a valle).
-  getParam(free_space_enabled_, "free_space_enabled", true);
-  getParam(free_space_weight_, "free_space_weight", 15.0f);
-  getParam(free_space_radius_, "free_space_radius", 0.5f);
-  getParam(free_space_ratio_, "free_space_ratio", 1.0f);
-  getParam(free_space_unknown_cost_, "free_space_unknown_cost", 0.3f);
+  getParam(worst_case_, "worst_case", true);
 
   // Parametri di visualizzazione.
   getParam(publish_predictions_, "publish_predictions", true);
@@ -94,12 +84,13 @@ void SpatioTemporalCritic::score(mppi::CriticData & data)
   }
 
   // Copio le tracce sotto lock (arrivano su un altro thread).
-  // NB: NON usciamo se la lista e' vuota. Senza pedoni il termine 1 non ha nulla
-  // da fare, ma il termine 2 (spazio libero a valle) deve girare comunque.
   std::vector<TrackSnapshot> tracks;
   {
     std::lock_guard<std::mutex> lock(tracks_mutex_);
     tracks = tracks_;
+  }
+  if (tracks.empty()) {
+    return;
   }
 
   const auto & traj_x = data.trajectories.x;   // [batch x time]
@@ -127,144 +118,100 @@ void SpatioTemporalCritic::score(mppi::CriticData & data)
   // ================== TERMINE 1: COLLISIONE FUTURA ==================
   // Salta se non ci sono pedoni, ma NON esce dalla funzione: il termine 2
   // (spazio libero) deve funzionare comunque, anche a marciapiede vuoto.
-  if (!tracks.empty()) {
-    // Limito la predizione a prediction_horizon_s: oltre, un pedone non e'
-    // prevedibile e l'alone diventerebbe enorme, coprendo tutto e togliendo
-    // al robot ogni via d'uscita.
-    size_t time_pred = time;
-    if (dt > 0.0f) {
-      const size_t h = static_cast<size_t>(prediction_horizon_s_ / dt);
-      time_pred = std::min(time, std::max<size_t>(1, h));
+  // Limito la predizione a prediction_horizon_s: oltre, un pedone non e'
+  // prevedibile e l'alone diventerebbe enorme, coprendo tutto e togliendo
+  // al robot ogni via d'uscita.
+  size_t time_pred = time;
+  if (dt > 0.0f) {
+    const size_t h = static_cast<size_t>(prediction_horizon_s_ / dt);
+    time_pred = std::min(time, std::max<size_t>(1, h));
+  }
+
+  // Penalita' della SINGOLA traccia, riusata a ogni giro. In modalita'
+  // worst_case tiene il massimo (avvicinamento peggiore); altrimenti somma.
+  std::vector<float> track_pen(batch, 0.0f);
+
+  for (const auto & tr : tracks) {
+    // solo pedoni in MOVIMENTO: i fermi sono gia' ostacoli fisici nella
+    // costmap (obstacle_layer + inflation), e la predizione lineare su un
+    // fermo non ha senso
+    const double speed = std::hypot(tr.vx, tr.vy);
+    if (speed < min_ped_speed_) {
+      continue;
+    }
+    // scarta tracce con velocita' troppo incerta (appena nate / rumorose /
+    // statici mal classificati): la loro predizione sarebbe inaffidabile
+    if (tr.vel_std > max_vel_std_) {
+      continue;
     }
 
-    for (const auto & tr : tracks) {
-      // solo pedoni in MOVIMENTO: i fermi li gestisce gia' il cono statico,
-      // e la predizione lineare su un fermo non ha senso
-      const double speed = std::hypot(tr.vx, tr.vy);
-      if (speed < min_ped_speed_) {
-        continue;
+    std::fill(track_pen.begin(), track_pen.end(), 0.0f);
+
+    // per ogni istante j (fino all'orizzonte di predizione): dove sara' il
+    // pedone e dove sara' il robot ALLO STESSO t. Se vicini -> penalita'.
+    for (size_t j = 0; j < time_pred; ++j) {
+      const float t = static_cast<float>(j) * dt;
+      const double px = tr.x + tr.vx * t;      // pedone al tempo t (Kalman lineare)
+      const double py = tr.y + tr.vy * t;
+      // alone di sicurezza: base + incertezza di partenza + incertezza di
+      // velocita' che cresce nel tempo, MA con un tetto massimo per non
+      // coprire tutto il marciapiede
+      double radius = collision_radius_ + tr.pos_std +
+        vel_std_gain_ * tr.vel_std * t;
+      if (radius > max_radius_) {
+        radius = max_radius_;
       }
-      // scarta tracce con velocita' troppo incerta (appena nate / rumorose /
-      // statici mal classificati): la loro predizione sarebbe inaffidabile
-      if (tr.vel_std > max_vel_std_) {
-        continue;
-      }
-      // per ogni istante j (fino all'orizzonte di predizione): dove sara' il
-      // pedone e dove sara' il robot ALLO STESSO t. Se vicini -> penalita'.
-      for (size_t j = 0; j < time_pred; ++j) {
-        const float t = static_cast<float>(j) * dt;
-        const double px = tr.x + tr.vx * t;      // pedone al tempo t (Kalman lineare)
-        const double py = tr.y + tr.vy * t;
-        // alone di sicurezza: base + incertezza di partenza + incertezza di
-        // velocita' che cresce nel tempo, MA con un tetto massimo per non
-        // coprire tutto il marciapiede
-        double radius = collision_radius_ + tr.pos_std +
-          vel_std_gain_ * tr.vel_std * t;
-        if (radius > max_radius_) {
-          radius = max_radius_;
-        }
-        const double r2 = radius * radius;
-        for (size_t i = 0; i < batch; ++i) {
-          const double ddx = traj_x(i, j) - px;
-          const double ddy = traj_y(i, j) - py;
-          const double d2 = ddx * ddx + ddy * ddy;
-          if (d2 < r2) {
-            // 1 al centro dell'alone, 0 al bordo: sfiorare costa poco,
-            // centrare in pieno costa molto
-            const double closeness = 1.0 - std::sqrt(d2) / radius;
-            penalty[i] += static_cast<float>(closeness);
+      const double r2 = radius * radius;
+      for (size_t i = 0; i < batch; ++i) {
+        const double ddx = traj_x(i, j) - px;
+        const double ddy = traj_y(i, j) - py;
+        const double d2 = ddx * ddx + ddy * ddy;
+        if (d2 < r2) {
+          // 1 al centro dell'alone, 0 al bordo: sfiorare costa poco,
+          // centrare in pieno costa molto
+          const float closeness =
+            static_cast<float>(1.0 - std::sqrt(d2) / radius);
+          if (worst_case_) {
+            // tengo solo l'avvicinamento PEGGIORE: "quanto vicino ci passi".
+            // Cosi' superare (stargli accanto a distanza per qualche secondo)
+            // costa poco, mentre andargli addosso costa molto.
+            if (closeness > track_pen[i]) {
+              track_pen[i] = closeness;
+            }
+          } else {
+            // somma: misura "quanto tempo" resti vicino. Punisce il sorpasso
+            // quanto l'impatto -> il robot preferisce tornare indietro.
+            track_pen[i] += closeness;
           }
         }
       }
     }
-  }
 
-  // Scrittura del termine 1, elemento per elemento, con peso ed esponente.
-  if (power_ > 1) {
+    // le tracce si sommano tra loro: due pedoni minacciosi pesano piu' di uno
     for (size_t i = 0; i < batch; ++i) {
-      const float p = penalty[i] * weight_;
-      data.costs(i) += std::pow(p, static_cast<float>(power_));
-    }
-  } else {
-    for (size_t i = 0; i < batch; ++i) {
-      data.costs(i) += penalty[i] * weight_;
+      penalty[i] += track_pen[i];
     }
   }
 
-  // ================== TERMINE 2: SPAZIO LIBERO A VALLE ==================
-  if (free_space_enabled_) {
-    scoreFreeSpace(data, batch, time);
+  // Scrittura del termine 1, elemento per elemento.
+  // NB: l'esponente si applica alla penalita' NORMALIZZATA (che in modalita'
+  // worst_case sta in [0,1]), poi si moltiplica per il peso. Cosi' cost_power
+  // modella la FORMA della spaziatura personale senza stravolgere la scala:
+  //   power 1 -> penalita' lineare con la vicinanza;
+  //   power 2 -> sfiorare il bordo dell'alone costa poco, avvicinarsi davvero
+  //              costa molto di piu' (profilo piu' simile allo spazio personale
+  //              descritto in letteratura). Con power>1 alza anche cost_weight.
+  for (size_t i = 0; i < batch; ++i) {
+    float p = penalty[i];
+    if (power_ > 1) {
+      p = std::pow(p, static_cast<float>(power_));
+    }
+    data.costs(i) += p * weight_;
   }
 
   // Visualizzazione per RViz: le scie predette dei pedoni + traiettoria robot.
   if (publish_predictions_ && pred_pub_) {
     publishPredictions(tracks, data, dt, time);
-  }
-}
-
-void SpatioTemporalCritic::scoreFreeSpace(
-  mppi::CriticData & data, size_t batch, size_t time)
-{
-  // Senza costmap non possiamo giudicare nulla: usciamo in silenzio.
-  if (costmap_ == nullptr) {
-    return;
-  }
-
-  const auto & traj_x = data.trajectories.x;
-  const auto & traj_y = data.trajectories.y;
-
-  // Istante in cui valutare la traiettoria: di default l'ULTIMO punto
-  // (free_space_ratio_ = 1.0), cioe' "dove vai a finire".
-  float ratio = free_space_ratio_;
-  if (ratio < 0.0f) {ratio = 0.0f;}
-  if (ratio > 1.0f) {ratio = 1.0f;}
-  const size_t j_end = static_cast<size_t>((time - 1) * ratio);
-
-  const float r = free_space_radius_;
-
-  // Pattern di campionamento attorno al punto terminale: il centro + 8 punti
-  // su una corona di raggio r. Bastano a distinguere "marciapiede aperto"
-  // (tutti liberi) da "ciglio della strada" (meta' corona costosa), e costano
-  // solo 9 letture di costmap per traiettoria.
-  constexpr int kN = 8;
-  static const float kCos[kN] = {1.0f, 0.7071f, 0.0f, -0.7071f,
-    -1.0f, -0.7071f, 0.0f, 0.7071f};
-  static const float kSin[kN] = {0.0f, 0.7071f, 1.0f, 0.7071f,
-    0.0f, -0.7071f, -1.0f, -0.7071f};
-
-  for (size_t i = 0; i < batch; ++i) {
-    const float ex = traj_x(i, j_end);
-    const float ey = traj_y(i, j_end);
-
-    float acc = 0.0f;
-    int n = 0;
-    // centro + corona
-    for (int k = -1; k < kN; ++k) {
-      const float sx = (k < 0) ? ex : ex + r * kCos[k];
-      const float sy = (k < 0) ? ey : ey + r * kSin[k];
-
-      unsigned int mx = 0, my = 0;
-      if (!costmap_->worldToMap(sx, sy, mx, my)) {
-        acc += free_space_unknown_cost_;      // fuori costmap: non lo preferiamo
-        ++n;
-        continue;
-      }
-      const unsigned char c = costmap_->getCost(mx, my);
-      if (c == nav2_costmap_2d::NO_INFORMATION) {
-        acc += free_space_unknown_cost_;      // sconosciuto: leggermente sfavorito
-      } else {
-        // normalizzo 0..1 sul massimo non-letale (252). Il ciglio/strada nel
-        // tuo costmap semantico ha costo alto -> si avvicina a 1; il
-        // marciapiede aperto e' vicino a 0.
-        acc += static_cast<float>(c) / 252.0f;
-      }
-      ++n;
-    }
-
-    if (n > 0) {
-      // media dell'intorno: quanto e' "brutto" il posto in cui finisce
-      data.costs(i) += (acc / static_cast<float>(n)) * free_space_weight_;
-    }
   }
 }
 
