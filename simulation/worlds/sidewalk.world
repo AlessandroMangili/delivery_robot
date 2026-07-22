@@ -1283,7 +1283,7 @@
         </visual>
       </link>
       <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
-        <label>9</label>
+        <label>10</label>
       </plugin>
     </model>
 
@@ -1315,6 +1315,17 @@
         </script>
         <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>12</label></plugin>
     </actor>
+    <!--<actor name="ped_1_1_steady">
+        <skin><filename>https://fuel.gazebosim.org/1.0/Mingfei/models/actor/tip/files/meshes/walk.dae</filename><scale>1.0</scale></skin>
+        <animation name="walk"><filename>https://fuel.gazebosim.org/1.0/Mingfei/models/actor/tip/files/meshes/walk.dae</filename><interpolate_x>true</interpolate_x></animation>
+        <script>
+            <loop>true</loop><delay_start>3.00</delay_start><auto_start>true</auto_start>
+            <trajectory id="0" type="walk" tension="0.6">
+                <waypoint><time>0.00</time><pose>8.500 2.1 1.0 0 0 0.0</pose></waypoint>
+            </trajectory>
+        </script>
+        <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>12</label></plugin>
+    </actor>-->
 
     <actor name="ped_2">
       <skin><filename>https://fuel.gazebosim.org/1.0/Mingfei/models/actor/tip/files/meshes/walk.dae</filename><scale>1.0</scale></skin>
