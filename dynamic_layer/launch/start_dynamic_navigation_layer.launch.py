@@ -16,7 +16,7 @@ def generate_launch_description():
     )
     enable_arg = DeclareLaunchArgument(
         'dynamic_layer', default_value='true',
-        description='Avvia il nodo dynamic_esdf_layer (costo anticipatorio dinamici)'
+        description='Avvia il nodo dynamic_tracker (costo anticipatorio dinamici)'
     )
     params_arg = DeclareLaunchArgument(
         'params_file',
@@ -31,8 +31,8 @@ def generate_launch_description():
     # riceve use_sim_time dal launch (il param nel yaml e' ridondante ma innocuo).
     dynamic_esdf_node = Node(
         package='dynamic_layer',
-        executable='dynamic_esdf_layer',
-        name='dynamic_esdf_layer',
+        executable='dynamic_tracker',
+        name='dynamic_tracker',
         output='screen',
         parameters=[
             params_file,

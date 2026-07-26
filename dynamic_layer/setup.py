@@ -29,6 +29,7 @@ setup(
     entry_points={
         'console_scripts': [
             'dynamic_esdf_layer = dynamic_layer.dynamic_esdf_layer:main',
+            'dynamic_tracker = dynamic_layer.dynamic_tracker:main',
         ],
     },
 )
