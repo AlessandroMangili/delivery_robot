@@ -20,9 +20,6 @@ bt_navigator:
 controller_server:
   ros__parameters:
     use_sim_time: true
-    # 10 Hz (era 20.0): i 20 Hz non venivano comunque rispettati ("Control loop
-    # missed its desired rate"). Meglio 10 Hz onesti e rispettati che 20 falliti.
-    # Dimezza il carico e permette a model_dt di crescere -> orizzonte piu' lungo.
     controller_frequency: 10.0
     costmap_update_timeout: 0.30
     min_x_velocity_threshold: 0.001
@@ -47,17 +44,9 @@ controller_server:
     FollowPath:
       plugin: "nav2_mppi_controller::MPPIController"
 
-      # ----- MPPI (primary_controller) -----
-      # ORIZZONTE SPAZIALE = time_steps * model_dt * vx_max
-      #   PRIMA: 90 * 0.05 * 0.30 = 1.35 m  -> traiettorie CORTE: non toccavano
-      #          nemmeno il cono (lungo 4 m) -> costo 0 -> MPPI cieco, poi sterzata
-      #          brusca quando il cono entrava nei 1.35 m ("reagisce all'ultimo").
-      #   ORA:   80 * 0.10 * 0.30 = 2.40 m  -> quasi il doppio, e con MENO step (80<90).
-      # model_dt DEVE restare = 1/controller_frequency (0.1 = 1/10Hz), cosi' resta
-      # attivo il "control sequence shifting" (lo vedi nei log all'avvio).
-      time_steps: 80
+      time_steps: 80    #120 per allungare orizzonte
       model_dt: 0.1
-      batch_size: 2000
+      batch_size: 2000   #1400 per allungare orizzonte
       ax_max: 3.0
       ax_min: -3.0
       ay_max: 3.0
@@ -65,18 +54,17 @@ controller_server:
       vx_std: 0.2
       vy_std: 0.0                 
       wz_std: 0.4
-      vx_max: 0.30                # allineato al max tarato del robot (era 0.5)
-      vx_min: 0.0                 # niente retro (come il tuo DWB); metti -0.35 per consentirlo
+      vx_max: 0.30                # allineato al max tarato del robot
+      vx_min: 0.0                 # niente retro, metti -0.35 per consentirlo
       vy_max: 0.0                 
       wz_max: 1.9
       iteration_count: 2          # era 1: rifinisce la scelta (aiuta a impegnarsi su un lato)
       prune_distance: 3.0         # era 1.7: teneva il path di riferimento PIU' CORTO del nuovo orizzonte (2.4 m) -> lo strozzava.
       transform_tolerance: 0.1
       temperature: 0.1            # era 0.3: PIU' BASSO = si concentra sulla traiettoria migliore e SCEGLIE un lato, invece di mediare sx+dx -> dritto.
-                                  # Se diventa nervoso/oscilla, risali verso 0.2
       gamma: 0.015
       motion_model: "DiffDrive"
-      visualize: false            # Rimettilo a true SOLO quando devi ispezionare le traiettorie.
+      visualize: false            
       regenerate_noises: true
 
       TrajectoryVisualizer:
@@ -92,7 +80,7 @@ controller_server:
         "PathAngleCritic", "PreferForwardCritic", "SpatioTemporalCritic"]
 
       SpatioTemporalCritic:
-        enabled: true
+        enabled: false
         tracks_topic: "/dynamic_tracks_state"
         cost_weight: 40.0
         cost_power: 1
@@ -130,13 +118,12 @@ controller_server:
         cost_weight: 5.0
         threshold_to_consider: 0.5
 
-      # >>>>> CostCritic = LA MANOPOLA DELL'EVITAMENTO <<<<<
       CostCritic:
         enabled: true
         cost_power: 1
         cost_weight: 25.0          # era 8.0: alzato MOLTO per deviare in anticipo dal cono se vaga fuori dal path SENZA pedoni, scendi verso 15-20
         critical_cost: 300.0
-        consider_footprint: false  # robot circolare (robot_radius): check su raggio/centro, non poligono
+        consider_footprint: false
         collision_cost: 1000000.0
         near_goal_distance: 1.0
         trajectory_point_step: 2
@@ -202,12 +189,13 @@ local_costmap:
           raytrace_min_range: 0.0
           obstacle_max_range: 6.0
           obstacle_min_range: 0.0
-      # --- DYNAMIC LAYER = cono anticipatorio dei dinamici (plugin C++) ---
+
       dynamic_layer:
         plugin: "dynamic_costmap_layer/DynamicLayer"
         enabled: true
         dynamic_cost_topic: /dynamic_cost
         cost_threshold: 1
+
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         cost_scaling_factor: 3.0
@@ -230,7 +218,6 @@ global_costmap:
       trinary_costmap: false
       plugins: ["static_layer", "inflation_layer"]
 
-      # --- STATIC LAYER = il tuo costmap semantico SSRL ---
       static_layer:
         plugin: "nav2_costmap_2d::StaticLayer"
         map_topic: /ssrl_costmap
@@ -260,10 +247,7 @@ planner_server:
       max_on_approach_iterations: 1000
       max_planning_time: 2.0
       cost_travel_multiplier: 30.0
-      # true = l'orientamento finale del percorso segue la DIREZIONE DI ARRIVO,
-      # non l'heading comandato nel goal -> il robot arriva gia' rivolto giusto e
-      # non fa il 180 sul posto per allinearsi a un heading all'indietro.
-      use_final_approach_orientation: true
+      use_final_approach_orientation: true   #true = l'orientamento finale del percorso segue la DIREZIONE DI ARRIVO,
       smoother:
         max_iterations: 1000
         w_smooth: 0.3
