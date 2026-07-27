@@ -1,64 +1,53 @@
 #!/usr/bin/env python3
 """
-dynamic_tracker.py -- Rilevamento e anticipazione di ostacoli dinamici con
-                      FUSIONE SEMANTICA camera + LiDAR 2D.
+dynamic_tracker.py -- Rilevamento e anticipazione di pedoni con CAMERA + DEPTH.
 
-IDEA
-----
-La camera dice CHE COSA, il LiDAR dice DOVE. Ogni punto dello scan viene
-proiettato nell'immagine di segmentazione e ne eredita la classe. Un muro non e'
-mai etichettato "persona", quindi non genera mai una traccia: il problema del
-centroide che slitta lungo la parete sparisce a monte invece di essere filtrato
-a valle.
+APPROCCIO (solo camera)
+-----------------------
+La maschera semantica "persona" dice QUALI pixel sono un pedone; la depth dice
+DOVE (distanza); il centroide immagine dà la direzione, molto piu' preciso del
+LiDAR. Retroproiezione con gli intrinseci -> posizione 3D nel mondo. Un muro non
+e' mai etichettato "persona", quindi non genera mai una traccia: il problema del
+centroide che slitta lungo la parete non esiste, perche' non si clusterizza piu'
+geometricamente il LiDAR.
 
-IL PUNTO DELICATO: IL CAMPO VISIVO
-----------------------------------
-Il LiDAR vede 360 gradi, la camera molto meno (con 320x240 e fx=222 sono ~72
-gradi, cioe' il 20% dello scan). Buttare tutto cio' che la camera non inquadra
-significa perdere l'80% dell'informazione e far morire le tracce appena il
-pedone esce dall'inquadratura. Per questo la classificazione ha TRE stati e non
-due:
+Questo tracker copre solo il campo visivo della camera (~72 gradi). E' una
+scelta deliberata: nel nostro scenario i pedoni che contano arrivano da davanti,
+e il ramo LiDAR laterale (versione precedente) introduceva cluster fantasma --
+il centroide che slitta su muri e ombre di occlusione mentre il robot si muove.
+Per la copertura laterale a 360 gradi esiste un tracker separato basato sul
+LiDAR (vedi lidar_semantic_tracker.py).
 
-  CONFERMATO  il cluster e' inquadrato e i suoi punti cadono su una classe
-              dinamica -> e' una persona/bici, si traccia.
-  RESPINTO    il cluster e' inquadrato ma i suoi punti cadono su edificio,
-              vegetazione, marciapiede... -> NON e' un dinamico, si scarta.
-              *** E' QUI CHE MUOIONO I MURI. ***
-  IGNOTO      il cluster non e' inquadrato (fuori campo visivo, dietro il
-              robot): non possiamo sapere. Si ricade sulla geometria come
-              faceva il tracker vecchio.
-
-Cosi' si tiene la copertura a 360 gradi e si eliminano i falsi positivi che la
-camera PUO' vedere: strettamente meglio del tracker puramente geometrico, senza
-rinunciare a nulla.
-
-MEMORIA SEMANTICA
------------------
-Una traccia confermata dalla camera resta "persona" anche quando esce dal campo
-visivo: il punteggio 'sem_score' sale su conferma, scende su rifiuto, e resta
-fermo quando non c'e' informazione. Senza questo, un pedone superato dal robot
-verrebbe dimenticato nell'istante in cui esce dall'inquadratura.
+PIPELINE
+--------
+1. componenti connesse sulla maschera "persona" -> regioni grezze (le gambe
+   possono essere due regioni: si fondono dopo, nel mondo);
+2. ogni regione -> distanza (mediana depth, o i pochi pixel validi se rada) +
+   direzione (centroide immagine) -> posizione 3D;
+3. FUSIONE NEL MONDO: due detection piu' vicine di una soglia in metri e a
+   profondita' simile sono la stessa persona (le sue gambe) -> una detection;
+4. Kalman a velocita' costante per traccia; promozione a dinamico a isteresi;
+5. cono di costo predittivo, con direzione dallo SPOSTAMENTO reale su finestra
+   (non dalla velocita' istantanea, che per una traccia nuova punta a caso).
 
 RIFERIMENTI
 -----------
-- Jia, Hermans, Leibe, "Self-Supervised Person Detection in 2D Range Data using
-  a Calibrated Camera", ICRA 2021 (proiezione a frustum).
-- "Robot Object Detection and Tracking Based on Image-Point Cloud Instance
-  Matching", Sensors 2026 (maschere proiettate + clustering + Kalman con gating).
-- "Semantic Fusion Algorithm of 2D LiDAR and Camera Based on Contour and
-  Inverse Projection" (caso specifico del LiDAR 2D).
-- "Human Detection from a Mobile Robot Using Fusion of Laser and Vision
-  Information", Sensors 2013 (cluster laser proiettati sull'immagine).
+- Munaro & Menegatti, "Fast RGB-D people tracking for service robots", 2014
+  (sub-clustering su profondita' + rilevatore + Kalman/UKF): il nostro impianto,
+  con la segmentazione semantica al posto del rilevatore di teste.
+- Linder et al., "Deep 3D perception of people and their mobility aids", RAS 2019
+  (people detector RGB-D open source, tracker congiunto classe+posizione+velocita').
 """
 
 import numpy as np
+from collections import deque
 
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
 
-from sensor_msgs.msg import LaserScan, Image, CameraInfo
-from nav_msgs.msg import OccupancyGrid, Odometry
+from sensor_msgs.msg import Image, CameraInfo
+from nav_msgs.msg import OccupancyGrid
 from visualization_msgs.msg import Marker, MarkerArray
 from geometry_msgs.msg import Point
 from std_msgs.msg import ColorRGBA
@@ -66,11 +55,6 @@ from dynamic_tracker_msgs.msg import Track, TrackArray
 
 from cv_bridge import CvBridge
 import tf2_ros
-
-# stati della classificazione semantica di un cluster
-SEM_UNKNOWN = 0
-SEM_CONFIRMED = 1
-SEM_REJECTED = -1
 
 
 def transform_to_matrix(t):
@@ -94,15 +78,13 @@ class SemanticDynamicTracker(Node):
         super().__init__('dynamic_tracker')
 
         # ---------------- I/O e frame ----------------
-        self.declare_parameter('scan_topic', '/scan')
         self.declare_parameter('seg_topic', '/semantic/segmentation')
-        self.declare_parameter('depth_topic', '/camera/depth/image_raw')
+        self.declare_parameter('depth_topic', '/camera/depth_image')
         # affidabilita' della sottoscrizione depth: 'best_effort' (default sensori)
         # o 'reliable'. Se il ponte Gazebo pubblica RELIABLE e non arriva nulla,
         # prova a mettere 'reliable' qui.
         self.declare_parameter('depth_reliability', 'best_effort')
         self.declare_parameter('camera_info_topic', '/camera/camera_info')
-        self.declare_parameter('odom_topic', '/odom')
         self.declare_parameter('output_topic', '/dynamic_cost')
         self.declare_parameter('tracks_topic', '/dynamic_tracks_state')
         self.declare_parameter('markers_topic', '/dynamic_tracks')
@@ -112,21 +94,15 @@ class SemanticDynamicTracker(Node):
 
         # ---------------- fusione semantica ----------------
         self.declare_parameter('dynamic_classes', [11, 12, 17, 18])
-        self.declare_parameter('pixel_dilation', 2)
-        self.declare_parameter('min_semantic_frac', 0.4)
         # quanti punti del cluster devono essere inquadrati per poter GIUDICARE.
         # Sotto questa soglia lo stato e' IGNOTO e si ricade sulla geometria.
-        self.declare_parameter('min_fov_points', 2)
         # true  = pubblica solo tracce confermate dalla camera (nessun fallback)
         # false = pubblica anche le IGNOTE (copertura 360), mai le RESPINTE
-        self.declare_parameter('require_semantic', False)
-        self.declare_parameter('sem_score_max', 5)
         self.declare_parameter('max_seg_age_s', 0.5)
 
         # ---------------- griglia rolling e cono ----------------
         self.declare_parameter('size_m', 8.0)
         self.declare_parameter('resolution', 0.05)
-        self.declare_parameter('max_range', 8.0)
         self.declare_parameter('rate_hz', 10.0)
         self.declare_parameter('enable_cone', True)
         self.declare_parameter('mark_obstacle', True)
@@ -145,49 +121,44 @@ class SemanticDynamicTracker(Node):
         # arrivera' VICINO al robot ENTRO l'orizzonte. Cosi' cade tutto cio' che
         # sta dietro o di lato e non incrocia: muri, aiuole, auto parcheggiate,
         # e il pedone che segue il robot senza raggiungerlo.
+        # Rilevanza: si disegna il cono solo per i dinamici nel SETTORE FRONTALE.
+        # Il robot non ha retromarcia (vx_min=0), quindi cio' che sta dietro non
+        # e' un pericolo di collisione. Non si usa piu' il criterio CPA (punto di
+        # massimo avvicinamento): scartava chi ci precede nella stessa direzione,
+        # che invece vogliamo anticipare.
         self.declare_parameter('relevance_enabled', True)
-        self.declare_parameter('relevance_horizon_s', 10.0)
-        self.declare_parameter('relevance_radius_m', 2.0)
-        self.declare_parameter('relevance_always_dist_m', 0.8)
-        # Settore ANGOLARE davanti al robot entro cui un dinamico merita un cono.
-        # Il robot non va mai in retromarcia (vx_min=0), quindi non puo' collidere
-        # con cio' che ha dietro: se un pedone lo raggiunge da dietro, sara' lui a
-        # scansarsi. 180 = semipiano anteriore (davanti + laterale).
-        # 72 = solo cio' che la camera inquadra davvero.
+        # Settore ANGOLARE frontale. 180 = semipiano anteriore (davanti + lati);
+        # 72 = solo cio' che la camera inquadra; 360 = disattivato (tutto).
         self.declare_parameter('cone_sector_deg', 180.0)
-        # --- MODALITA' DI RILEVAMENTO ---
-        # 'camera' = camera primaria: la maschera semantica trova le persone,
-        #            la depth le localizza. Direzione 8x piu' precisa, niente
-        #            centroide-tra-le-gambe. Solo entro il campo visivo.
-        # 'lidar'  = il vecchio front-end LiDAR con gating semantico (360 gradi).
-        # 'fusion' = camera per le persone nel FOV, LiDAR per il resto/dietro.
-        self.declare_parameter('detection_mode', 'camera')
         self.declare_parameter('min_region_px', 40)      # pixel minimi per una persona
-        self.declare_parameter('min_valid_depth_px', 10) # pixel con depth valida minimi
-        # CHIUSURA morfologica per riunire le gambe di una stessa persona quando
-        # il busto non e' segmentato (il gap tra le gambe e' ~8-12 px a distanza
-        # media). 0 = disattivata. 11 = sicuro senza unire persone diverse.
-        self.declare_parameter('leg_merge_px', 11)
-        # SALVAGUARDIA: se la chiusura unisce due persone vicine, la regione
-        # risultante e' piu' larga del limite e viene rispezzata per colonna.
-        self.declare_parameter('split_wide', True)
-        self.declare_parameter('max_person_width_m', 0.8)
+        self.declare_parameter('min_valid_depth_px', 10) # pixel depth per una stima "piena"
+        # FUSIONE NEL MONDO: due detection piu' vicine di questa distanza (in
+        # metri) e a profondita' simile sono la stessa persona -- tipicamente le
+        # sue due gambe. Invariante alla distanza, a differenza della chiusura in
+        # pixel. 0.4 m unisce le gambe senza fondere due persone affiancate.
+        self.declare_parameter('person_merge_dist_m', 0.4)
+        self.declare_parameter('person_merge_depth_m', 0.6)
         self.declare_parameter('depth_min_m', 0.3)
         self.declare_parameter('depth_max_m', 8.0)
-        # Direzione del cono lisciata a parte dalla velocita' del Kalman: il
-        # centroide di un pedone salta tra le due gambe e fa oscillare il cono.
-        self.declare_parameter('cone_dir_ema', 0.3)
+        # Direzione del cono dallo spostamento reale su una finestra di N frame,
+        # non dalla velocita' istantanea (che per una traccia nuova puo' puntare
+        # all'indietro). Il cono si disegna solo se lo spostamento netto supera
+        # cone_min_disp: cosi' non parte mai storto per poi girarsi.
+        self.declare_parameter('cone_dir_window', 6)      # frame nella finestra
+        self.declare_parameter('cone_min_disp_m', 0.15)   # spostamento minimo per disegnare
+        # Campo visivo della camera: il ramo LiDAR tiene solo cio' che sta FUORI
+        # da questo cono (piu' un margine), perche' il davanti e' compito della
+        # camera. Evita cluster fantasma nell'ombra dietro un pedone.
 
         # ---------------- clustering ----------------
-        self.declare_parameter('cluster_eps_m', 0.5)
-        self.declare_parameter('cluster_min_pts', 2)
-        self.declare_parameter('cluster_max_size_m', 1.5)
 
         # ---------------- tracking ----------------
         self.declare_parameter('gate_dist_m', 0.7)
         self.declare_parameter('min_obs', 3)
         self.declare_parameter('track_timeout_s', 0.6)
         self.declare_parameter('min_speed', 0.40)
+        # i laterali (LiDAR, senza classe) richiedono N volte la soglia frontale
+        # per essere promossi: piu' cauti, cosi' i muri che ballano non passano
         self.declare_parameter('promote_frames', 4)
         self.declare_parameter('demote_frames', 8)
 
@@ -198,25 +169,17 @@ class SemanticDynamicTracker(Node):
         self.declare_parameter('kf_min_snr', 1.0)
 
         gp = self.get_parameter
-        self.scan_topic = gp('scan_topic').value
         self.seg_topic = gp('seg_topic').value
         self.caminfo_topic = gp('camera_info_topic').value
-        self.odom_topic = gp('odom_topic').value
         self.world_frame = gp('world_frame').value
         self.robot_frame = gp('robot_frame').value
 
         self.dynamic_classes = [int(c) for c in gp('dynamic_classes').value]
-        self.pixel_dilation = int(gp('pixel_dilation').value)
-        self.min_semantic_frac = float(gp('min_semantic_frac').value)
-        self.min_fov_points = int(gp('min_fov_points').value)
-        self.require_semantic = bool(gp('require_semantic').value)
-        self.sem_score_max = int(gp('sem_score_max').value)
         self.max_seg_age = float(gp('max_seg_age_s').value)
 
         self.size_m = float(gp('size_m').value)
         self.res = float(gp('resolution').value)
         self.n = int(self.size_m / self.res)
-        self.max_range = float(gp('max_range').value)
         self.rate_hz = float(gp('rate_hz').value)
         self.enable_cone = bool(gp('enable_cone').value)
         self.mark_obstacle = bool(gp('mark_obstacle').value)
@@ -231,23 +194,15 @@ class SemanticDynamicTracker(Node):
         self.cone_lateral_falloff = float(gp('cone_lateral_falloff').value)
         self.gate_ang_vel = float(gp('gate_ang_vel').value)
         self.relevance_enabled = bool(gp('relevance_enabled').value)
-        self.relevance_horizon = float(gp('relevance_horizon_s').value)
-        self.relevance_radius = float(gp('relevance_radius_m').value)
-        self.relevance_always = float(gp('relevance_always_dist_m').value)
+        self.person_merge_dist = float(gp('person_merge_dist_m').value)
+        self.person_merge_depth = float(gp('person_merge_depth_m').value)
         self.cone_sector = float(gp('cone_sector_deg').value)
-        self.detection_mode = str(gp('detection_mode').value)
         self.min_region_px = int(gp('min_region_px').value)
         self.min_valid_depth_px = int(gp('min_valid_depth_px').value)
-        self.leg_merge_px = int(gp('leg_merge_px').value)
-        self.split_wide = bool(gp('split_wide').value)
-        self.max_person_width_m = float(gp('max_person_width_m').value)
         self.depth_min = float(gp('depth_min_m').value)
         self.depth_max = float(gp('depth_max_m').value)
-        self.cone_dir_ema = float(gp('cone_dir_ema').value)
-
-        self.cluster_eps = float(gp('cluster_eps_m').value)
-        self.cluster_min_pts = int(gp('cluster_min_pts').value)
-        self.cluster_max_size = float(gp('cluster_max_size_m').value)
+        self.cone_dir_window = int(gp('cone_dir_window').value)
+        self.cone_min_disp = float(gp('cone_min_disp_m').value)
 
         self.gate_dist = float(gp('gate_dist_m').value)
         self.min_obs = int(gp('min_obs').value)
@@ -263,7 +218,6 @@ class SemanticDynamicTracker(Node):
 
         # ---------------- stato ----------------
         self.bridge = CvBridge()
-        self.last_scan = None
         self.seg_img = None
         self.seg_stamp = None
         self.depth_img = None
@@ -276,8 +230,6 @@ class SemanticDynamicTracker(Node):
         self.tracks = []
         self.next_id = 0
         self.robot_ang = 0.0
-        self.robot_v_body = (0.0, 0.0)   # velocita' lineare nel frame del robot
-        self.robot_v_world = (0.0, 0.0)  # ...ruotata nel frame mondo
         self.robot_xy = (0.0, 0.0)
         self.robot_yaw = 0.0
         self.arrows = []
@@ -290,7 +242,6 @@ class SemanticDynamicTracker(Node):
 
         qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT,
                          history=HistoryPolicy.KEEP_LAST)
-        self.create_subscription(LaserScan, self.scan_topic, self.scan_cb, qos)
         self.create_subscription(Image, self.seg_topic, self.seg_cb, qos)
         depth_rel = (ReliabilityPolicy.RELIABLE
                      if str(gp('depth_reliability').value) == 'reliable'
@@ -302,7 +253,6 @@ class SemanticDynamicTracker(Node):
             f"Sottoscritto depth su '{gp('depth_topic').value}' "
             f"({str(gp('depth_reliability').value)}). Se resta 'nessuna depth', "
             f"il topic o la QoS non combaciano: ros2 topic info <topic> -v")
-        self.create_subscription(Odometry, self.odom_topic, self.odom_cb, qos)
         self.create_subscription(CameraInfo, self.caminfo_topic, self.caminfo_cb, 10)
 
         qos_grid = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
@@ -318,17 +268,9 @@ class SemanticDynamicTracker(Node):
 
         self.get_logger().info(
             f'Tracker semantico avviato.  classi dinamiche={self.dynamic_classes}  '
-            f'min_semantic_frac={self.min_semantic_frac}  '
-            f'require_semantic={self.require_semantic}')
+            'solo camera (depth + segmentazione).')
 
     # ------------------------------------------------------------------ IO
-    def scan_cb(self, msg):
-        self.last_scan = msg
-
-    def odom_cb(self, msg):
-        self.robot_ang = abs(float(msg.twist.twist.angular.z))
-        self.robot_v_body = (float(msg.twist.twist.linear.x),
-                             float(msg.twist.twist.linear.y))
 
     def seg_cb(self, msg):
         try:
@@ -383,149 +325,6 @@ class SemanticDynamicTracker(Node):
             return None
 
     # ------------------------------------------------------- fusione semantica
-    def scan_points_laser(self, scan):
-        ang = scan.angle_min + np.arange(len(scan.ranges)) * scan.angle_increment
-        r = np.asarray(scan.ranges, dtype=np.float32)
-        good = np.isfinite(r) & (r >= scan.range_min) & (r <= scan.range_max) \
-            & (r <= self.max_range)
-        ang, r = ang[good], r[good]
-        if r.size == 0:
-            return np.empty((0, 2), dtype=np.float32)
-        return np.stack([r * np.cos(ang), r * np.sin(ang)], axis=1).astype(np.float32)
-
-    def label_points(self, pts_laser, scan):
-        """Per ogni punto: (in_fov, is_dyn).
-
-        in_fov=False significa "non classificabile": fuori inquadratura, dietro
-        la camera, oppure mancano segmentazione/intrinseci/TF. In quel caso NON
-        si conclude nulla: sara' il cluster a finire in stato IGNOTO.
-        """
-        n = len(pts_laser)
-        in_fov = np.zeros(n, dtype=bool)
-        is_dyn = np.zeros(n, dtype=bool)
-        if n == 0:
-            return in_fov, is_dyn
-
-        if self.seg_img is None:
-            self.diag['motivo'] = 'nessuna segmentazione'
-            return in_fov, is_dyn
-        if self.K is None or self.cam_frame is None:
-            self.diag['motivo'] = 'nessun camera_info'
-            return in_fov, is_dyn
-        if self.seg_stamp is not None:
-            t_scan = rclpy.time.Time.from_msg(scan.header.stamp).nanoseconds * 1e-9
-            t_seg = rclpy.time.Time.from_msg(self.seg_stamp).nanoseconds * 1e-9
-            if abs(t_scan - t_seg) > self.max_seg_age:
-                self.diag['motivo'] = f'segmentazione vecchia di {abs(t_scan-t_seg):.2f}s'
-                return in_fov, is_dyn
-
-        T = self.lookup(self.cam_frame, scan.header.frame_id, scan.header.stamp)
-        if T is None:
-            self.diag['motivo'] = f'manca TF {self.cam_frame}<-{scan.header.frame_id}'
-            return in_fov, is_dyn
-        self.diag['motivo'] = 'ok'
-
-        M = transform_to_matrix(T)
-        P = np.concatenate([pts_laser, np.zeros((n, 1), dtype=np.float32),
-                            np.ones((n, 1), dtype=np.float32)], axis=1)
-        Pc = (M @ P.T).T[:, :3]
-        z = Pc[:, 2]
-        front = z > 1e-3
-        if not np.any(front):
-            return in_fov, is_dyn
-
-        fx, fy = self.K[0, 0], self.K[1, 1]
-        cx, cy = self.K[0, 2], self.K[1, 2]
-        u = np.full(n, -1.0)
-        v = np.full(n, -1.0)
-        u[front] = fx * Pc[front, 0] / z[front] + cx
-        v[front] = fy * Pc[front, 1] / z[front] + cy
-
-        H, W = self.seg_img.shape[:2]
-        if self.cam_w and self.cam_h and (W != self.cam_w or H != self.cam_h):
-            u *= W / float(self.cam_w)
-            v *= H / float(self.cam_h)
-
-        ui = np.round(u).astype(int)
-        vi = np.round(v).astype(int)
-        inside = front & (ui >= 0) & (ui < W) & (vi >= 0) & (vi < H)
-        in_fov[:] = inside
-
-        d = max(0, self.pixel_dilation)
-        for i in np.where(inside)[0]:
-            y0, y1 = max(0, vi[i] - d), min(H, vi[i] + d + 1)
-            x0, x1 = max(0, ui[i] - d), min(W, ui[i] + d + 1)
-            patch = self.seg_img[y0:y1, x0:x1]
-            is_dyn[i] = bool(np.isin(patch, self.dynamic_classes).any())
-
-        self.diag['n_fov'] = int(np.count_nonzero(inside))
-        self.diag['n_dyn'] = int(np.count_nonzero(is_dyn))
-        return in_fov, is_dyn
-
-    # ------------------------------------------------------------- clustering
-    def cluster_points(self, pts, in_fov, is_dyn):
-        clusters = []
-        if len(pts) == 0:
-            return clusters
-        eps = self.cluster_eps
-        keys = np.floor(pts / eps).astype(int)
-        cell = {}
-        for i, (kx, ky) in enumerate(keys):
-            cell.setdefault((kx, ky), []).append(i)
-
-        parent = list(range(len(pts)))
-
-        def find(a):
-            while parent[a] != a:
-                parent[a] = parent[parent[a]]
-                a = parent[a]
-            return a
-
-        def union(a, b):
-            ra, rb = find(a), find(b)
-            if ra != rb:
-                parent[rb] = ra
-
-        for (kx, ky), idxs in cell.items():
-            for dx in (-1, 0, 1):
-                for dy in (-1, 0, 1):
-                    other = cell.get((kx + dx, ky + dy))
-                    if not other:
-                        continue
-                    for i in idxs:
-                        for j in other:
-                            if i < j and np.hypot(*(pts[i] - pts[j])) <= eps:
-                                union(i, j)
-
-        groups = {}
-        for i in range(len(pts)):
-            groups.setdefault(find(i), []).append(i)
-
-        for idxs in groups.values():
-            if len(idxs) < self.cluster_min_pts:
-                continue
-            cpts = pts[idxs]
-            size = float(np.max(np.ptp(cpts, axis=0))) if len(cpts) > 1 else 0.0
-            if size > self.cluster_max_size:
-                continue
-
-            n_fov = int(np.count_nonzero(in_fov[idxs]))
-            n_dyn = int(np.count_nonzero(is_dyn[idxs]))
-            # TRE STATI, non due. Vedi il commento in testa al file.
-            if n_fov < self.min_fov_points:
-                stato = SEM_UNKNOWN          # non inquadrato: non possiamo sapere
-            elif n_dyn / float(n_fov) >= self.min_semantic_frac:
-                stato = SEM_CONFIRMED        # inquadrato e riconosciuto dinamico
-            else:
-                stato = SEM_REJECTED         # inquadrato e NON dinamico -> muro
-
-            c = cpts.mean(axis=0)
-            clusters.append({'centroid': (float(c[0]), float(c[1])),
-                             'size': size, 'stato': stato,
-                             'idxs': idxs})
-        return clusters
-
-    # ------------------------------------------------------------- Kalman
     def _kf_predict(self, tr, dt):
         F = np.array([[1, 0, dt, 0], [0, 1, 0, dt],
                       [0, 0, 1, 0], [0, 0, 0, 1]], dtype=float)
@@ -545,7 +344,7 @@ class SemanticDynamicTracker(Node):
         tr['s'] = tr['s'] + K @ y
         tr['P'] = (np.eye(4) - K @ H) @ tr['P']
 
-    def track(self, dets, stati, now_s):
+    def track(self, dets, now_s):
         for tr in self.tracks:
             dt = max(1e-3, min(now_s - tr['t'], 1.0))
             self._kf_predict(tr, dt)
@@ -564,14 +363,6 @@ class SemanticDynamicTracker(Node):
                 self._kf_update(tr, np.array(dets[best], dtype=float))
                 tr['t_seen'] = now_s
                 tr['n'] = min(tr['n'] + 1, 999)
-                # MEMORIA SEMANTICA: sale su conferma, scende su rifiuto, resta
-                # ferma quando non c'e' informazione. Cosi' una persona gia'
-                # riconosciuta non viene dimenticata appena esce dall'inquadratura.
-                st = stati[best]
-                if st == SEM_CONFIRMED:
-                    tr['sem'] = min(tr['sem'] + 1, self.sem_score_max)
-                elif st == SEM_REJECTED:
-                    tr['sem'] = max(tr['sem'] - 1, -self.sem_score_max)
                 used.add(best)
 
         for j, d in enumerate(dets):
@@ -580,10 +371,9 @@ class SemanticDynamicTracker(Node):
             s = np.array([d[0], d[1], 0.0, 0.0], dtype=float)
             P = np.diag([self.kf_sigma_z ** 2, self.kf_sigma_z ** 2,
                          self.kf_v_init ** 2, self.kf_v_init ** 2])
-            sem0 = 1 if stati[j] == SEM_CONFIRMED else (-1 if stati[j] == SEM_REJECTED else 0)
             self.tracks.append(dict(id=self.next_id, s=s, P=P, n=1,
                                     t=now_s, t_seen=now_s, is_dynamic=False,
-                                    mov_count=0, still_count=0, sem=sem0))
+                                    mov_count=0, still_count=0))
             self.next_id += 1
 
         self.tracks = [t for t in self.tracks
@@ -595,6 +385,12 @@ class SemanticDynamicTracker(Node):
             tr['sp'] = float(np.sqrt(max(tr['P'][0, 0] + tr['P'][1, 1], 0.0)))
             tr['sv'] = float(np.sqrt(max(tr['P'][2, 2] + tr['P'][3, 3], 0.0)))
 
+            # storico posizioni per la direzione del cono (finestra scorrevole)
+            hist = tr.setdefault('pos_hist', deque(maxlen=self.cone_dir_window))
+            hist.append((tr['x'], tr['y']))
+
+            # promozione a dinamico: tutte le tracce sono persone (la camera le
+            # ha classificate), quindi conta solo che si muovano in modo stabile.
             speed = np.hypot(tr['vx'], tr['vy'])
             moving = (speed >= self.min_speed) and \
                      (self.kf_min_snr <= 0.0 or speed >= self.kf_min_snr * tr['sv'])
@@ -612,55 +408,33 @@ class SemanticDynamicTracker(Node):
                 tr['is_dynamic'] = False
 
     def is_relevant(self, tr):
-        """Il dinamico incrocera' il robot? Criterio del punto di massimo
-        avvicinamento (CPA), calcolato in coordinate RELATIVE.
+        """Vale la pena disegnare il cono per questo dinamico?
 
-            t* = -(p_rel . v_rel) / |v_rel|^2      istante di minima distanza
-            d* = |p_rel + v_rel * t*|              quella distanza
+        Regola unica: e' nel SETTORE FRONTALE del robot (cone_sector, di
+        default 180 = davanti + lati). Chiunque sia davanti puo' essere sulla
+        rotta -- che si avvicini o che vada nella nostra stessa direzione, se
+        cammina piu' lento lo raggiungiamo -- quindi merita l'anticipazione.
 
-        t* <= 0  -> si stanno gia' allontanando: irrilevante.
-        t* oltre l'orizzonte -> troppo in la' nel tempo: irrilevante.
-        d* oltre il raggio   -> passera' comunque distante: irrilevante.
+        Si scarta SOLO cio' che sta DIETRO: il robot non ha retromarcia
+        (vx_min=0), non puo' collidere all'indietro, e un pedone che arriva da
+        dietro si scansa da solo.
 
-        Serve a non disegnare coni per cio' che sta DIETRO o DI LATO senza
-        incrociare. NON toglie i coni da cio' che sta davvero sulla rotta: se un
-        muro e' davanti e il robot ci va contro, resta rilevante -- ed e' giusto.
+        NB: qui NON si usa piu' il criterio del punto di massimo avvicinamento
+        (CPA). Scartava chi non incrociava la nostra traiettoria, ma cosi'
+        toglieva il cono a un pedone che ci precede nella stessa direzione --
+        proprio quello che vogliamo anticipare per non tamponarlo. Un cono in
+        piu' su chi si allontana e' spreco innocuo; un cono in meno su chi ci
+        precede e' un rischio.
         """
         if not self.relevance_enabled:
             return True
         px = tr['x'] - self.robot_xy[0]
         py = tr['y'] - self.robot_xy[1]
-
-        # SETTORE FRONTALE: il robot non ha retromarcia (vx_min=0), quindi non
-        # puo' collidere con cio' che ha alle spalle. Un pedone che lo raggiunge
-        # da dietro si scansera' da solo: non e' un problema di navigazione.
-        if self.cone_sector < 360.0:
-            rel = np.arctan2(py, px) - self.robot_yaw
-            rel = (rel + np.pi) % (2 * np.pi) - np.pi      # riporta in [-pi, pi]
-            if abs(rel) > np.radians(self.cone_sector) / 2.0:
-                return False
-
-        d0 = np.hypot(px, py)
-        if d0 <= self.relevance_always:
-            return True                       # gia' addosso: sempre rilevante
-        vx = tr['vx'] - self.robot_v_world[0]
-        vy = tr['vy'] - self.robot_v_world[1]
-        vv = vx * vx + vy * vy
-        if vv < 1e-6:
-            return False                      # moto relativo nullo: non si avvicina
-        t_cpa = -(px * vx + py * vy) / vv
-        if t_cpa <= 0.0 or t_cpa > self.relevance_horizon:
-            return False
-        return np.hypot(px + vx * t_cpa, py + vy * t_cpa) <= self.relevance_radius
-
-    def accepted(self, tr):
-        """Una traccia va usata? Mai se la camera l'ha respinta (muro).
-        Sempre se l'ha confermata. Se non sa, dipende da require_semantic."""
-        if tr['sem'] < 0:
-            return False
-        if tr['sem'] > 0:
+        if self.cone_sector >= 360.0:
             return True
-        return not self.require_semantic
+        rel = np.arctan2(py, px) - self.robot_yaw
+        rel = (rel + np.pi) % (2 * np.pi) - np.pi          # in [-pi, pi]
+        return abs(rel) <= np.radians(self.cone_sector) / 2.0
 
     # ------------------------------------------------------------- ciclo
     @staticmethod
@@ -705,14 +479,27 @@ class SemanticDynamicTracker(Node):
     def detect_people_camera(self, now_s):
         """Rileva le persone dalla coppia (segmentazione, depth).
 
-        Ritorna (dets_world, dirs_img) dove:
-          dets_world : lista di (x, y) nel frame mondo, una per persona;
-          dirs_img   : lista di angoli-immagine (rad) per la direzione, se serve.
-        Aggiorna anche self.diag e self.dyn_pts_w per la visualizzazione.
+        Pipeline pulita, in tre passi:
+          1. componenti connesse sulla maschera "persona" -> regioni grezze
+             (le gambe possono essere due regioni separate: va bene, le fondiamo
+             dopo, nel mondo);
+          2. per ogni regione: distanza dalla depth (mediana dei pixel validi,
+             o i pochi che ci sono se la depth e' rada) + direzione dal centroide
+             immagine -> posizione 3D nel mondo;
+          3. FUSIONE NEL MONDO: due detection piu' vicine di person_merge_dist_m
+             sono la stessa persona (tipicamente le due gambe) e si fondono.
+             Questo e' invariante alla distanza -- lavora in metri, non in pixel
+             -- ed e' l'unico posto dove si decide "una persona o due".
+
+        Ritorna la lista di (x, y) nel mondo, una per persona.
         """
-        dets, dbg_pts = [], []
+        dets = []
         self.diag['n_people'] = 0
         self.diag['n_valid_depth'] = 0
+        self.diag['n_sparse_depth'] = 0
+        self.diag['n_regions'] = 0
+        self.diag['n_small'] = 0
+        self.diag['n_nodepth'] = 0
 
         if self.seg_img is None:
             self.diag['motivo'] = 'nessuna segmentazione'
@@ -724,12 +511,10 @@ class SemanticDynamicTracker(Node):
             self.diag['motivo'] = 'nessun camera_info'
             return dets
 
-        # segmentazione e depth devono essere ragionevolmente sincronizzate
+        # segmentazione e depth ragionevolmente sincronizzate
         if self.seg_stamp is not None and self.depth_stamp is not None:
-            ts = self._stamp_s(self.seg_stamp)
-            td = self._stamp_s(self.depth_stamp)
-            if abs(ts - td) > self.max_seg_age:
-                self.diag['motivo'] = f'seg/depth desync {abs(ts-td):.2f}s'
+            if abs(self._stamp_s(self.seg_stamp) - self._stamp_s(self.depth_stamp)) > self.max_seg_age:
+                self.diag['motivo'] = 'seg/depth desync'
                 return dets
         self.diag['motivo'] = 'ok'
 
@@ -737,208 +522,126 @@ class SemanticDynamicTracker(Node):
         depth = self.depth_img
         H, W = seg.shape[:2]
 
-        # la depth puo' avere risoluzione diversa dalla segmentazione: la riscalo
-        # agli indici della seg con nearest-neighbour (nessuna interpolazione sui
-        # bordi di profondita', che creerebbe distanze fantasma)
+        # allineo la depth alla risoluzione della segmentazione (nearest, niente
+        # interpolazione sui bordi di profondita' = niente distanze fantasma)
         if depth.shape[:2] != (H, W):
-            ys = (np.linspace(0, depth.shape[0] - 1, H)).astype(int)
-            xs = (np.linspace(0, depth.shape[1] - 1, W)).astype(int)
-            depth = depth[np.ix_(ys, xs)]
+            iy = np.linspace(0, depth.shape[0] - 1, H).astype(int)
+            ix = np.linspace(0, depth.shape[1] - 1, W).astype(int)
+            depth = depth[np.ix_(iy, ix)]
+        depth_m = (depth.astype(np.float32) * 0.001) if depth.dtype == np.uint16 \
+            else depth.astype(np.float32)
 
-        # depth in metri: 16UC1 e' in millimetri, 32FC1 e' gia' in metri
-        if depth.dtype == np.uint16:
-            depth_m = depth.astype(np.float32) * 0.001
-        else:
-            depth_m = depth.astype(np.float32)
-
-        # maschera dei pixel di classe dinamica
         dyn_mask = np.isin(seg, self.dynamic_classes)
         self.diag['n_dyn_px'] = int(dyn_mask.sum())
         if not dyn_mask.any():
-            self.diag['motivo'] = 'nessun pixel di classe dinamica nella segmentazione'
+            self.diag['motivo'] = 'nessun pixel dinamico'
             return dets
 
-        # CHIUSURA MORFOLOGICA: quando il busto non e' segmentato, le due gambe
-        # restano due regioni separate e il tracker vedrebbe DUE persone. Una
-        # chiusura (dilata + erode) col kernel largo quanto il gap tra le gambe
-        # le ricongiunge, senza spostare i bordi esterni. Kernel dispari.
-        if self.leg_merge_px > 0:
-            dyn_mask = self._close_mask(dyn_mask, self.leg_merge_px)
+        # PASSO 1: componenti connesse grezze (nessuna chiusura in pixel)
+        labels, n_lab = self._connected_components(dyn_mask, self.min_region_px)
+        self.diag['n_regions'] = int(n_lab)
+
+        Tw = self.lookup(self.world_frame, self.cam_frame)
+        if Tw is None:
+            self.diag['motivo'] = f'manca TF {self.world_frame}<-{self.cam_frame}'
+            return dets
+        M = transform_to_matrix(Tw)
 
         fx, fy = self.K[0, 0], self.K[1, 1]
         cx, cy = self.K[0, 2], self.K[1, 2]
         sx = W / float(self.cam_w) if self.cam_w else 1.0
         sy = H / float(self.cam_h) if self.cam_h else 1.0
 
-        # connected components sulla maschera: una regione per persona
-        labels, n_lab = self._connected_components(dyn_mask, self.min_region_px)
-        self.diag['n_regions'] = int(n_lab)
-
-        Tw = self.lookup(self.world_frame, self.cam_frame)   # ottico -> mondo
-        if Tw is None:
-            self.diag['motivo'] = f'manca TF {self.world_frame}<-{self.cam_frame}'
-            return dets
-        M = transform_to_matrix(Tw)
-
-        n_small = n_nodepth = 0
+        # PASSO 2: ogni regione -> una posizione 3D nel mondo
+        raw = []                             # (x, y, Z) nel mondo, prima della fusione
         for lab in range(1, n_lab + 1):
             ys, xs = np.where(labels == lab)
             if len(xs) < self.min_region_px:
-                n_small += 1
-                continue                       # regione troppo piccola: rumore
+                self.diag['n_small'] += 1
+                continue
+            self.diag['n_people'] += 1
 
-            # SALVAGUARDIA: se la chiusura ha unito due persone vicine, la
-            # regione e' piu' larga di una persona plausibile a quella distanza.
-            # In quel caso la si spezza in sotto-regioni per colonna.
-            sub_regions = self._split_if_wide(xs, ys, depth_m)
-            for sxs, sys in sub_regions:
-                if len(sxs) < self.min_region_px:
-                    n_small += 1
-                    continue
-                self.diag['n_people'] += 1
+            d = depth_m[ys, xs]
+            valid = np.isfinite(d) & (d > self.depth_min) & (d < self.depth_max)
+            n_valid = int(np.count_nonzero(valid))
+            # depth rada: si tiene la persona con qualunque pixel valido; solo a
+            # zero pixel non sappiamo la distanza e la saltiamo
+            if n_valid == 0:
+                self.diag['n_nodepth'] += 1
+                continue
+            if n_valid < self.min_valid_depth_px:
+                self.diag['n_sparse_depth'] += 1
+            self.diag['n_valid_depth'] += 1
 
-                # profondita' valida: scarto zeri, inf e fuori range
-                d = depth_m[sys, sxs]
-                valid = np.isfinite(d) & (d > self.depth_min) & (d < self.depth_max)
-                if np.count_nonzero(valid) < self.min_valid_depth_px:
-                    n_nodepth += 1
-                    continue
-                self.diag['n_valid_depth'] += 1
+            Z = float(np.median(d[valid]))
+            u = float(np.mean(xs)) / sx
+            v = float(np.mean(ys)) / sy
+            Xo = (u - cx) * Z / fx
+            Yo = (v - cy) * Z / fy
+            pw = M @ np.array([Xo, Yo, Z, 1.0])
+            raw.append((float(pw[0]), float(pw[1]), Z))
 
-                Z = float(np.median(d[valid]))
-                u = float(np.mean(sxs)) / sx
-                v = float(np.mean(sys)) / sy
-                Xo = (u - cx) * Z / fx
-                Yo = (v - cy) * Z / fy
-                pw = M @ np.array([Xo, Yo, Z, 1.0])
-                dets.append((float(pw[0]), float(pw[1])))
-                dbg_pts.append((float(pw[0]), float(pw[1])))
-
-        self.diag['n_small'] = n_small
-        self.diag['n_nodepth'] = n_nodepth
-        self.dyn_pts_w = np.array(dbg_pts) if dbg_pts else np.empty((0, 2))
+        # PASSO 3: fusione nel mondo. Due detection piu' vicine di
+        # person_merge_dist_m (e a distanza-camera simile) sono la stessa
+        # persona: le sue due gambe. Le fondo nel loro punto medio. Invariante
+        # alla distanza, a differenza della vecchia chiusura in pixel.
+        dets = self._merge_world(raw)
+        self.dyn_pts_w = np.array([(x, y) for x, y in dets]) if dets else np.empty((0, 2))
         return dets
 
-    @staticmethod
-    def _close_mask(mask, k):
-        """Chiusura morfologica con kernel k x k. Riunisce le gambe di una
-        stessa persona quando il busto non e' segmentato. Usa cv2 se c'e',
-        altrimenti una dilata+erode manuale con vicinato quadrato."""
-        k = int(k) | 1                       # forzo dispari
-        try:
-            import cv2
-            ker = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
-            return cv2.morphologyEx(mask.astype(np.uint8), cv2.MORPH_CLOSE,
-                                    ker).astype(bool)
-        except Exception:
-            pass
-        r = k // 2
-        m = mask.copy()
-        # dilata
-        dil = np.zeros_like(m)
-        H, W = m.shape
-        ys, xs = np.where(m)
-        for dy in range(-r, r + 1):
-            for dx in range(-r, r + 1):
-                ny = np.clip(ys + dy, 0, H - 1)
-                nx = np.clip(xs + dx, 0, W - 1)
-                dil[ny, nx] = True
-        # erode
-        ero = dil.copy()
-        ys, xs = np.where(~dil)
-        for dy in range(-r, r + 1):
-            for dx in range(-r, r + 1):
-                ny = np.clip(ys + dy, 0, H - 1)
-                nx = np.clip(xs + dx, 0, W - 1)
-                ero[ny, nx] = False
-        return ero
+    def _merge_world(self, raw):
+        """Fonde detection vicine nel mondo (union-find su soglia di distanza).
+        raw: lista di (x, y, Z). Ritorna lista di (x, y) fusi."""
+        n = len(raw)
+        if n == 0:
+            return []
+        parent = list(range(n))
 
-    def _split_if_wide(self, xs, ys, depth_m):
-        """Se una regione e' piu' larga di una persona plausibile a quella
-        distanza, la spezza per colonna: e' il caso di due persone vicine unite
-        dalla chiusura. Ritorna una lista di (xs, ys). Se non serve, ne ritorna
-        una sola: la regione intera."""
-        if not self.split_wide:
-            return [(xs, ys)]
-        d = depth_m[ys, xs]
-        valid = np.isfinite(d) & (d > self.depth_min) & (d < self.depth_max)
-        if np.count_nonzero(valid) < self.min_valid_depth_px:
-            return [(xs, ys)]
-        Z = float(np.median(d[valid]))
-        # larghezza reale della regione in metri, a quella distanza
-        fx = self.K[0, 0]
-        width_px = xs.max() - xs.min() + 1
-        width_m = width_px * Z / fx
-        if width_m <= self.max_person_width_m:
-            return [(xs, ys)]                # larghezza plausibile: una persona
-        # troppo larga: quante persone ci stanno, e taglio in colonne uguali
-        n = int(np.ceil(width_m / self.max_person_width_m))
-        edges = np.linspace(xs.min(), xs.max() + 1, n + 1)
-        out = []
+        def find(a):
+            while parent[a] != a:
+                parent[a] = parent[parent[a]]
+                a = parent[a]
+            return a
+
         for i in range(n):
-            sel = (xs >= edges[i]) & (xs < edges[i + 1])
-            if sel.any():
-                out.append((xs[sel], ys[sel]))
-        return out if out else [(xs, ys)]
+            for j in range(i + 1, n):
+                d = np.hypot(raw[i][0] - raw[j][0], raw[i][1] - raw[j][1])
+                dz = abs(raw[i][2] - raw[j][2])
+                # stessa persona se vicine nel piano E a profondita' simile
+                # (due persone alla stessa distanza ma affiancate distano > soglia;
+                #  due gambe distano ~0.2-0.3 m e hanno la stessa Z)
+                if d < self.person_merge_dist and dz < self.person_merge_depth:
+                    parent[find(i)] = find(j)
+
+        groups = {}
+        for i in range(n):
+            groups.setdefault(find(i), []).append(i)
+
+        out = []
+        for idxs in groups.values():
+            xs = [raw[k][0] for k in idxs]
+            ys = [raw[k][1] for k in idxs]
+            out.append((float(np.mean(xs)), float(np.mean(ys))))
+        return out
 
     def update(self):
         now_s = self.get_clock().now().nanoseconds * 1e-9
 
-        # ------ RILEVAMENTO: sceglie il front-end secondo detection_mode ------
-        dets, stati = [], []
-
-        # A) ramo CAMERA: la maschera semantica trova le persone, la depth le
-        #    localizza. Le detection sono per costruzione CONFERMATE (la camera
-        #    ha gia' detto "persona"): non esistono muri qui, non serve il
-        #    meccanismo a tre stati.
-        if self.detection_mode in ('camera', 'fusion'):
-            cam_dets = self.detect_people_camera(now_s)
-            dets += cam_dets
-            stati += [SEM_CONFIRMED] * len(cam_dets)
-
-        # B) ramo LiDAR: copre cio' che la camera non inquadra. In 'camera' e'
-        #    spento; in 'fusion' aggiunge SOLO gli IGNOTI (fuori FOV), perche' i
-        #    dinamici nel FOV li ha gia' dati la camera in modo piu' preciso.
-        if self.detection_mode in ('lidar', 'fusion') and self.last_scan is not None:
-            scan = self.last_scan
-            pts_l = self.scan_points_laser(scan)
-            self.diag['n_scan'] = len(pts_l)
-            if len(pts_l) > 0:
-                in_fov, is_dyn = self.label_points(pts_l, scan)
-                Tw = self.lookup(self.world_frame, scan.header.frame_id, scan.header.stamp)
-                if Tw is not None:
-                    Mw = transform_to_matrix(Tw)
-                    P = np.concatenate([pts_l, np.zeros((len(pts_l), 1)),
-                                        np.ones((len(pts_l), 1))], axis=1)
-                    pts_w = (Mw @ P.T).T[:, :2]
-                    clusters = self.cluster_points(pts_w, in_fov, is_dyn)
-                    self.diag['conf'] = sum(1 for c in clusters if c['stato'] == SEM_CONFIRMED)
-                    self.diag['rej'] = sum(1 for c in clusters if c['stato'] == SEM_REJECTED)
-                    self.diag['unk'] = sum(1 for c in clusters if c['stato'] == SEM_UNKNOWN)
-                    if self.detection_mode == 'lidar':
-                        keep = [c for c in clusters if c['stato'] != SEM_REJECTED]
-                    else:
-                        # in fusion il LiDAR aggiunge solo cio' che la camera non vede
-                        keep = [c for c in clusters if c['stato'] == SEM_UNKNOWN]
-                    dets += [c['centroid'] for c in keep]
-                    stati += [c['stato'] for c in keep]
-                    if self.detection_mode == 'lidar':
-                        self.dyn_pts_w = pts_w[is_dyn] if len(pts_w) else np.empty((0, 2))
-
-        self.track(dets, stati, now_s)
+        # ------ RILEVAMENTO: SOLO CAMERA ------
+        # La maschera semantica trova le persone, la depth le localizza. Niente
+        # ramo LiDAR: nel nostro scenario i pedoni che contano arrivano da
+        # davanti (nel campo visivo della camera), e il LiDAR laterale
+        # introduceva solo cluster fantasma (centroide che slitta su muri e
+        # ombre di occlusione). Le detection sono tutte persone confermate.
+        dets = self.detect_people_camera(now_s)
+        self.track(dets, now_s)
 
         Tr = self.lookup(self.world_frame, self.robot_frame)
         if Tr is not None:
             M = transform_to_matrix(Tr)
             rx, ry = M[0, 3], M[1, 3]
             self.robot_xy = (rx, ry)
-            # la velocita' di /odom e' nel frame del robot: la ruoto nel mondo,
-            # serve al criterio di rilevanza che ragiona su velocita' RELATIVE
-            yaw = np.arctan2(M[1, 0], M[0, 0])
-            self.robot_yaw = yaw
-            bx, by = self.robot_v_body
-            self.robot_v_world = (bx * np.cos(yaw) - by * np.sin(yaw),
-                                  bx * np.sin(yaw) + by * np.cos(yaw))
+            self.robot_yaw = np.arctan2(M[1, 0], M[0, 0])
             ox, oy = rx - self.size_m / 2.0, ry - self.size_m / 2.0
             cost = self.build_cost(ox, oy)
             self.publish_cost(cost, ox, oy)
@@ -955,44 +658,41 @@ class SemanticDynamicTracker(Node):
         for tr in self.tracks:
             if tr['n'] < self.min_obs or not tr.get('is_dynamic', False):
                 continue
-            if not self.accepted(tr):
-                continue
-            # il nucleo si marca comunque (e' un ostacolo fisico dove si trova),
-            # ma il CONO lo disegniamo solo se incrocera' davvero il robot
-            rilevante = self.is_relevant(tr)
+            # il nucleo si marca comunque (e' un ostacolo fisico dove si trova)
             if self.mark_obstacle:
                 self._stamp(cost, tr['x'], tr['y'], ox, oy,
                             self.nucleus_radius, self.max_cost)
-            if not self.enable_cone or spinning or not rilevante:
+            if not self.enable_cone or spinning or not self.is_relevant(tr):
+                continue
+            # DIREZIONE DEL CONO dallo spostamento reale su una finestra, non
+            # dalla velocita' istantanea del Kalman: una traccia appena nata ha
+            # velocita' rumorosa che puo' puntare all'indietro. Il cono si
+            # disegna SOLO quando c'e' spostamento netto sufficiente a dare una
+            # direzione affidabile -- cosi' non parte mai storto per poi girarsi.
+            direction = self._cone_direction(tr)
+            if direction is None:
                 continue
             speed = np.hypot(tr['vx'], tr['vy'])
-            if self.kf_min_snr > 0.0 and speed < self.kf_min_snr * tr.get('sv', 0.0):
-                continue
-            self._update_cone_dir(tr, speed)
-            self._paint_cone(cost, tr, ox, oy, speed)
-            self.arrows.append((tr['x'], tr['y'], tr['vx'], tr['vy']))
+            self._paint_cone(cost, tr, ox, oy, speed, direction)
+            self.arrows.append((tr['x'], tr['y'], direction[0] * speed,
+                                direction[1] * speed))
         return cost
 
-    def _update_cone_dir(self, tr, speed):
-        """Direzione del cono lisciata con una media esponenziale.
-
-        Il centroide di un pedone salta tra le due gambe a ogni passo, e la
-        direzione della velocita' del Kalman balla di conseguenza: il cono
-        oscilla come se la persona barcollasse. Qui si liscia SOLO la direzione,
-        lasciando intatte posizione e velocita' stimate -- che devono restare
-        reattive per il critic spazio-temporale."""
-        if speed < 1e-6:
-            return
-        nx, ny = tr['vx'] / speed, tr['vy'] / speed
-        old = tr.get('dir')
-        if old is None:
-            tr['dir'] = (nx, ny)
-            return
-        a = self.cone_dir_ema
-        dx = a * nx + (1.0 - a) * old[0]
-        dy = a * ny + (1.0 - a) * old[1]
-        m = np.hypot(dx, dy)
-        tr['dir'] = (dx / m, dy / m) if m > 1e-6 else (nx, ny)
+    def _cone_direction(self, tr):
+        """Direzione del cono dallo spostamento netto sulla finestra di storia.
+        Ritorna (ux, uy) normalizzato, oppure None se lo spostamento e' troppo
+        piccolo perche' la direzione sia affidabile (traccia appena nata o
+        quasi ferma). Robusto al backwards-flip della velocita' istantanea."""
+        hist = tr.get('pos_hist')
+        if hist is None or len(hist) < 2:
+            return None
+        x0, y0 = hist[0]
+        x1, y1 = hist[-1]
+        dx, dy = x1 - x0, y1 - y0
+        disp = np.hypot(dx, dy)
+        if disp < self.cone_min_disp:
+            return None                      # non si e' mosso abbastanza: niente cono
+        return (dx / disp, dy / disp)
 
     def _stamp(self, cost, wx, wy, ox, oy, radius_m, val):
         cxi = int((wx - ox) / self.res); cyi = int((wy - oy) / self.res)
@@ -1004,8 +704,8 @@ class SemanticDynamicTracker(Node):
                     if 0 <= gx < self.n and 0 <= gy < self.n and cost[gy, gx] < val:
                         cost[gy, gx] = val
 
-    def _paint_cone(self, cost, tr, ox, oy, speed):
-        ux, uy = tr.get('dir', (tr['vx'] / speed, tr['vy'] / speed))
+    def _paint_cone(self, cost, tr, ox, oy, speed, direction):
+        ux, uy = direction
         length = min(max(self.cone_min_length, speed * self.horizon_s), self.size_m)
         n_steps = max(1, int(length / self.res))
         px = (tr['x'] - ox) / self.res
@@ -1047,7 +747,7 @@ class SemanticDynamicTracker(Node):
         msg.header.frame_id = self.world_frame
         msg.header.stamp = self.get_clock().now().to_msg()
         for tr in self.tracks:
-            if not tr.get('is_dynamic', False) or not self.accepted(tr):
+            if not tr.get('is_dynamic', False):
                 continue
             t = Track()
             t.id = int(tr['id'])
@@ -1066,7 +766,7 @@ class SemanticDynamicTracker(Node):
         arr.markers.append(clear)
         now = self.get_clock().now().to_msg()
         for tr in self.tracks:
-            if not tr.get('is_dynamic', False) or not self.accepted(tr):
+            if not tr.get('is_dynamic', False):
                 continue
             m = Marker()
             m.header.frame_id = self.world_frame
@@ -1076,11 +776,7 @@ class SemanticDynamicTracker(Node):
             m.type = Marker.ARROW
             m.action = Marker.ADD
             m.scale.x = 0.06; m.scale.y = 0.12; m.scale.z = 0.12
-            # verde = confermata dalla camera, giallo = solo geometrica
-            if tr['sem'] > 0:
-                m.color.r, m.color.g, m.color.b, m.color.a = 0.1, 0.9, 0.3, 0.9
-            else:
-                m.color.r, m.color.g, m.color.b, m.color.a = 0.9, 0.8, 0.1, 0.9
+            m.color.r, m.color.g, m.color.b, m.color.a = 0.1, 0.9, 0.2, 0.9  # verde = persona
             m.points = [Point(x=tr['x'], y=tr['y'], z=0.1),
                         Point(x=tr['x'] + tr['vx'], y=tr['y'] + tr['vy'], z=0.1)]
             m.lifetime.sec = 0
@@ -1109,22 +805,14 @@ class SemanticDynamicTracker(Node):
 
     def log_diag(self):
         d = self.diag
-        n_acc = sum(1 for t in self.tracks if t.get('is_dynamic') and self.accepted(t))
-        n_sem = sum(1 for t in self.tracks if t['sem'] > 0)
-        if self.detection_mode in ('camera', 'fusion'):
-            # diagnostica dello STADIO in cui si perdono le persone
-            self.get_logger().info(
-                f"[camera] pixel_dinamici={d.get('n_dyn_px',0)} "
-                f"regioni={d.get('n_regions',0)} persone={d.get('n_people',0)} "
-                f"con_depth_valida={d.get('n_valid_depth',0)} "
-                f"(scartate: piccole={d.get('n_small',0)} senza_depth={d.get('n_nodepth',0)}) | "
-                f"tracce={len(self.tracks)} usate={n_acc} | {d['motivo']}")
-        else:
-            self.get_logger().info(
-                f"[lidar] scan={d['n_scan']} inquadrati={d['n_fov']} "
-                f"su_classe_dinamica={d['n_dyn']} | "
-                f"cluster: conf={d['conf']} RESPINTI={d['rej']} ignoti={d['unk']} | "
-                f"tracce={len(self.tracks)} (sem+={n_sem}) usate={n_acc} | {d['motivo']}")
+        n_acc = sum(1 for t in self.tracks if t.get('is_dynamic'))
+        self.get_logger().info(
+            f"pixel_dinamici={d.get('n_dyn_px',0)} regioni={d.get('n_regions',0)} "
+            f"persone={d.get('n_people',0)} con_depth={d.get('n_valid_depth',0)} "
+            f"(di cui rada={d.get('n_sparse_depth',0)}; scartate: piccole={d.get('n_small',0)} "
+            f"senza_depth={d.get('n_nodepth',0)}) | "
+            f"LATERALI(lidar)={d.get('unk',0)} | "
+            f"tracce={len(self.tracks)} usate={n_acc} | {d['motivo']}")
 
 
 def main():

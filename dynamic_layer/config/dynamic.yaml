@@ -3,36 +3,23 @@ dynamic_tracker:
     use_sim_time: true
 
     # ===== I/O e frame =====
-    scan_topic: '/scan'
     seg_topic: '/semantic/segmentation'
     # immagine di profondita' (16UC1 in mm o 32FC1 in m)
     depth_topic: '/camera/depth_image'
-    # se non arriva nulla: prova 'reliable', oppure cambia depth_topic in /camera/depth_image
     depth_reliability: best_effort
     camera_info_topic: '/camera/camera_info'
-    odom_topic: '/odom'
     output_topic: '/dynamic_cost'
     tracks_topic: '/dynamic_tracks_state'
     markers_topic: '/dynamic_tracks'
     debug_points_topic: '/dynamic_tracker/semantic_points'
     world_frame: 'odom'
     robot_frame: 'base_link'
-    # ===== FUSIONE SEMANTICA (camera classifica, LiDAR misura) =====
     # trainId Cityscapes: 11 person, 12 rider, 17 motorcycle, 18 bicycle
     dynamic_classes: [11, 12, 17, 18]
-    # (solo lidar/fusion) tolleranza in pixel della proiezione LiDAR
-    pixel_dilation: 2
-    # (solo lidar/fusion) frazione per confermare un cluster LiDAR
-    min_semantic_frac: 0.4
-    min_fov_points: 2
-    # (solo lidar/fusion) false=tiene gli ignoti fuori FOV
-    require_semantic: False
-    sem_score_max: 5
     max_seg_age_s: 0.5
     # ===== griglia rolling e cono =====
     size_m: 8.0
     resolution: 0.05
-    max_range: 8.0
     rate_hz: 10.0
     enable_cone: True
     mark_obstacle: True
@@ -48,33 +35,26 @@ dynamic_tracker:
     gate_ang_vel: 1.0
     # ===== RILEVANZA: a chi serve un cono =====
     relevance_enabled: True
-    relevance_horizon_s: 10.0
-    relevance_radius_m: 2.0
-    relevance_always_dist_m: 0.8
-    # settore frontale del cono. 180=davanti+lati (no retromarcia). 72=solo FOV camera
     cone_sector_deg: 180.0
-    # ===== MODALITA' DI RILEVAMENTO =====
-    # 'camera'=maschera semantica+depth (preciso, solo FOV). 'lidar'=vecchio front-end (360). 'fusion'=camera nel FOV + LiDAR fuori
-    detection_mode: 'camera'
+    # direzione del cono dallo spostamento reale su una finestra (non dalla
+    # velocita' istantanea, che per una traccia nuova punta a caso). Il cono
+    # appare solo dopo cone_min_disp_m di spostamento netto: niente flip iniziale.
+    cone_dir_window: 6
+    cone_min_disp_m: 0.15
     # pixel minimi perche' una maschera conti come persona
     min_region_px: 40
     # pixel con profondita' valida minimi per fidarsi della distanza
     min_valid_depth_px: 10
-    # riunisce le gambe di una stessa persona quando il busto non e' segmentato
+    # fusione nel mondo: due detection piu' vicine di questa distanza (m) e a
+    # profondita' simile sono la stessa persona (le due gambe). Invariante alla
+    # distanza. 0.4 unisce le gambe senza fondere due persone affiancate.
+    person_merge_dist_m: 0.4
+    person_merge_depth_m: 0.6
     # (gap tipico 8-12 px). 0 = disattivato. Se una persona si sdoppia, alza a 13-15.
-    leg_merge_px: 11
-    # se la chiusura unisce due persone vicine, rispezza la regione troppo larga
-    split_wide: true
-    max_person_width_m: 0.8
     # range utile della depth: sotto e sopra si scarta
     depth_min_m: 0.3
     depth_max_m: 8.0
     # 0=direzione congelata, 1=nessun lisciamento
-    cone_dir_ema: 0.3
-    # ===== clustering (solo modalita lidar/fusion) =====
-    cluster_eps_m: 0.5
-    cluster_min_pts: 2
-    cluster_max_size_m: 1.5
     # ===== tracking =====
     gate_dist_m: 0.7
     min_obs: 3
