@@ -162,3 +162,61 @@ dynamic_tracker:
     kf_sigma_z: 0.12
     kf_v_init: 1.0
     kf_min_snr: 1.0
+
+optical_flow_tracker:
+  ros__parameters:
+    use_sim_time: true
+
+    # ===== I/O =====
+    scan_topic: /scan
+    odom_topic: /odom
+    output_topic: /dynamic_cost            # stesso topic del tracker a oggetti
+    tracks_topic: /dynamic_tracks_state    # il critic C++ non cambia
+    markers_topic: /dynamic_tracks
+    flow_markers_topic: /optical_flow/vectors
+    world_frame: odom
+    robot_frame: base_link
+
+    # ===== griglia di occupazione =====
+    size_m: 8.0
+    resolution: 0.05
+    max_range: 8.0
+    rate_hz: 10.0
+
+    # ===== flusso ottico (Farneback) =====
+    # parametri standard: winsize grande = piu' liscio ma meno reattivo ai
+    # dettagli. 15 e' un buon compromesso per una griglia a 5 cm.
+    flow_pyr_scale: 0.5
+    flow_levels: 3
+    flow_winsize: 15
+    flow_iterations: 3
+    flow_poly_n: 5
+    flow_poly_sigma: 1.2
+    # una cella conta come "in moto" solo sopra questa velocita' (m/s): sotto
+    # e' rumore del flusso. E' anche cio' che esclude i muri fermi.
+    min_speed: 0.30
+    # blob: celle in moto vicine = stesso ostacolo (serve solo per il cono)
+    blob_eps_m: 0.4
+    blob_min_cells: 4
+    # lisciamento temporale della velocita' dei blob: recupera stabilita' che
+    # un Kalman darebbe. 0 = nessun lisciamento, 1 = solo il frame corrente.
+    vel_ema: 0.4
+    # un blob genera cono solo dopo N frame di moto coerente (anti-muro)
+    promote_frames: 3
+
+    # ===== cono di costo (identico al tracker a oggetti) =====
+    enable_cone: true
+    mark_obstacle: true
+    horizon_s: 3.0
+    cone_min_length: 4.0
+    cone_halfwidth_m: 0.4
+    cone_spread: 1.5
+    max_cost: 100
+    nucleus_radius_m: 0.20
+    cone_base_cost: 99
+    cone_tip_cost: 90
+    cone_lateral_falloff: 0.35
+    cone_sector_deg: 180.0        # niente coni da dietro (no retromarcia)
+    relevance_horizon_s: 10.0
+    relevance_radius_m: 2.0
+    relevance_always_dist_m: 0.8
