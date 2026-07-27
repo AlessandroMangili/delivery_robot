@@ -6,7 +6,7 @@ from launch_ros.actions import Node
 
 def generate_launch_description():
     params = os.path.join(
-        get_package_share_directory('semantic'), 'config', 'params.yaml')
+        get_package_share_directory('semantic'), 'config', 'semantic.yaml')
     use_sim_time = {'use_sim_time': True}
 
     gt_relay = Node(

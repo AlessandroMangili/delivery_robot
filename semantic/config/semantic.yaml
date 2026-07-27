@@ -16,12 +16,18 @@ semantic_costmap_node:
     initial_size_m: 10.0                   # [m] initial grid side, then auto grow
     grow_margin_m: 3.0                     # [m] margin added on each auto expansion
 
-    # IPM projection (camera pixel to the ground)
+    # Pixel
     pixel_stride: 4                        # sample 1 pixel every N
     max_range: 5.5                         # [m] max distance considered for view/occlusion
     min_row_frac: 0.55                     # sample the image from this fraction downward (0.55 = lower half = the ground)
-    min_ray_downness: 0.06                 # ANTI-SMEAR: drop near-horizontal rays (they project far and imprecise)
     map_write_max_range: 5.0               # [m] WRITE to map only within this range (where IPM is accurate)
+
+    # Depth
+    depth_topic: /camera/depth_image
+    depth_write_max_m: 6.0                 # [m] scrivi solo entro questa distanza (depth affidabile). Alza se serve il suolo piu' lontano, sapendo che oltre ~6-7 m la depth e' rumorosa
+    max_obstacle_height: 0.60              # [m] sopra questa quota non scrivere: chiome, tettoie, insegne sotto cui il robot passa
+    depth_max_age_s: 0.5                   # depth piu' vecchia di cosi' = non usata
+    veto_verbose: false                    # true = logga quanti pixel misurati/scartati per frame
 
     # Full map publishing
     full_map_period_s: 1.0                 # [s] republish the full map every N seconds
@@ -31,63 +37,36 @@ semantic_costmap_node:
     occ_sector_deg: 2.0                    # [deg] angular width of z-buffer sectors
     occ_margin: 0.15                       # [m] beyond the first obstacle before calling it "occluded"
     occ_weak: 0.10                         # weight of an occluded observation (0.1 = nearly ignored, but not dropped: can still confirm over time)
-
-    # Weights and confidence -----
     w_dist_min: 0.03                       # min weight of an observation at max_range (near ~1, far small)
 
-    # VERTICAL classes that block the view, this means "OCCLUDES THE VIEW", NOT "stands upright"
     blocker_classes: [2,3,4,5,7,8,11,12,13,14,15,16,17,18]
-
-    # ANTI-SMEAR: true pixel position from depth
-    # IPM assumes every pixel lies on the ground: a pixel at height h, camera at height H lands at d*H/(H-h) 
-    # With depth we don't GUESS the position, we MEASURE it: all pixels of a trunk fall on the trunk cell. IPM stays only where depth is missing
-    use_depth_projection: true             # true = position pixels by depth measurement; false = IPM only
-    depth_topic: /camera/depth_image
-    max_obstacle_height: 0.60              # [m] above this, don't write: canopies, roofs, signs the robot passes under
-    depth_max_age_s: 0.5                   # depth older than this = not used
-    veto_verbose: false                    # true = log how many pixels are measured/discarded per frame
 
     # Map persistence
     map_save_name: 'map2'                  # empty = don't save
     map_load_name: 'map2'                  # empty = start from scratch
     autosave: false                        # true = save the map on node SHUTDOWN
 
-    # Dynamic objects exclusion -----
+    # Dynamic objects exclusion
     dynamic_classes: [11,12,13,14,15,16,17,18]
     dyn_v_thresh: 0.3                             # [m/s] above = "moving"
     dyn_gate: 1.0                                 # [m] max distance to associate a track across frames
     dyn_min_obs: 3                                # min frames before trusting the estimated velocity
     dyn_timeout: 1.0                              # [s] max age of a track no longer seen
     dyn_vel_beta: 0.6                             # velocity smoothing (EMA)
-
-    # Dynamics SILENCE zone (no footprints in the map) -----
     map_static_dynamics: false             # false = a dynamic-class object NEVER writes to the map, even when still
     dyn_dilate_px: 6                       # [px] halo around dynamics where nothing is written (catches mis-segmented edge pixels and IPM smear of the body)
 
-    # EVIDENCE: the map defends a cell in proportion to how much it has been seen
-    # The map remembers the cell CLASS, not just the cost. 
-    # Confidence C is an EVIDENCE COUNTER:
-    #    AGREEING observation    -> C rises  (+confirm_gain * weight)
-    #    DISAGREEING observation -> C falls  (-deny_penalty * weight)
-    #    C <= 0 -> the cell lost its defence and the new class replaces it OUTRIGHT.
-    # Trust costs more than it earns, and there's a ceiling: no cell becomes immortal.
-    #    fresh cell (C=2) -> falls after 2 close disagreements
-    #    mature cell (C=8) -> needs 4, CONSECUTIVE and CLOSE
     conf_max: 8.0          # evidence CEILING (no cell is immortal)
     conf_init: 2.0         # defence of a just-entered cell (low: must earn it)
     confirm_gain: 1.0      # one confirmation is worth +1 * weight
-    deny_penalty: 2.0      # one denial is worth -2 * weight  <- ASYMMETRY: denying costs double
-                           #   RAISE (3-4) if noise stays in the map too long
-                           #   LOWER (1.5) if true cells flip too easily
+    deny_penalty: 2.0      # one denial is worth -2 * weight
     conf_decay: 0.99       # evidence of unseen cells ages (-1%/s)
 
     # MAP ENTRY: only after N CONSECUTIVE confirmations, then written OUTRIGHT
-    # The counter that keeps NOISE out of the map: a new cell enters only after being seen N times IN A ROW. 
     new_hits: 4            # 2 = permissive / 4 = strict
     change_hits: 2         # consecutive confirmations of the OPPOSITE class to flip a cell (on top of C reaching 0)
 
     # ROBUST localization gate (EMA + hysteresis)
-    # Suspends mapping ONLY on SEVERE, PERSISTENT localization loss. The existing map stays published; resumes on its own when localization recovers.
     use_loc_quality_gate: true             # enable/disable the gate
     loc_pose_topic: /odometry/filtered     # pose-with-covariance topic (/amcl_pose for AMCL)
     loc_cov_source: odometry               # 'pose_with_cov' for AMCL, 'odometry' for EKF (robot_localization)
@@ -100,7 +79,7 @@ confinement_layer:
     in_topic: /semantic_costmap            # semantic map in (latched)
     out_topic: /confinement_cost           # confinement field out (latched)
     sidewalk_cost_max: 15                  # cells with cost <= this = sidewalk
-    conf_max: 50.0                         # confinement cost AT the sidewalk edge
+    conf_max: 35.0                         # confinement cost AT the sidewalk edge
     falloff: 0.4                           # [m] exponential decay toward the centre (at 0.4 m ~30, at 1 m ~7)
     include_unknown_as_edge: false         # false = unknown does NOT repel, so the robot explores it
 

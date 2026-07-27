@@ -13,8 +13,8 @@ from std_srvs.srv import Trigger
 import os
 
 CLASS_COST = {
-    1: 0, 9: 70, 8: 80, 0: 90,
-    2: 100, 3: 100, 4: 100, 5: 100, 7: 100,
+    1: 0, 9: 70, 0: 90,
+    8: 100, 2: 100, 3: 100, 4: 100, 5: 100, 7: 100,
     11: 100, 12: 100, 13: 100, 14: 100, 15: 100, 16: 100, 17: 100, 18: 100,
 }
 DEFAULT_BLOCKERS = [2, 3, 4, 5, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18]
@@ -88,7 +88,6 @@ class SemanticCostmapNode(Node):
         self.declare_parameter('pixel_stride', 4)
         self.declare_parameter('max_range', 5.0)
         self.declare_parameter('min_row_frac', 0.62)
-        self.declare_parameter('min_ray_downness', 0.08)
         self.declare_parameter('map_write_max_range', 4.0)
         self.declare_parameter('occ_sector_deg', 2.0)
         self.declare_parameter('occ_margin', 0.15)
@@ -101,7 +100,7 @@ class SemanticCostmapNode(Node):
         self.declare_parameter('deny_penalty', 2.0)
         self.declare_parameter('new_hits', 2)
         self.declare_parameter('change_hits', 2)
-        self.declare_parameter('use_depth_projection', True)
+        self.declare_parameter('depth_write_max_m', 6.0)  # scrivi solo entro questa distanza (depth affidabile)
         self.declare_parameter('depth_topic', '/camera/depth_image')
         self.declare_parameter('max_obstacle_height', 0.60)
         self.declare_parameter('depth_max_age_s', 0.5)
@@ -126,7 +125,6 @@ class SemanticCostmapNode(Node):
         self.stride = gp('pixel_stride').value
         self.max_range = gp('max_range').value
         self.min_row_frac = gp('min_row_frac').value
-        self.min_ray_downness = float(gp('min_ray_downness').value)
         self.map_write_max_range = float(gp('map_write_max_range').value)
         self.conf_decay = float(gp('conf_decay').value)
         self.conf_max = float(gp('conf_max').value)
@@ -162,15 +160,15 @@ class SemanticCostmapNode(Node):
             else:
                 self.create_subscription(PoseWithCovarianceStamped, self.loc_pose_topic,
                                          self.loc_cb_pwc, 10)
-        self.use_depth_veto = bool(gp('use_depth_projection').value)
+        self.depth_write_max = float(gp('depth_write_max_m').value)
         self.max_obs_h = float(gp('max_obstacle_height').value)
         self.depth_max_age = float(gp('depth_max_age_s').value)
         self.veto_verbose = bool(gp('veto_verbose').value)
         self.depth = None
         self.depth_t = -1e9
         self._veto_warned = False
-        if self.use_depth_veto:
-            self.create_subscription(Image, gp('depth_topic').value, self.depth_cb, 1)
+        # la depth e' l'UNICA fonte di posizione: sottoscrizione sempre attiva
+        self.create_subscription(Image, gp('depth_topic').value, self.depth_cb, 1)
 
         blockers = gp('blocker_classes').value
         dynamic = gp('dynamic_classes').value
@@ -461,56 +459,65 @@ class SemanticCostmapNode(Node):
 
         fx, fy = self.K[0, 0], self.K[1, 1]
         cx, cy = self.K[0, 2], self.K[1, 2]
+        # direzione del raggio di ogni pixel nel frame ottico
         dir_opt = np.stack([(uu - cx) / fx, (vv - cy) / fy, np.ones_like(uu, dtype=float)], axis=1)
-        dir_world = dir_opt @ R.T
-        dz = dir_world[:, 2]
 
-        valid = dz < -1e-6
-        valid = valid & (dz < -self.min_ray_downness)
-        t = np.full(uu.shape, -1.0)
-        t[valid] = -origin[2] / dz[valid]
-        ok = valid & (t > 0)
-        pts = origin[None, :] + t[:, None] * dir_world
-        X, Y = pts[:, 0], pts[:, 1]
-
+        # ===== POSIZIONAMENTO SOLO-DEPTH =====
+        # La posizione di ogni pixel viene MISURATA dalla depth: nessuna
+        # assunzione sul piano del suolo (niente IPM). Un pixel senza depth
+        # valida NON viene scritto -- meglio un buco che una posizione inventata.
+        # Motivazione: con la depth disponibile l'IPM sarebbe solo un ripiego che
+        # assume che ogni pixel stia a terra, falso per tutto cio' che ha altezza
+        # (edifici, alberi, persone) e fonte di smearing. Nel mondo reale, dove la
+        # segmentazione non e' ground truth, un metodo che MISURA e' piu' robusto
+        # di uno che ASSUME sulla base di una classe che potrebbe essere sbagliata.
+        X = np.full(uu.shape, np.nan)
+        Y = np.full(uu.shape, np.nan)
+        ok = np.zeros(uu.shape, dtype=bool)
         n_depth = 0
-        if self.use_depth_veto and self.depth is not None:
-            if self.depth.shape != seg.shape:
-                self.get_logger().error(
-                    f'DEPTH UNUSABLE: {self.depth.shape} != segmentation {seg.shape}.',
-                    throttle_duration_sec=10.0)
-            elif (stamp_sec - self.depth_t) > self.depth_max_age:
-                self.get_logger().warn('DEPTH too old in this frame.',
-                                       throttle_duration_sec=10.0)
-            else:
-                bz = T_base.transform.translation.z
-                dd = self.depth[vv, uu].astype(np.float64)
-                dvalid = np.isfinite(dd) & (dd > 0.05) & (dd < 30.0)
-                dd = np.where(dvalid, dd, 0.0)
-                P_map = (dir_opt * dd[:, None]) @ R.T + origin[None, :]
-                z_rel = P_map[:, 2] - bz
 
-                overhead = dvalid & (z_rel > self.max_obs_h)
-
-                use_d = dvalid & ~overhead
-                X = np.where(use_d, P_map[:, 0], X)
-                Y = np.where(use_d, P_map[:, 1], Y)
-                ok = (ok | use_d) & ~overhead
-                n_depth = int(np.count_nonzero(use_d))
-
-                if self.veto_verbose:
-                    self.get_logger().info(
-                        f'Depth: {n_depth} pixels positioned by MEASUREMENT, '
-                        f'{int(np.count_nonzero(overhead))} discarded because above '
-                        f'{self.max_obs_h:.2f} m (robot passes underneath)',
-                        throttle_duration_sec=2.0)
-        elif self.use_depth_veto:
+        if self.depth is None:
+            self.get_logger().warn(
+                'Nessuna depth ricevuta: in modalita\' solo-depth non si mappa nulla. '
+                'Controlla il topic depth.', throttle_duration_sec=10.0)
+        elif self.depth.shape != seg.shape:
             self.get_logger().error(
-                'NO DEPTH: positions guessed with IPM -> smearing.',
+                f'DEPTH inutilizzabile: {self.depth.shape} != segmentazione {seg.shape}.',
                 throttle_duration_sec=10.0)
+        elif (stamp_sec - self.depth_t) > self.depth_max_age:
+            self.get_logger().warn('DEPTH troppo vecchia in questo frame.',
+                                   throttle_duration_sec=10.0)
+        else:
+            bz = T_base.transform.translation.z
+            dd = self.depth[vv, uu].astype(np.float64)
+            dvalid = np.isfinite(dd) & (dd > 0.05) & (dd < self.depth_write_max)
+            dd = np.where(dvalid, dd, 0.0)
+            # retroproiezione con la distanza MISURATA -> punto 3D nel mondo
+            P_map = (dir_opt * dd[:, None]) @ R.T + origin[None, :]
+            z_rel = P_map[:, 2] - bz
+            # scarta cio' che sta sopra la testa del robot (tettoie, insegne,
+            # chiome: il robot ci passa sotto, non sono ostacoli a terra)
+            overhead = dvalid & (z_rel > self.max_obs_h)
+            use_d = dvalid & ~overhead
+            X = np.where(use_d, P_map[:, 0], np.nan)
+            Y = np.where(use_d, P_map[:, 1], np.nan)
+            ok = use_d
+            n_depth = int(np.count_nonzero(use_d))
+            if self.veto_verbose:
+                self.get_logger().info(
+                    f'Depth: {n_depth} pixel posizionati per MISURA, '
+                    f'{int(np.count_nonzero(overhead))} scartati perche\' sopra '
+                    f'{self.max_obs_h:.2f} m (il robot ci passa sotto)',
+                    throttle_duration_sec=2.0)
 
         dist = np.hypot(X - bx, Y - by)
-        ok = ok & (dist < self.map_write_max_range)
+        ok = ok & np.isfinite(X) & np.isfinite(Y) & (dist < self.map_write_max_range)
+        # i pixel senza depth hanno X,Y = NaN e sono gia' esclusi da ok; li
+        # azzero SOLO per rendere sicuri i cast a intero piu' a valle (arctan2,
+        # astype(int)), che su NaN emetterebbero warning. Il valore 0 e' innocuo
+        # perche' questi pixel non vengono comunque scritti (ok=False).
+        Xz = np.where(np.isfinite(X), X, 0.0)
+        Yz = np.where(np.isfinite(Y), Y, 0.0)
 
         classes = seg[vv, uu]
         costs = self.cost_lut[classes]
@@ -550,8 +557,8 @@ class SemanticCostmapNode(Node):
                 ok = ok & (~(in_dyn & ~keep))
 
         camx, camy = origin[0], origin[1]
-        ang = np.arctan2(Y - camy, X - camx)
-        rad = np.hypot(X - camx, Y - camy)
+        ang = np.arctan2(Yz - camy, Xz - camx)
+        rad = np.hypot(Xz - camx, Yz - camy)
         sec = np.clip(((ang + np.pi) / self.occ_dth).astype(int), 0, self.occ_nsec - 1)
         is_block = self.block_lut[classes] & ok
         occ_r = np.full(self.occ_nsec, np.inf, dtype=np.float64)
@@ -567,8 +574,8 @@ class SemanticCostmapNode(Node):
         if okx.any():
             self.ensure_capacity(X[okx], Y[okx])
 
-        gi = ((X - self.gox) / self.res).astype(int)
-        gj = ((Y - self.goy) / self.res).astype(int)
+        gi = ((Xz - self.gox) / self.res).astype(int)
+        gj = ((Yz - self.goy) / self.res).astype(int)
         inside = ok & (gi >= 0) & (gi < self.gnx) & (gj >= 0) & (gj < self.gny)
 
         full_dyn = self.dyn_lut[seg].astype(np.uint8)
@@ -605,8 +612,8 @@ class SemanticCostmapNode(Node):
                 ok = ok & (~(in_dyn & ~keep))
 
         camx, camy = origin[0], origin[1]
-        ang = np.arctan2(Y - camy, X - camx)
-        rad = np.hypot(X - camx, Y - camy)
+        ang = np.arctan2(Yz - camy, Xz - camx)
+        rad = np.hypot(Xz - camx, Yz - camy)
         sec = np.clip(((ang + np.pi) / self.occ_dth).astype(int), 0, self.occ_nsec - 1)
         is_block = self.block_lut[classes] & ok
         occ_r = np.full(self.occ_nsec, np.inf, dtype=np.float64)
@@ -622,8 +629,8 @@ class SemanticCostmapNode(Node):
         if okx.any():
             self.ensure_capacity(X[okx], Y[okx])
 
-        gi = ((X - self.gox) / self.res).astype(int)
-        gj = ((Y - self.goy) / self.res).astype(int)
+        gi = ((Xz - self.gox) / self.res).astype(int)
+        gj = ((Yz - self.goy) / self.res).astype(int)
         inside = ok & (gi >= 0) & (gi < self.gnx) & (gj >= 0) & (gj < self.gny)
 
         if np.any(inside):
