@@ -29,6 +29,7 @@ setup(
     entry_points={
         'console_scripts': [
             'dynamic_tracker = dynamic_layer.dynamic_tracker:main',
+            'lidar_dynamic_tracker = dynamic_layer.lidar_dynamic_tracker:main',
         ],
     },
 )

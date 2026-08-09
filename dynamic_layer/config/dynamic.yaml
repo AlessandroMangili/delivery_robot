@@ -68,3 +68,73 @@ dynamic_tracker:
     kf_sigma_z: 0.12
     kf_v_init: 1.0
     kf_min_snr: 1.0
+
+lidar_dynamic_tracker:
+  ros__parameters:
+    use_sim_time: true
+
+    # ===== I/O e frame =====
+    scan_topic: '/scan'
+    output_topic: '/dynamic_cost'
+    world_frame: 'odom'
+    robot_frame: 'base_link'
+    odom_topic: '/odom'
+
+    size_m: 8.0
+    resolution: 0.05
+    rate_hz: 10.0
+    max_range: 8.0
+    # ===== clustering LiDAR =====
+    cluster_eps_m: 0.5
+    cluster_min_pts: 2
+    cluster_max_size_m: 1.5
+
+    # ===== CLASSE DALLA CAMERA (fa morire i muri) =====
+    # immagine di segmentazione (ID Cityscapes)
+    seg_topic: '/semantic/segmentation'
+    camera_info_topic: '/camera/camera_info'
+
+    # 11 person, 12 rider, 17 motorcycle, 18 bicycle
+    dynamic_classes: [11, 12, 17, 18]
+
+    # intorno campionato attorno al centroide proiettato
+    sample_radius_px: 3
+
+    # frazione di pixel dinamici per accettare il cluster
+    min_dyn_frac: 0.25
+
+    # true = tiene i cluster fuori FOV camera (copertura 360)
+    keep_unclassifiable: True
+    
+    # DEPRECATO (sostituito dal Kalman)
+    vel_ema: 0.4
+    # DEPRECATO
+    pos_ema: 0.5
+
+    # ===== Kalman (velocita costante) =====
+    kf_sigma_a: 0.6
+    kf_sigma_z: 0.12
+    kf_v_init: 1.0
+    kf_min_snr: 1.0
+
+    # ===== tracking e promozione =====
+    gate_dist_m: 0.7
+    min_obs: 3
+    track_timeout_s: 0.6
+    min_speed: 0.30
+    promote_frames: 4
+    demote_frames: 8
+
+    # ===== cono di costo =====
+    horizon_s: 3.0
+    cone_min_length: 4.0
+    cone_halfwidth_m: 0.4
+    cone_spread: 1.5
+    max_cost: 100
+    nucleus_radius_m: 0.20
+    cone_base_cost: 99
+    cone_tip_cost: 90
+    cone_lateral_falloff: 0.35
+    mark_obstacle: True
+    enable_cone: True
+    gate_ang_vel: 1.0

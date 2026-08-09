@@ -31,8 +31,8 @@ def generate_launch_description():
     # riceve use_sim_time dal launch (il param nel yaml e' ridondante ma innocuo).
     dynamic_esdf_node = Node(
         package='dynamic_layer',
-        executable='dynamic_tracker',
-        name='dynamic_tracker',
+        executable='lidar_dynamic_tracker',
+        name='lidar_dynamic_tracker',
         output='screen',
         parameters=[
             params_file,
