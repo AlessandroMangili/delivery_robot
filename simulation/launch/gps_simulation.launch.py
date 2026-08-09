@@ -171,7 +171,7 @@ def generate_launch_description():
             "/scan@sensor_msgs/msg/LaserScan@gz.msgs.LaserScan",
             "/scan/points@sensor_msgs/msg/PointCloud2@gz.msgs.PointCloudPacked",
             "/camera/depth_image@sensor_msgs/msg/Image@gz.msgs.Image",
-            "/camera/points@sensor_msgs/msg/PointCloud2@gz.msgs.PointCloudPacked",
+            "/scan/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked",
             "/semantic/labels_map@sensor_msgs/msg/Image[gz.msgs.Image",
 
         ],

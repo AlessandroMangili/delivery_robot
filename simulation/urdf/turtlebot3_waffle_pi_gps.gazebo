@@ -46,13 +46,19 @@
                <topic>scan</topic>
                <gz_frame_id>base_scan</gz_frame_id>
                <lidar>
-                    <scan>
+                   <scan>
                          <horizontal>
                               <samples>720</samples>
                               <resolution>1</resolution>
                               <min_angle>-3.14156</min_angle>
                               <max_angle>3.14156</max_angle>
                          </horizontal>
+                         <vertical>                          <!-- QUESTO lo rende 3D -->
+                              <samples>16</samples>             <!-- 16 corone, stile VLP-16 -->
+                              <resolution>1</resolution>
+                              <min_angle>-0.2618</min_angle>    <!-- -15° -->
+                              <max_angle>0.2618</max_angle>     <!-- +15° -->
+                         </vertical>
                     </scan>
                     <range>
                          <min>0.05</min>
