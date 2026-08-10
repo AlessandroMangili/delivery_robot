@@ -284,7 +284,10 @@ class Lidar3DTracker(Node):
         self.mot = MultiObjectTracker(self.params)
 
         self.tf_buffer = tf2_ros.Buffer()
-        self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
+        # spin_thread=True: il listener aggiorna il buffer su un thread proprio,
+        # così una lookup con timeout nella callback non va in deadlock.
+        self.tf_listener = tf2_ros.TransformListener(
+            self.tf_buffer, self, spin_thread=True)
 
         qos = QoSProfile(depth=10,
                          reliability=ReliabilityPolicy.RELIABLE,
@@ -302,18 +305,22 @@ class Lidar3DTracker(Node):
 
     # -----------------------------------------------------------------------
     def _lookup(self, src, stamp):
-        """TF src -> tracking_frame; prova lo stamp esatto, poi l'ultima disponibile."""
-        for tp in (rclpy.time.Time.from_msg(stamp), rclpy.time.Time()):
-            try:
-                return self.tf_buffer.lookup_transform(
-                    self.tracking_frame, src, tp,
-                    timeout=Duration(seconds=0.05))
-            except TransformException:
-                continue
-        self.get_logger().warn(
-            f"TF {self.tracking_frame} <- {src} non disponibile",
-            throttle_duration_sec=2.0)
-        return None
+        """TF src -> tracking_frame ALLO STAMP ESATTO del cloud.
+        NIENTE fallback all'ultima TF: userebbe una posa del robot diversa da
+        quella di cattura e in movimento farebbe 'muovere' in odom gli oggetti
+        statici (ego-moto non compensato). Se la TF manca, si salta il frame:
+        il tracker fa coasting e nessuna velocità viene falsata."""
+        try:
+            return self.tf_buffer.lookup_transform(
+                self.tracking_frame, src,
+                rclpy.time.Time.from_msg(stamp),
+                timeout=Duration(seconds=0.05))
+        except TransformException as e:
+            self.get_logger().warn(
+                f"TF {self.tracking_frame} <- {src} @stamp non disponibile, "
+                f"salto il frame ({e})",
+                throttle_duration_sec=2.0)
+            return None
 
     @staticmethod
     def _apply_tf(tf, pts):
