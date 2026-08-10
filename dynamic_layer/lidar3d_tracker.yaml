@@ -1,0 +1,29 @@
+lidar3d_tracker:
+  ros__parameters:
+    input_topic: /detections
+    tracking_frame: odom          # frame fisso: NON base_scan (ruota col robot)
+    markers_topic: /tracks/markers
+
+    # Kalman (velocità costante)
+    accel_std: 0.8                # tarato: statico fermo resta sotto ~0.12 m/s
+    meas_std: 0.10               # rumore misura di posizione [m]
+    init_pos_std: 0.30
+    init_vel_std: 2.0
+
+    # associazione
+    gating_mahalanobis: 9.21     # chi^2, 2 gdl, ~99%
+    max_assoc_dist: 1.5          # gate euclideo di sicurezza [m]
+
+    # ciclo di vita
+    min_hits: 3                  # frame per confermare una traccia
+    max_age: 10                  # frame di coasting (10 = ~1 s a 10 Hz)
+
+    # gate di velocità (isteresi) — esclude alberi, panchine, pali (statici)
+    min_speed_on: 0.20
+    min_speed_off: 0.15
+
+    # visualizzazione
+    marker_z: 0.6
+    arrow_time_scale: 1.0        # lunghezza freccia = velocità * questo [s]
+    publish_static: false        # true = mostra in grigio anche le tracce ferme (debug)
+    diag_period_frames: 20

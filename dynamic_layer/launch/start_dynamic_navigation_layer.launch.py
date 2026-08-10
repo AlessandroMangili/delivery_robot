@@ -20,7 +20,7 @@ def generate_launch_description():
     )
     params_arg = DeclareLaunchArgument(
         'params_file',
-        default_value=os.path.join(pkg_dynamic, 'config', 'dynamic.yaml'),
+        default_value=os.path.join(pkg_dynamic, 'config', 'dynamic_tracker.yaml'),
         description='File dei parametri del layer ESDF differenziale'
     )
 
@@ -29,10 +29,22 @@ def generate_launch_description():
 
     # nodo del layer anticipatorio: legge i parametri dal esdf.yaml e
     # riceve use_sim_time dal launch (il param nel yaml e' ridondante ma innocuo).
-    dynamic_esdf_node = Node(
+    pointcloud = Node(
         package='dynamic_layer',
-        executable='lidar_dynamic_tracker',
-        name='lidar_dynamic_tracker',
+        executable='pointcloud_detector',
+        name='pointcloud_detector',
+        output='screen',
+        parameters=[
+            params_file,
+            {'use_sim_time': use_sim_time},
+        ],
+        condition=IfCondition(LaunchConfiguration('dynamic_layer')),
+    )
+    
+    dynamic_tracker = Node(
+        package='dynamic_layer',
+        executable='lidar3d_tracker',
+        name='lidar3d_tracker',
         output='screen',
         parameters=[
             params_file,
@@ -45,5 +57,6 @@ def generate_launch_description():
         use_sim_time_arg,
         enable_arg,
         params_arg,
-        dynamic_esdf_node,
+        pointcloud,
+        dynamic_tracker,
     ])

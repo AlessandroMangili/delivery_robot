@@ -28,8 +28,8 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'dynamic_tracker = dynamic_layer.dynamic_tracker:main',
-            'lidar_dynamic_tracker = dynamic_layer.lidar_dynamic_tracker:main',
+            'pointcloud_detector = dynamic_layer.pointcloud_detector:main',
+            'lidar3d_tracker = dynamic_layer.lidar3d_tracker:main',
         ],
     },
 )
