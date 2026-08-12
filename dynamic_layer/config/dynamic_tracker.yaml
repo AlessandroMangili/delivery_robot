@@ -4,32 +4,35 @@ pointcloud_detector:
     input_topic: /scan/points
     detections_topic: /detections
     markers_topic: /detections/markers
- 
+
     # crop
     min_range: 0.30        # scarta il corpo del robot / punti troppo vicini
     max_range: 12.0        # oltre, il LiDAR è rado/rumoroso
     crop_min_z: -1.0       # box in z, frame sensore (base_scan)
     crop_max_z: 2.5
- 
+
     # downsample
     voxel_size: 0.05       # alza se il clustering è lento
- 
+
     # rimozione piano di terra (RANSAC)
     ground_dist_thresh: 0.08
     ground_max_iter: 60
     ground_normal_z_min: 0.85   # |n_z| min: piano ~orizzontale = terra, non muro
     remove_below_ground: true
- 
+
     # clustering euclideo
     cluster_tolerance: 0.30     # distanza max tra punti dello stesso cluster
     cluster_min_points: 6
     cluster_max_points: 800
- 
+    # merge world-space: riunisce cluster frammentati (gambe di una persona)
+    merge_enabled: true
+    merge_dist: 0.45              # < distanza tra 2 persone, > tra le gambe di una
+
     # filtro geometrico "persona" (permissivo: la camera rifinisce in Step 3)
     min_height: 0.20
     max_height: 2.20
     max_footprint: 1.00         # ingombro orizzontale max (muri lunghi cadono qui)
- 
+
     # diagnostica / debug
     debug_show_rejected: true   # cluster scartati in rosso in RViz (per tarare)
     diag_period_frames: 20
@@ -41,28 +44,32 @@ lidar3d_tracker:
     input_topic: /detections
     tracking_frame: odom          # frame fisso: NON base_scan (ruota col robot)
     markers_topic: /tracks/markers
- 
+
     # Kalman (velocità costante)
     accel_std: 0.8                # tarato: statico fermo resta sotto ~0.12 m/s
     meas_std: 0.10               # rumore misura di posizione [m]
     init_pos_std: 0.30
     init_vel_std: 2.0
- 
+
     # associazione
     gating_mahalanobis: 9.21     # chi^2, 2 gdl, ~99%
     max_assoc_dist: 1.5          # gate euclideo di sicurezza [m]
- 
+
     # ciclo di vita
     min_hits: 3                  # frame per confermare una traccia
     max_age: 10                  # frame di coasting (10 = ~1 s a 10 Hz)
- 
+
     # gate di velocità (isteresi) — esclude alberi, panchine, pali (statici)
     min_speed_on: 0.20
     min_speed_off: 0.15
- 
+    # cross-check con la mappa semantica statica
+    use_static_map_gate: true
+    static_map_topic: /semantic_costmap
+    static_cost_thresh: 99          # 100 = struttura dura mappata (muro/edificio/albero)
+    static_gate_radius_cells: 2     # finestra di celle attorno alla traccia (assorbe il jitter)
+
     # visualizzazione
     marker_z: 0.6
     arrow_time_scale: 1.0        # lunghezza freccia = velocità * questo [s]
     publish_static: false        # true = mostra in grigio anche le tracce ferme (debug)
     diag_period_frames: 20
- 

@@ -31,11 +31,13 @@ import numpy as np
 import rclpy
 from rclpy.node import Node
 from rclpy.duration import Duration
+from rclpy.executors import ExternalShutdownException
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
 
 from geometry_msgs.msg import PoseArray, Point
 from visualization_msgs.msg import Marker, MarkerArray
 from std_msgs.msg import ColorRGBA
+from nav_msgs.msg import OccupancyGrid
 
 import tf2_ros
 from tf2_ros import TransformException
@@ -222,6 +224,19 @@ def color_for(tid, a=0.9):
     return ColorRGBA(r=float(r), g=float(g), b=float(b), a=float(a))
 
 
+def cell_is_static(smap, res, ox, oy, w, h, xm, ym, thresh, radius):
+    """True se (xm,ym) [frame map] cade su/vicino a una cella occupata >= thresh.
+    Funzione pura (numpy) -> testabile senza ROS. La finestra di 'radius' celle
+    assorbe il jitter che potrebbe spostare la traccia appena fuori dal muro."""
+    gi = int((xm - ox) / res)
+    gj = int((ym - oy) / res)
+    i0, i1 = max(0, gi - radius), min(w, gi + radius + 1)
+    j0, j1 = max(0, gj - radius), min(h, gj + radius + 1)
+    if i0 >= i1 or j0 >= j1:
+        return False
+    return bool((smap[j0:j1, i0:i1] >= thresh).any())
+
+
 # ===========================================================================
 # Nodo ROS2
 # ===========================================================================
@@ -254,6 +269,14 @@ class Lidar3DTracker(Node):
         d('min_speed_on', 0.20)
         d('min_speed_off', 0.15)
 
+        # cross-check con la mappa semantica statica (/semantic_costmap)
+        # una traccia su una cella occupata (struttura mappata) è un falso
+        # dinamico: i dinamici NON scrivono in mappa, quindi occupata = statico.
+        d('use_static_map_gate', True)
+        d('static_map_topic', '/semantic_costmap')
+        d('static_cost_thresh', 99)          # 100 = struttura dura; 99 la cattura
+        d('static_gate_radius_cells', 2)     # finestra di celle attorno alla traccia
+
         # visualizzazione
         d('marker_z', 0.6)
         d('arrow_time_scale', 1.0)   # lunghezza freccia = v * questo [s]
@@ -269,6 +292,10 @@ class Lidar3DTracker(Node):
         self.publish_static = bool(g('publish_static'))
         self.diag_period_frames = int(g('diag_period_frames'))
 
+        self.use_static_map_gate = bool(g('use_static_map_gate'))
+        self.static_cost_thresh = int(g('static_cost_thresh'))
+        self.static_gate_radius = int(g('static_gate_radius_cells'))
+
         self.params = dict(
             accel_std=float(g('accel_std')),
             meas_std=float(g('meas_std')),
@@ -283,7 +310,7 @@ class Lidar3DTracker(Node):
         )
         self.mot = MultiObjectTracker(self.params)
 
-        self.tf_buffer = tf2_ros.Buffer()
+        self.tf_buffer = tf2_ros.Buffer(cache_time=Duration(seconds=30.0))
         # spin_thread=True: il listener aggiorna il buffer su un thread proprio,
         # così una lookup con timeout nella callback non va in deadlock.
         self.tf_listener = tf2_ros.TransformListener(
@@ -297,8 +324,19 @@ class Lidar3DTracker(Node):
         self.sub = self.create_subscription(
             PoseArray, self.input_topic, self.on_dets, qos)
 
+        # mappa semantica statica (latched -> TRANSIENT_LOCAL per ricevere l'ultima)
+        self.smap = None
+        if self.use_static_map_gate:
+            map_qos = QoSProfile(depth=1,
+                                 reliability=ReliabilityPolicy.RELIABLE,
+                                 durability=DurabilityPolicy.TRANSIENT_LOCAL,
+                                 history=HistoryPolicy.KEEP_LAST)
+            self.sub_map = self.create_subscription(
+                OccupancyGrid, g('static_map_topic'), self.on_static_map, map_qos)
+
         self._frame = 0
         self.last_t = None
+        self._n_suppressed = 0
         self.get_logger().info(
             f"lidar3d_tracker avviato: {self.input_topic} -> tracce in "
             f"'{self.tracking_frame}'")
@@ -314,7 +352,7 @@ class Lidar3DTracker(Node):
             return self.tf_buffer.lookup_transform(
                 self.tracking_frame, src,
                 rclpy.time.Time.from_msg(stamp),
-                timeout=Duration(seconds=0.05))
+                timeout=Duration(seconds=0.1))
         except TransformException as e:
             self.get_logger().warn(
                 f"TF {self.tracking_frame} <- {src} @stamp non disponibile, "
@@ -328,6 +366,44 @@ class Lidar3DTracker(Node):
         tr = tf.transform.translation
         R = quat_to_rot(q.x, q.y, q.z, q.w)
         return (R @ pts.T).T + np.array([tr.x, tr.y, tr.z])
+
+    def on_static_map(self, msg):
+        """Memorizza l'ultima mappa semantica (costo per cella, frame map)."""
+        self.smap = np.array(msg.data, dtype=np.int16).reshape(
+            msg.info.height, msg.info.width)
+        self.smap_res = msg.info.resolution
+        self.smap_ox = msg.info.origin.position.x
+        self.smap_oy = msg.info.origin.position.y
+        self.smap_h, self.smap_w = self.smap.shape
+
+    def _lookup_map(self, stamp):
+        """TF tracking_frame -> map per il cross-check. Qui il fallback all'ultima
+        TF è innocuo: la mappa è statica, un piccolo sfasamento non falsa la velocità
+        (che è già stata stimata) — serve solo la posizione approssimata in map."""
+        if self.tracking_frame == 'map':
+            return None
+        for tp in (rclpy.time.Time.from_msg(stamp), rclpy.time.Time()):
+            try:
+                return self.tf_buffer.lookup_transform(
+                    'map', self.tracking_frame, tp, timeout=Duration(seconds=0.1))
+            except TransformException:
+                continue
+        return None
+
+    def _on_static_structure(self, xt, yt, tf_map):
+        """True se la traccia (xt,yt in tracking_frame) sta su struttura mappata."""
+        if self.smap is None:
+            return False
+        if tf_map is not None:
+            pm = self._apply_tf(tf_map, np.array([[xt, yt, 0.0]]))[0]
+            xm, ym = pm[0], pm[1]
+        elif self.tracking_frame == 'map':
+            xm, ym = xt, yt
+        else:
+            return False
+        return cell_is_static(self.smap, self.smap_res, self.smap_ox, self.smap_oy,
+                              self.smap_w, self.smap_h, xm, ym,
+                              self.static_cost_thresh, self.static_gate_radius)
 
     def on_dets(self, msg):
         self._frame += 1
@@ -355,15 +431,25 @@ class Lidar3DTracker(Node):
             n_dyn = sum(1 for t in tracks if t.confirmed and t.published_dynamic)
             self.get_logger().info(
                 f"[trk] dets={len(dets)} tracce={len(tracks)} "
-                f"confermate={n_conf} dinamiche={n_dyn}")
+                f"confermate={n_conf} dinamiche={n_dyn} "
+                f"soppresse_mappa={self._n_suppressed}")
 
     # -----------------------------------------------------------------------
     def publish(self, stamp, tracks):
+        tf_map = self._lookup_map(stamp) if self.use_static_map_gate else None
+        n_suppressed = 0
         ma = MarkerArray()
         for t in tracks:
             if not t.confirmed:
                 continue
             dynamic = t.published_dynamic
+            # cross-check con la mappa statica: se la traccia dinamica sta su una
+            # struttura mappata, è un falso positivo -> non pubblicarla come dinamica
+            if dynamic and self.use_static_map_gate:
+                px0, py0 = t.kf.pos
+                if self._on_static_structure(px0, py0, tf_map):
+                    dynamic = False
+                    n_suppressed += 1
             if (not dynamic) and (not self.publish_static):
                 continue
             px, py = t.kf.pos
@@ -400,6 +486,7 @@ class Lidar3DTracker(Node):
             ma.markers.append(txt)
 
         self.pub_mrk.publish(ma)
+        self._n_suppressed = n_suppressed
 
     def _mk(self, stamp, ns, mid, mtype, x, y, z, color):
         mk = Marker()
@@ -424,11 +511,12 @@ def main(args=None):
     node = Lidar3DTracker()
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':

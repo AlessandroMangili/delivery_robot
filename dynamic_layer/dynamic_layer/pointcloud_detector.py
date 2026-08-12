@@ -28,6 +28,7 @@ import numpy as np
 
 import rclpy
 from rclpy.node import Node
+from rclpy.executors import ExternalShutdownException
 from rclpy.qos import (QoSProfile, ReliabilityPolicy, HistoryPolicy,
                        DurabilityPolicy)
 
@@ -124,6 +125,34 @@ def euclidean_cluster(xyz, tol, min_pts, max_pts):
     return clusters
 
 
+def merge_clusters(cluster_pts, merge_dist):
+    """Unisce cluster i cui centroidi (x,y) distano meno di merge_dist.
+    Cura la frammentazione: le due gambe di una persona (centroidi vicini) tornano
+    un cluster solo; due persone distanti restano separate. Funzione pura -> testabile.
+    cluster_pts: lista di array (N_i,3). Ritorna la lista di cluster uniti."""
+    n = len(cluster_pts)
+    if n <= 1:
+        return cluster_pts
+    cen = np.array([c[:, :2].mean(axis=0) for c in cluster_pts])
+    parent = list(range(n))
+
+    def find(a):
+        while parent[a] != a:
+            parent[a] = parent[parent[a]]
+            a = parent[a]
+        return a
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            if np.hypot(*(cen[i] - cen[j])) < merge_dist:
+                parent[find(i)] = find(j)
+
+    groups = {}
+    for i in range(n):
+        groups.setdefault(find(i), []).append(i)
+    return [np.vstack([cluster_pts[i] for i in g]) for g in groups.values()]
+
+
 # ---------------------------------------------------------------------------
 # Nodo ROS2
 # ---------------------------------------------------------------------------
@@ -157,6 +186,11 @@ class PointCloudDetector(Node):
         p('cluster_min_points', 6)
         p('cluster_max_points', 800)
 
+        # merge in world-space: unisce cluster vicini (cura la frammentazione:
+        # le gambe di una persona spezzate in 2 cluster tornano una detection sola)
+        p('merge_enabled', True)
+        p('merge_dist', 0.45)       # < distanza tra 2 persone, > tra le gambe di una
+
         # filtro geometrico "persona" (permissivo: la camera rifinisce a valle in Step 3)
         p('min_height', 0.20)
         p('max_height', 2.20)
@@ -182,6 +216,8 @@ class PointCloudDetector(Node):
         self.cluster_tolerance = float(g('cluster_tolerance'))
         self.cluster_min_points = int(g('cluster_min_points'))
         self.cluster_max_points = int(g('cluster_max_points'))
+        self.merge_enabled = bool(g('merge_enabled'))
+        self.merge_dist = float(g('merge_dist'))
         self.min_height = float(g('min_height'))
         self.max_height = float(g('max_height'))
         self.max_footprint = float(g('max_footprint'))
@@ -248,10 +284,15 @@ class PointCloudDetector(Node):
             nonground, self.cluster_tolerance,
             self.cluster_min_points, self.cluster_max_points)
 
+        # merge in world-space: riunisce cluster frammentati (gambe di una persona)
+        cluster_pts = [nonground[idx] for idx in clusters]
+        n_pre = len(cluster_pts)
+        if self.merge_enabled and len(cluster_pts) > 1:
+            cluster_pts = merge_clusters(cluster_pts, self.merge_dist)
+
         # feature per cluster + filtro geometrico
         results = []   # (centroid(3,), size(3,), ok)
-        for idx in clusters:
-            pts = nonground[idx]
+        for pts in cluster_pts:
             c = pts.mean(axis=0)
             size = pts.max(axis=0) - pts.min(axis=0)
             height = float(size[2])
@@ -266,7 +307,7 @@ class PointCloudDetector(Node):
         if self.diag_period_frames > 0 and self._frame % self.diag_period_frames == 0:
             self.get_logger().info(
                 f"[det] in={n_in} crop={n_crop} nonground={n_ng} "
-                f"cluster={len(clusters)} persone={n_ok}")
+                f"cluster={n_pre}->{len(cluster_pts)} persone={n_ok}")
 
     # -----------------------------------------------------------------------
     def publish(self, header, results):
@@ -322,11 +363,12 @@ def main(args=None):
     node = PointCloudDetector()
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':
