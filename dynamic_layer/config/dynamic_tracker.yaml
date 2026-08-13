@@ -58,15 +58,29 @@ lidar3d_tracker:
     # ciclo di vita
     min_hits: 3                  # frame per confermare una traccia
     max_age: 10                  # frame di coasting (10 = ~1 s a 10 Hz)
+    coast_publish_frames: 3      # frame di coasting per cui la traccia resta PUBBLICATA
+                                 # (fantasma corto; resta viva fino a max_age per ri-associarsi)
+    # conferma dinamico / life-cycle (SimpleTrack: moto coerente + gate SNR)
+    min_speed: 0.30              # [m/s] soglia di "in movimento"
+    snr_min: 1.0                 # velocità >= snr_min * incertezza -> direzione affidabile
+    promote_frames: 4            # frame di moto coerente consecutivi per promuovere
+    demote_frames: 8             # frame lenti consecutivi per retrocedere (anti-lampeggio)
 
-    # gate di velocità (isteresi) — esclude alberi, panchine, pali (statici)
-    min_speed_on: 0.20
-    min_speed_off: 0.15
     # cross-check con la mappa semantica statica
     use_static_map_gate: true
     static_map_topic: /semantic_costmap
     static_cost_thresh: 99          # 100 = struttura dura mappata (muro/edificio/albero)
     static_gate_radius_cells: 2     # finestra di celle attorno alla traccia (assorbe il jitter)
+    # gate semantico camera sulle tracce (/semantic/segmentation, ID Cityscapes)
+    use_semantic_gate: true
+    seg_topic: /semantic/segmentation
+    camera_info_topic: /camera/camera_info
+    camera_frame: camera_rgb_optical_frame
+    probe_height: 0.9              # [m] quota a cui proiettare la traccia (mezzo busto)
+    probe_patch: 2                # semi-finestra pixel per il voto di maggioranza
+    sem_static_hits: 2            # letture statiche consecutive per scartare la traccia
+    static_seg_classes: [2, 3, 4, 5, 7, 8]              # building/wall/fence/pole/sign/vegetation
+    dynamic_seg_classes: [11, 12, 13, 14, 15, 16, 17, 18]  # person/rider/car/.../bike
 
     # visualizzazione
     marker_z: 0.6

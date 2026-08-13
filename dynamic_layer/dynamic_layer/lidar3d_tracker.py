@@ -23,7 +23,7 @@ Uscita (Step 2, per verifica):
 Lo Step 4 aggancerà TrackArray(x,y,vx,vy,pos_std,vel_std) su /dynamic_tracks_state
 per il critic; qui restiamo sui marker per verificare tracking e gate.
 
-Dipendenze: numpy, scipy (linear_sum_assignment).
+Dipendenze: numpy. Associazione greedy (niente scipy nel tracker).
 """
 import math
 import numpy as np
@@ -31,13 +31,15 @@ import numpy as np
 import rclpy
 from rclpy.node import Node
 from rclpy.duration import Duration
-from rclpy.executors import ExternalShutdownException
+from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
 
 from geometry_msgs.msg import PoseArray, Point
 from visualization_msgs.msg import Marker, MarkerArray
 from std_msgs.msg import ColorRGBA
 from nav_msgs.msg import OccupancyGrid
+from sensor_msgs.msg import Image, CameraInfo
 
 import tf2_ros
 from tf2_ros import TransformException
@@ -111,7 +113,13 @@ class Track:
         self.age = 1
         self.time_since_update = 0
         self.confirmed = False
-        self.published_dynamic = False   # isteresi del gate di velocità
+        self.published_dynamic = False   # confermato dinamico?
+        self.mov_count = 0               # frame in moto COERENTE consecutivi
+        self.still_count = 0             # frame lenti consecutivi
+        # --- stato semantico (dalla camera; persiste anche fuori dal cono) ---
+        self.sem_class = -1              # classe Cityscapes dinamica (-1 = ignota)
+        self.sem_static_count = 0        # letture consecutive su classe statica
+        self.sem_dynamic_count = 0       # letture consecutive su classe dinamica
 
 
 class MultiObjectTracker:
@@ -152,27 +160,43 @@ class MultiObjectTracker:
         self.tracks = [t for t in self.tracks
                        if t.time_since_update <= self.p['max_age']]
 
-        # 6. gate di velocità con isteresi (statici -> non pubblicati)
+        # 6. conferma dinamico (life-cycle): moto COERENTE per promote_frames frame
+        #    consecutivi + gate SNR (velocità significativa vs la sua incertezza).
+        #    SimpleTrack indica la terminazione precoce / le tracce spurie come causa
+        #    #1 degli ID-switch: un bordo di muro che balla a media zero NON accumula
+        #    frame consecutivi di moto vero e ha SNR basso -> non viene mai promosso.
         for t in self.tracks:
-            s = t.kf.speed
-            if t.published_dynamic:
-                if s < self.p['min_speed_off']:
-                    t.published_dynamic = False
+            speed = t.kf.speed
+            sv = t.kf.vel_std()
+            moving = ((speed >= self.p['min_speed']) and
+                      (self.p['snr_min'] <= 0.0 or speed >= self.p['snr_min'] * sv))
+            if moving:
+                t.mov_count += 1
+                t.still_count = 0
             else:
-                if s >= self.p['min_speed_on']:
-                    t.published_dynamic = True
+                t.still_count += 1
+                t.mov_count = 0
+            # promozione: traccia confermata (Kalman stabilizzato) + moto coerente
+            if ((not t.published_dynamic) and t.confirmed and
+                    t.mov_count >= self.p['promote_frames']):
+                t.published_dynamic = True
+            # retrocessione con isteresi: ferma per demote_frames -> torna statica
+            if t.published_dynamic and t.still_count >= self.p['demote_frames']:
+                t.published_dynamic = False
 
         return self.tracks
 
     def _associate(self, dets):
-        from scipy.optimize import linear_sum_assignment
+        """Associazione GREEDY (SimpleTrack Sec. 4.3.2: le metriche a distanza come
+        Mahalanobis vanno con il greedy, non con l'ungherese, che gli outlier possono
+        sviare). Si assegnano prima le coppie a costo minore, saltando quelle già prese."""
         T, M = len(self.tracks), len(dets)
         if T == 0 or M == 0:
             return [], list(range(T)), list(range(M))
-        BIG = 1e6
-        cost = np.full((T, M), BIG)
         gate_maha = self.p['gating_mahalanobis']
         gate_dist = self.p['max_assoc_dist']
+        # coppie ammissibili (dentro entrambi i gate) con il loro costo di Mahalanobis^2
+        pairs = []
         for i, t in enumerate(self.tracks):
             for j in range(M):
                 y, S = t.kf.innovation(dets[j])
@@ -184,17 +208,19 @@ class MultiObjectTracker:
                     continue
                 if m2 > gate_maha:                        # gate chi-quadro (2 gdl)
                     continue
-                cost[i, j] = m2
-        rows, cols = linear_sum_assignment(cost)
-        matches = []
-        un_tracks, un_dets = set(range(T)), set(range(M))
-        for r, c in zip(rows, cols):
-            if cost[r, c] >= BIG:
+                pairs.append((m2, i, j))
+        # greedy: costo crescente, assegna solo se traccia e detection sono libere
+        pairs.sort(key=lambda p: p[0])
+        matched_t, matched_d, matches = set(), set(), []
+        for _cost, i, j in pairs:
+            if i in matched_t or j in matched_d:
                 continue
-            matches.append((int(r), int(c)))
-            un_tracks.discard(int(r))
-            un_dets.discard(int(c))
-        return matches, list(un_tracks), list(un_dets)
+            matches.append((i, j))
+            matched_t.add(i)
+            matched_d.add(j)
+        un_tracks = [i for i in range(T) if i not in matched_t]
+        un_dets = [j for j in range(M) if j not in matched_d]
+        return matches, un_tracks, un_dets
 
 
 # ===========================================================================
@@ -222,6 +248,34 @@ PALETTE = [(0.20, 0.80, 0.95), (0.95, 0.60, 0.20), (0.60, 0.85, 0.25),
 def color_for(tid, a=0.9):
     r, g, b = PALETTE[tid % len(PALETTE)]
     return ColorRGBA(r=float(r), g=float(g), b=float(b), a=float(a))
+
+
+CITYSCAPES_NAMES = {11: 'person', 12: 'rider', 13: 'car', 14: 'truck',
+                    15: 'bus', 16: 'train', 17: 'moto', 18: 'bike'}
+
+
+def project_to_pixel(K, p_cam, w, h):
+    """Proietta un punto 3D (frame ottico camera) nel pixel (u,v). None se dietro
+    la camera o fuori inquadratura. Funzione pura -> testabile senza ROS."""
+    Xc, Yc, Zc = float(p_cam[0]), float(p_cam[1]), float(p_cam[2])
+    if Zc <= 0.05:
+        return None
+    u = int(round(K[0, 0] * Xc / Zc + K[0, 2]))
+    v = int(round(K[1, 1] * Yc / Zc + K[1, 2]))
+    if 0 <= u < w and 0 <= v < h:
+        return (u, v)
+    return None
+
+
+def patch_majority(seg, u, v, r):
+    """Classe di maggioranza in una finestra (2r+1) attorno a (u,v). Funzione pura."""
+    h, w = seg.shape
+    patch = seg[max(0, v - r):min(h, v + r + 1),
+                max(0, u - r):min(w, u + r + 1)].ravel()
+    if patch.size == 0:
+        return None
+    vals, counts = np.unique(patch, return_counts=True)
+    return int(vals[np.argmax(counts)])
 
 
 def cell_is_static(smap, res, ox, oy, w, h, xm, ym, thresh, radius):
@@ -264,10 +318,15 @@ class Lidar3DTracker(Node):
         # ciclo di vita
         d('min_hits', 3)             # frame per confermare una traccia
         d('max_age', 10)             # frame di coasting prima di ucciderla (10 = ~1 s a 10 Hz)
+        d('coast_publish_frames', 3) # per quanti frame di coasting una traccia resta
+                                     # PUBBLICATA (fantasma corto). Oltre, resta viva
+                                     # internamente per ri-associarsi ma non è mostrata.
 
         # gate di velocità (isteresi) — uccide gli statici
-        d('min_speed_on', 0.20)
-        d('min_speed_off', 0.15)
+        d('min_speed', 0.30)         # [m/s] soglia di "in movimento"
+        d('snr_min', 1.0)            # velocità >= snr_min * incertezza -> direzione affidabile
+        d('promote_frames', 4)       # frame di moto coerente consecutivi per promuovere
+        d('demote_frames', 8)        # frame lenti consecutivi per retrocedere
 
         # cross-check con la mappa semantica statica (/semantic_costmap)
         # una traccia su una cella occupata (struttura mappata) è un falso
@@ -276,6 +335,19 @@ class Lidar3DTracker(Node):
         d('static_map_topic', '/semantic_costmap')
         d('static_cost_thresh', 99)          # 100 = struttura dura; 99 la cattura
         d('static_gate_radius_cells', 2)     # finestra di celle attorno alla traccia
+
+        # gate semantico camera sulle tracce (/semantic/segmentation, ID Cityscapes)
+        # proietta la traccia nell'immagine: classe statica -> scarta; dinamica ->
+        # etichetta (la classe persiste con la traccia anche fuori dal cono camera).
+        d('use_semantic_gate', True)
+        d('seg_topic', '/semantic/segmentation')
+        d('camera_info_topic', '/camera/camera_info')
+        d('camera_frame', 'camera_rgb_optical_frame')
+        d('probe_height', 0.9)               # [m] quota a cui proiettare la traccia (mezzo busto)
+        d('probe_patch', 2)                  # semi-finestra pixel per il voto di maggioranza
+        d('sem_static_hits', 2)              # letture statiche consecutive per scartare
+        d('static_seg_classes', [2, 3, 4, 5, 7, 8])          # building/wall/fence/pole/sign/veg
+        d('dynamic_seg_classes', [11, 12, 13, 14, 15, 16, 17, 18])
 
         # visualizzazione
         d('marker_z', 0.6)
@@ -291,10 +363,19 @@ class Lidar3DTracker(Node):
         self.arrow_time_scale = float(g('arrow_time_scale'))
         self.publish_static = bool(g('publish_static'))
         self.diag_period_frames = int(g('diag_period_frames'))
+        self.coast_publish_frames = int(g('coast_publish_frames'))
 
         self.use_static_map_gate = bool(g('use_static_map_gate'))
         self.static_cost_thresh = int(g('static_cost_thresh'))
         self.static_gate_radius = int(g('static_gate_radius_cells'))
+
+        self.use_semantic_gate = bool(g('use_semantic_gate'))
+        self.camera_frame = g('camera_frame')
+        self.probe_height = float(g('probe_height'))
+        self.probe_patch = int(g('probe_patch'))
+        self.sem_static_hits = int(g('sem_static_hits'))
+        self.static_set = set(int(c) for c in g('static_seg_classes'))
+        self.dynamic_set = set(int(c) for c in g('dynamic_seg_classes'))
 
         self.params = dict(
             accel_std=float(g('accel_std')),
@@ -305,8 +386,10 @@ class Lidar3DTracker(Node):
             max_assoc_dist=float(g('max_assoc_dist')),
             min_hits=int(g('min_hits')),
             max_age=int(g('max_age')),
-            min_speed_on=float(g('min_speed_on')),
-            min_speed_off=float(g('min_speed_off')),
+            min_speed=float(g('min_speed')),
+            snr_min=float(g('snr_min')),
+            promote_frames=int(g('promote_frames')),
+            demote_frames=int(g('demote_frames')),
         )
         self.mot = MultiObjectTracker(self.params)
 
@@ -320,9 +403,17 @@ class Lidar3DTracker(Node):
                          reliability=ReliabilityPolicy.RELIABLE,
                          history=HistoryPolicy.KEEP_LAST,
                          durability=DurabilityPolicy.VOLATILE)
+        # Gruppi di callback: on_dets (tracking) su un gruppo suo (mai concorrente
+        # con se stesso -> stato del tracker al sicuro); camera e mappa su un gruppo
+        # separato -> girano su un ALTRO thread e non serializzano con on_dets.
+        # Con MultiThreadedExecutor, le callback camera non affamano più il feed TF.
+        self.cb_track = MutuallyExclusiveCallbackGroup()
+        self.cb_side = MutuallyExclusiveCallbackGroup()
+
         self.pub_mrk = self.create_publisher(MarkerArray, self.markers_topic, 10)
         self.sub = self.create_subscription(
-            PoseArray, self.input_topic, self.on_dets, qos)
+            PoseArray, self.input_topic, self.on_dets, qos,
+            callback_group=self.cb_track)
 
         # mappa semantica statica (latched -> TRANSIENT_LOCAL per ricevere l'ultima)
         self.smap = None
@@ -332,14 +423,97 @@ class Lidar3DTracker(Node):
                                  durability=DurabilityPolicy.TRANSIENT_LOCAL,
                                  history=HistoryPolicy.KEEP_LAST)
             self.sub_map = self.create_subscription(
-                OccupancyGrid, g('static_map_topic'), self.on_static_map, map_qos)
+                OccupancyGrid, g('static_map_topic'), self.on_static_map, map_qos,
+                callback_group=self.cb_side)
+
+        # segmentazione camera + intrinseci (per il gate semantico sulle tracce)
+        self.seg = None
+        self.seg_stamp = None
+        self.K = None
+        if self.use_semantic_gate:
+            seg_qos = QoSProfile(depth=1,
+                                 reliability=ReliabilityPolicy.BEST_EFFORT,
+                                 history=HistoryPolicy.KEEP_LAST)
+            self.sub_seg = self.create_subscription(
+                Image, g('seg_topic'), self.on_seg, seg_qos,
+                callback_group=self.cb_side)
+            self.sub_cam = self.create_subscription(
+                CameraInfo, g('camera_info_topic'), self.on_caminfo, 1,
+                callback_group=self.cb_side)
 
         self._frame = 0
         self.last_t = None
         self._n_suppressed = 0
+        self._n_sem_suppressed = 0
         self.get_logger().info(
             f"lidar3d_tracker avviato: {self.input_topic} -> tracce in "
             f"'{self.tracking_frame}'")
+
+    # -----------------------------------------------------------------------
+    def on_seg(self, msg):
+        """Segmentazione mono8 (ID Cityscapes per pixel). Decodifica senza cv_bridge."""
+        step = msg.step if msg.step else msg.width
+        arr = np.frombuffer(msg.data, dtype=np.uint8)
+        try:
+            self.seg = arr.reshape(msg.height, step)[:, :msg.width]
+        except ValueError:
+            return
+        self.seg_stamp = msg.header.stamp
+
+    def on_caminfo(self, msg):
+        self.K = np.array(msg.k, dtype=float).reshape(3, 3)
+
+    def _lookup_cam(self):
+        """TF tracking_frame -> camera_frame, NON bloccante (timeout 0, ultima TF).
+        Il gate camera legge solo la classe a un pixel, non stima velocità: un
+        piccolo sfasamento temporale lo assorbe il patch di maggioranza. Timeout 0
+        = ritorna subito se la TF non c'è, così NON blocca on_dets né affama il
+        thread del listener TF (era questo a far slittare la lookup delle detection)."""
+        try:
+            return self.tf_buffer.lookup_transform(
+                self.camera_frame, self.tracking_frame,
+                rclpy.time.Time(), timeout=Duration(seconds=0.0))
+        except TransformException:
+            return None
+
+    def _semantic_class(self, xt, yt, tf_cam):
+        """Classe Cityscapes letta proiettando la traccia (xt,yt,probe_height)
+        nella segmentazione. None se dietro la camera / fuori inquadratura."""
+        if self.seg is None or self.K is None or tf_cam is None:
+            return None
+        p_cam = self._apply_tf(tf_cam, np.array([[xt, yt, self.probe_height]]))[0]
+        h, w = self.seg.shape
+        px = project_to_pixel(self.K, p_cam, w, h)
+        if px is None:
+            return None
+        return patch_majority(self.seg, px[0], px[1], self.probe_patch)
+
+    def _update_semantics(self, tracks):
+        """Aggiorna lo stato semantico delle tracce dalla camera. La classe letta
+        persiste: fuori dal cono non si tocca nulla (nessuna lettura -> nessun cambio)."""
+        if not self.use_semantic_gate:
+            return
+        tf_cam = self._lookup_cam()
+        if tf_cam is None:
+            return
+        for t in tracks:
+            if not t.confirmed:
+                continue
+            cls = self._semantic_class(t.kf.pos[0], t.kf.pos[1], tf_cam)
+            if cls is None:
+                continue                      # fuori cono/dietro -> mantiene lo stato
+            if cls in self.static_set:
+                t.sem_static_count += 1
+                t.sem_dynamic_count = 0
+            elif cls in self.dynamic_set:
+                t.sem_dynamic_count += 1
+                t.sem_static_count = 0
+                t.sem_class = cls             # etichetta persistente
+            # altre classi (strada/marciapiede/terreno/cielo): nessuna decisione
+
+    def _sem_is_static(self, t):
+        return (t.sem_static_count >= self.sem_static_hits and
+                t.sem_dynamic_count == 0)
 
     # -----------------------------------------------------------------------
     def _lookup(self, src, stamp):
@@ -424,6 +598,7 @@ class Lidar3DTracker(Node):
             dets = self._apply_tf(tf, pts)[:, :2]
 
         tracks = self.mot.step(dets, dt)
+        self._update_semantics(tracks)
         self.publish(stamp, tracks)
 
         if self.diag_period_frames > 0 and self._frame % self.diag_period_frames == 0:
@@ -432,12 +607,14 @@ class Lidar3DTracker(Node):
             self.get_logger().info(
                 f"[trk] dets={len(dets)} tracce={len(tracks)} "
                 f"confermate={n_conf} dinamiche={n_dyn} "
-                f"soppresse_mappa={self._n_suppressed}")
+                f"soppresse_mappa={self._n_suppressed} "
+                f"soppresse_sem={self._n_sem_suppressed}")
 
     # -----------------------------------------------------------------------
     def publish(self, stamp, tracks):
         tf_map = self._lookup_map(stamp) if self.use_static_map_gate else None
         n_suppressed = 0
+        n_sem = 0
         ma = MarkerArray()
         for t in tracks:
             if not t.confirmed:
@@ -450,6 +627,16 @@ class Lidar3DTracker(Node):
                 if self._on_static_structure(px0, py0, tf_map):
                     dynamic = False
                     n_suppressed += 1
+            # gate semantico camera: se la traccia è vista come classe STATICA
+            # (building/wall/vegetation...), è un falso positivo -> scarta
+            if dynamic and self.use_semantic_gate and self._sem_is_static(t):
+                dynamic = False
+                n_sem += 1
+            # coasting a finestra corta: una traccia in coasting da troppi frame non
+            # viene più mostrata (niente fantasma lungo dopo una svolta), ma resta
+            # viva internamente fino a max_age per ri-associarsi se il pedone riappare.
+            if dynamic and t.time_since_update > self.coast_publish_frames:
+                dynamic = False
             if (not dynamic) and (not self.publish_static):
                 continue
             px, py = t.kf.pos
@@ -478,15 +665,17 @@ class Lidar3DTracker(Node):
                 ]
                 ma.markers.append(arr)
 
+            label = CITYSCAPES_NAMES.get(t.sem_class, '?')
             txt = self._mk(stamp, 'tracks', base + 2, Marker.TEXT_VIEW_FACING,
                            px, py, self.marker_z + 1.0,
                            ColorRGBA(r=1.0, g=1.0, b=1.0, a=0.9))
             txt.scale.z = 0.3
-            txt.text = f"{t.id}  v={t.kf.speed:.2f}"
+            txt.text = f"{t.id} {label} v={t.kf.speed:.2f}"
             ma.markers.append(txt)
 
         self.pub_mrk.publish(ma)
         self._n_suppressed = n_suppressed
+        self._n_sem_suppressed = n_sem
 
     def _mk(self, stamp, ns, mid, mtype, x, y, z, color):
         mk = Marker()
@@ -509,8 +698,12 @@ class Lidar3DTracker(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = Lidar3DTracker()
+    # MultiThreadedExecutor: le callback camera (gruppo cb_side) girano su un thread
+    # diverso da on_dets (cb_track) e non affamano il feed TF -> niente slittamento.
+    executor = MultiThreadedExecutor(num_threads=4)
+    executor.add_node(node)
     try:
-        rclpy.spin(node)
+        executor.spin()
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
