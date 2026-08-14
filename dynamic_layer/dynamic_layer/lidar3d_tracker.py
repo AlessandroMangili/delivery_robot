@@ -220,6 +220,33 @@ class MultiObjectTracker:
             matched_d.add(j)
         un_tracks = [i for i in range(T) if i not in matched_t]
         un_dets = [j for j in range(M) if j not in matched_d]
+
+        # RECUPERO (2° stadio, spirito two-stage di SimpleTrack): le detection rimaste
+        # non associate vengono riacchiappate dalle tracce rimaste con il SOLO gate
+        # euclideo generoso (recovery_dist), bypassando il Mahalanobis stretto. Recupera
+        # i target in manovra (svolta brusca / salto del centroide) che il gate primario,
+        # troppo stretto per una traccia ben agganciata, ha rifiutato. Non tocca la velocità.
+        rec_dist = self.p['recovery_dist']
+        self._n_recovered = 0
+        if rec_dist > 0.0 and un_tracks and un_dets:
+            rec = []
+            for i in un_tracks:
+                for j in un_dets:
+                    d = math.hypot(*(self.tracks[i].kf.pos - dets[j]))
+                    if d <= rec_dist:
+                        rec.append((d, i, j))
+            rec.sort(key=lambda p: p[0])
+            rt, rd = set(), set()
+            for _d, i, j in rec:
+                if i in rt or j in rd:
+                    continue
+                matches.append((i, j))
+                rt.add(i)
+                rd.add(j)
+                self._n_recovered += 1
+            un_tracks = [i for i in un_tracks if i not in rt]
+            un_dets = [j for j in un_dets if j not in rd]
+
         return matches, un_tracks, un_dets
 
 
@@ -314,6 +341,8 @@ class Lidar3DTracker(Node):
         # associazione
         d('gating_mahalanobis', 9.21)  # chi^2, 2 gdl, ~99%
         d('max_assoc_dist', 1.5)       # gate euclideo di sicurezza [m]
+        d('recovery_dist', 1.0)        # 2° stadio: gate euclideo di recupero [m] per i
+                                       # target in manovra rifiutati dal Mahalanobis (0=off)
 
         # ciclo di vita
         d('min_hits', 3)             # frame per confermare una traccia
@@ -384,6 +413,7 @@ class Lidar3DTracker(Node):
             init_vel_std=float(g('init_vel_std')),
             gating_mahalanobis=float(g('gating_mahalanobis')),
             max_assoc_dist=float(g('max_assoc_dist')),
+            recovery_dist=float(g('recovery_dist')),
             min_hits=int(g('min_hits')),
             max_age=int(g('max_age')),
             min_speed=float(g('min_speed')),
@@ -608,7 +638,8 @@ class Lidar3DTracker(Node):
                 f"[trk] dets={len(dets)} tracce={len(tracks)} "
                 f"confermate={n_conf} dinamiche={n_dyn} "
                 f"soppresse_mappa={self._n_suppressed} "
-                f"soppresse_sem={self._n_sem_suppressed}")
+                f"soppresse_sem={self._n_sem_suppressed} "
+                f"recuperi={getattr(self.mot, '_n_recovered', 0)}")
 
     # -----------------------------------------------------------------------
     def publish(self, stamp, tracks):

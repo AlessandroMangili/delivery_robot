@@ -54,6 +54,8 @@ lidar3d_tracker:
     # associazione
     gating_mahalanobis: 9.21     # chi^2, 2 gdl, ~99%
     max_assoc_dist: 1.5          # gate euclideo di sicurezza [m]
+    recovery_dist: 1.0           # 2° stadio: gate euclideo di recupero [m] per i target
+                                 # in manovra (svolta) rifiutati dal Mahalanobis (0 = off)
 
     # ciclo di vita
     min_hits: 3                  # frame per confermare una traccia
