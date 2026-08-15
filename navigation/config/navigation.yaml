@@ -80,7 +80,7 @@ controller_server:
         "PathAngleCritic", "PreferForwardCritic", "SpatioTemporalCritic"]
 
       SpatioTemporalCritic:
-        enabled: false
+        enabled: true
         tracks_topic: "/dynamic_tracks_state"
         cost_weight: 40.0
         cost_power: 1

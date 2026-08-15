@@ -10,18 +10,22 @@ con le buone pratiche di SimpleTrack (CV + gating).
         -> TF base_scan -> odom   (frame fisso: nel frame del sensore che ruota
                                     l'ego-moto fingerebbe una velocità)
         -> predizione Kalman CV di tutte le tracce
-        -> associazione (Hungarian) con gate di Mahalanobis + gate euclideo
+        -> associazione (greedy) con gate di Mahalanobis + gate euclideo
         -> correzione Kalman delle tracce associate
         -> nascita/morte tracce (min_hits per confermare, max_age per il coasting)
         -> GATE DI VELOCITÀ: pubblica solo le tracce in moto (uccide alberi,
            panchine, pali: sono statici, v ~ 0)
 
-Uscita (Step 2, per verifica):
-    /tracks/markers   visualization_msgs/MarkerArray   (cilindro + freccia velocità
-                                                         + id, colore stabile per id)
+Uscite:
+    /tracks/markers          visualization_msgs/MarkerArray    (cilindro + freccia
+                                                                velocità + id)
+    /dynamic_tracks_state    dynamic_tracker_msgs/TrackArray    (Step 4: alimenta il
+                                                                critic spazio-temporale MPPI)
 
-Lo Step 4 aggancerà TrackArray(x,y,vx,vy,pos_std,vel_std) su /dynamic_tracks_state
-per il critic; qui restiamo sui marker per verificare tracking e gate.
+Le due uscite condividono LA STESSA decisione "è un pedone dinamico valido"
+(confermato + gate mappa + gate semantico + finestra di coasting): ciò che vedi
+nei marker è esattamente ciò che riceve il critic. La visualizzazione delle scie
+predette (pedoni + robot) la fa il critic su /spatiotemporal_critic/predictions.
 
 Dipendenze: numpy. Associazione greedy (niente scipy nel tracker).
 """
@@ -40,6 +44,12 @@ from visualization_msgs.msg import Marker, MarkerArray
 from std_msgs.msg import ColorRGBA
 from nav_msgs.msg import OccupancyGrid
 from sensor_msgs.msg import Image, CameraInfo
+
+# Messaggi delle tracce consumati dal critic spazio-temporale MPPI.
+# (pacchetto confermato dall'header del critic: dynamic_tracker_msgs)
+# ATTENZIONE: il messaggio si chiama 'Track' come la classe interna di tracking
+# qui sotto -> lo importo con alias 'TrackMsg' per non farlo shadoware dalla classe.
+from dynamic_tracker_msgs.msg import Track as TrackMsg, TrackArray
 
 import tf2_ros
 from tf2_ros import TransformException
@@ -329,6 +339,8 @@ class Lidar3DTracker(Node):
         d('input_topic', '/detections')
         d('tracking_frame', 'odom')
         d('markers_topic', '/tracks/markers')
+        # Step 4: uscita per il critic spazio-temporale MPPI
+        d('tracks_topic', '/dynamic_tracks_state')
 
         # Kalman
         d('accel_std', 0.8)          # densità rumore di accelerazione [m/s^2]
@@ -388,6 +400,7 @@ class Lidar3DTracker(Node):
         self.input_topic = g('input_topic')
         self.tracking_frame = g('tracking_frame')
         self.markers_topic = g('markers_topic')
+        self.tracks_topic = g('tracks_topic')
         self.marker_z = float(g('marker_z'))
         self.arrow_time_scale = float(g('arrow_time_scale'))
         self.publish_static = bool(g('publish_static'))
@@ -441,6 +454,9 @@ class Lidar3DTracker(Node):
         self.cb_side = MutuallyExclusiveCallbackGroup()
 
         self.pub_mrk = self.create_publisher(MarkerArray, self.markers_topic, 10)
+        # Step 4: TrackArray verso il critic (QoS RELIABLE depth 10, compatibile col
+        # subscribe del critic che è rclcpp::QoS(10) di default -> reliable).
+        self.pub_tracks = self.create_publisher(TrackArray, self.tracks_topic, 10)
         self.sub = self.create_subscription(
             PoseArray, self.input_topic, self.on_dets, qos,
             callback_group=self.cb_track)
@@ -477,7 +493,7 @@ class Lidar3DTracker(Node):
         self._n_sem_suppressed = 0
         self.get_logger().info(
             f"lidar3d_tracker avviato: {self.input_topic} -> tracce in "
-            f"'{self.tracking_frame}'")
+            f"'{self.tracking_frame}' | critic:'{self.tracks_topic}'")
 
     # -----------------------------------------------------------------------
     def on_seg(self, msg):
@@ -642,32 +658,46 @@ class Lidar3DTracker(Node):
                 f"recuperi={getattr(self.mot, '_n_recovered', 0)}")
 
     # -----------------------------------------------------------------------
+    def _is_valid_dynamic(self, t, tf_map):
+        """UNICA decisione 'pedone dinamico valido', condivisa da marker e TrackArray.
+        Applica in ordine: promozione life-cycle -> gate mappa statica -> gate
+        semantico camera -> finestra di coasting. Restituisce
+        (dynamic: bool, suppressed_map: bool, suppressed_sem: bool) così il chiamante
+        aggiorna i contatori diagnostici senza duplicare la logica."""
+        if not t.confirmed:
+            return False, False, False
+        dynamic = t.published_dynamic
+        sup_map = False
+        sup_sem = False
+        # gate mappa statica: traccia dinamica su struttura mappata = falso positivo
+        if dynamic and self.use_static_map_gate:
+            px0, py0 = t.kf.pos
+            if self._on_static_structure(px0, py0, tf_map):
+                dynamic = False
+                sup_map = True
+        # gate semantico camera: vista come classe statica (muro/veg...) = falso positivo
+        if dynamic and self.use_semantic_gate and self._sem_is_static(t):
+            dynamic = False
+            sup_sem = True
+        # coasting a finestra corta: niente fantasma lungo dopo una svolta
+        if dynamic and t.time_since_update > self.coast_publish_frames:
+            dynamic = False
+        return dynamic, sup_map, sup_sem
+
     def publish(self, stamp, tracks):
         tf_map = self._lookup_map(stamp) if self.use_static_map_gate else None
         n_suppressed = 0
         n_sem = 0
+        dyn_tracks = []          # tracce che passano tutti i gate (per il critic)
         ma = MarkerArray()
         for t in tracks:
             if not t.confirmed:
                 continue
-            dynamic = t.published_dynamic
-            # cross-check con la mappa statica: se la traccia dinamica sta su una
-            # struttura mappata, è un falso positivo -> non pubblicarla come dinamica
-            if dynamic and self.use_static_map_gate:
-                px0, py0 = t.kf.pos
-                if self._on_static_structure(px0, py0, tf_map):
-                    dynamic = False
-                    n_suppressed += 1
-            # gate semantico camera: se la traccia è vista come classe STATICA
-            # (building/wall/vegetation...), è un falso positivo -> scarta
-            if dynamic and self.use_semantic_gate and self._sem_is_static(t):
-                dynamic = False
-                n_sem += 1
-            # coasting a finestra corta: una traccia in coasting da troppi frame non
-            # viene più mostrata (niente fantasma lungo dopo una svolta), ma resta
-            # viva internamente fino a max_age per ri-associarsi se il pedone riappare.
-            if dynamic and t.time_since_update > self.coast_publish_frames:
-                dynamic = False
+            dynamic, sup_map, sup_sem = self._is_valid_dynamic(t, tf_map)
+            n_suppressed += int(sup_map)
+            n_sem += int(sup_sem)
+            if dynamic:
+                dyn_tracks.append(t)
             if (not dynamic) and (not self.publish_static):
                 continue
             px, py = t.kf.pos
@@ -705,8 +735,31 @@ class Lidar3DTracker(Node):
             ma.markers.append(txt)
 
         self.pub_mrk.publish(ma)
+        # Step 4: alimenta il critic con le stesse tracce dinamiche mostrate
+        self._publish_tracks(stamp, dyn_tracks)
         self._n_suppressed = n_suppressed
         self._n_sem_suppressed = n_sem
+
+    def _publish_tracks(self, stamp, dyn_tracks):
+        """TrackArray su /dynamic_tracks_state per il critic spazio-temporale.
+        Frame = tracking_frame (odom): stesso frame delle traiettorie campionate da
+        MPPI, che il critic confronta senza TF. Mappatura diretta dallo stato Kalman."""
+        msg = TrackArray()
+        msg.header.stamp = stamp
+        msg.header.frame_id = self.tracking_frame
+        for t in dyn_tracks:
+            px, py = t.kf.pos
+            vx, vy = t.kf.vel
+            tr = TrackMsg()
+            tr.id = int(t.id)
+            tr.x = float(px)
+            tr.y = float(py)
+            tr.vx = float(vx)
+            tr.vy = float(vy)
+            tr.pos_std = float(t.kf.pos_std())   # sqrt cov posizione
+            tr.vel_std = float(t.kf.vel_std())   # sqrt cov velocità
+            msg.tracks.append(tr)
+        self.pub_tracks.publish(msg)
 
     def _mk(self, stamp, ns, mid, mtype, x, y, z, color):
         mk = Marker()
@@ -729,8 +782,6 @@ class Lidar3DTracker(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = Lidar3DTracker()
-    # MultiThreadedExecutor: le callback camera (gruppo cb_side) girano su un thread
-    # diverso da on_dets (cb_track) e non affamano il feed TF -> niente slittamento.
     executor = MultiThreadedExecutor(num_threads=4)
     executor.add_node(node)
     try:

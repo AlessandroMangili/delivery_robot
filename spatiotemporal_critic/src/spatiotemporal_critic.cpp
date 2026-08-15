@@ -3,10 +3,10 @@
 // TERMINE 1 - collisione futura: confronta dove sara' il pedone e dove sara' il
 //   robot allo STESSO istante t, e penalizza l'incontro. E' cio' che il cono
 //   statico non puo' fare, perche' non sa QUANDO il robot passera' di li'.
-//   La scelta di DOVE scartare (destra o sinistra) e' lasciata a MPPI e ai
-//   critic di costo gia' presenti: qui diciamo solo dove NON si puo' andare.
 
 #include "spatiotemporal_critic/spatiotemporal_critic.hpp"
+
+#include "geometry_msgs/msg/point.hpp"
 
 #include <cmath>
 #include <algorithm>
@@ -14,15 +14,11 @@
 
 #include <xtensor/xmath.hpp>
 
-// namespace mppi::critics: vedi la nota nell'header. MPPI cerca il critic
-// come mppi::critics::<nome-nello-yaml>.
 namespace mppi::critics
 {
 
 void SpatioTemporalCritic::initialize()
 {
-  // getParam appartiene a CriticFunction: legge i parametri sotto il nome di
-  // questo critic nel controller_server (es. FollowPath.SpatioTemporalCritic.*).
   auto getParam = parameters_handler_->getParamGetter(name_);
   getParam(enabled_, "enabled", true);
   getParam(tracks_topic_, "tracks_topic", std::string("/dynamic_tracks_state"));
@@ -43,9 +39,13 @@ void SpatioTemporalCritic::initialize()
   getParam(publish_predictions_, "publish_predictions", true);
   getParam(predictions_topic_, "predictions_topic",
     std::string("/spatiotemporal_critic/predictions"));
+  // traiettoria robot: topic separato + flag proprio (default: sempre attiva)
+  getParam(publish_robot_traj_, "publish_robot_trajectory", true);
+  getParam(robot_traj_topic_, "robot_trajectory_topic",
+    std::string("/spatiotemporal_critic/robot_trajectory"));
+  // frame di pubblicazione (default = frame delle tracce = odom)
+  getParam(world_frame_, "world_frame", std::string("odom"));
 
-  // Il subscriber vive sul nodo del controller_server (parent_ e' un weak_ptr
-  // al nav2 lifecycle node). QoS 10, best-effort va bene per tracce a 10 Hz.
   auto node = parent_.lock();
   tracks_sub_ = node->create_subscription<dynamic_tracker_msgs::msg::TrackArray>(
     tracks_topic_, rclcpp::QoS(10),
@@ -54,6 +54,10 @@ void SpatioTemporalCritic::initialize()
   if (publish_predictions_) {
     pred_pub_ = node->create_publisher<visualization_msgs::msg::MarkerArray>(
       predictions_topic_, rclcpp::QoS(1));
+  }
+  if (publish_robot_traj_) {
+    robot_pub_ = node->create_publisher<visualization_msgs::msg::MarkerArray>(
+      robot_traj_topic_, rclcpp::QoS(1));
   }
 
   RCLCPP_INFO(
@@ -83,23 +87,14 @@ void SpatioTemporalCritic::score(mppi::CriticData & data)
     return;
   }
 
-  // Copio le tracce sotto lock (arrivano su un altro thread).
-  std::vector<TrackSnapshot> tracks;
-  {
-    std::lock_guard<std::mutex> lock(tracks_mutex_);
-    tracks = tracks_;
-  }
-  if (tracks.empty()) {
-    return;
-  }
-
+  // Forme delle traiettorie: servono anche alla sola viz del robot, quindi le
+  // leggo e valido PRIMA di qualunque early-return legato ai pedoni.
   const auto & traj_x = data.trajectories.x;   // [batch x time]
   const auto & traj_y = data.trajectories.y;
   const float dt = data.model_dt;
   const size_t batch = traj_x.shape(0);
   const size_t time = traj_x.shape(1);
 
-  // Guardie sulle forme: se qualcosa non torna, non tocchiamo la memoria.
   if (batch == 0 || time == 0) {
     return;
   }
@@ -110,52 +105,54 @@ void SpatioTemporalCritic::score(mppi::CriticData & data)
     return;
   }
 
+  // === VIZ TRAIETTORIA ROBOT: SEMPRE, su topic dedicato ===
+  // Pubblicata a ogni ciclo di controllo, indipendente dai pedoni. E' la media
+  // del batch gia' calcolato: costo trascurabile (nessuna candidate ricostruita).
+  if (publish_robot_traj_ && robot_pub_) {
+    publishRobotTrajectory(data, dt, time);
+  }
+
+  // Copio le tracce sotto lock (arrivano su un altro thread).
+  std::vector<TrackSnapshot> tracks;
+  {
+    std::lock_guard<std::mutex> lock(tracks_mutex_);
+    tracks = tracks_;
+  }
+  // Il termine di collisione futura ha senso solo con pedoni: se non ce ne
+  // sono, la viz del robot e' gia' stata pubblicata sopra, quindi esco.
+  if (tracks.empty()) {
+    return;
+  }
+
   // Penalita' per traiettoria. std::vector (non xtensor): la scrittura finale
-  // su data.costs va fatta elemento per elemento, non con operazioni
-  // vettoriali xtensor su riferimenti (causa di crash su questo Humble).
+  // su data.costs va fatta elemento per elemento (operazioni xtensor su
+  // riferimenti = causa di crash su questo Humble).
   std::vector<float> penalty(batch, 0.0f);
 
   // ================== TERMINE 1: COLLISIONE FUTURA ==================
-  // Salta se non ci sono pedoni, ma NON esce dalla funzione: il termine 2
-  // (spazio libero) deve funzionare comunque, anche a marciapiede vuoto.
-  // Limito la predizione a prediction_horizon_s: oltre, un pedone non e'
-  // prevedibile e l'alone diventerebbe enorme, coprendo tutto e togliendo
-  // al robot ogni via d'uscita.
   size_t time_pred = time;
   if (dt > 0.0f) {
     const size_t h = static_cast<size_t>(prediction_horizon_s_ / dt);
     time_pred = std::min(time, std::max<size_t>(1, h));
   }
 
-  // Penalita' della SINGOLA traccia, riusata a ogni giro. In modalita'
-  // worst_case tiene il massimo (avvicinamento peggiore); altrimenti somma.
   std::vector<float> track_pen(batch, 0.0f);
 
   for (const auto & tr : tracks) {
-    // solo pedoni in MOVIMENTO: i fermi sono gia' ostacoli fisici nella
-    // costmap (obstacle_layer + inflation), e la predizione lineare su un
-    // fermo non ha senso
     const double speed = std::hypot(tr.vx, tr.vy);
     if (speed < min_ped_speed_) {
       continue;
     }
-    // scarta tracce con velocita' troppo incerta (appena nate / rumorose /
-    // statici mal classificati): la loro predizione sarebbe inaffidabile
     if (tr.vel_std > max_vel_std_) {
       continue;
     }
 
     std::fill(track_pen.begin(), track_pen.end(), 0.0f);
 
-    // per ogni istante j (fino all'orizzonte di predizione): dove sara' il
-    // pedone e dove sara' il robot ALLO STESSO t. Se vicini -> penalita'.
     for (size_t j = 0; j < time_pred; ++j) {
       const float t = static_cast<float>(j) * dt;
-      const double px = tr.x + tr.vx * t;      // pedone al tempo t (Kalman lineare)
+      const double px = tr.x + tr.vx * t;
       const double py = tr.y + tr.vy * t;
-      // alone di sicurezza: base + incertezza di partenza + incertezza di
-      // velocita' che cresce nel tempo, MA con un tetto massimo per non
-      // coprire tutto il marciapiede
       double radius = collision_radius_ + tr.pos_std +
         vel_std_gain_ * tr.vel_std * t;
       if (radius > max_radius_) {
@@ -167,40 +164,24 @@ void SpatioTemporalCritic::score(mppi::CriticData & data)
         const double ddy = traj_y(i, j) - py;
         const double d2 = ddx * ddx + ddy * ddy;
         if (d2 < r2) {
-          // 1 al centro dell'alone, 0 al bordo: sfiorare costa poco,
-          // centrare in pieno costa molto
           const float closeness =
             static_cast<float>(1.0 - std::sqrt(d2) / radius);
           if (worst_case_) {
-            // tengo solo l'avvicinamento PEGGIORE: "quanto vicino ci passi".
-            // Cosi' superare (stargli accanto a distanza per qualche secondo)
-            // costa poco, mentre andargli addosso costa molto.
             if (closeness > track_pen[i]) {
               track_pen[i] = closeness;
             }
           } else {
-            // somma: misura "quanto tempo" resti vicino. Punisce il sorpasso
-            // quanto l'impatto -> il robot preferisce tornare indietro.
             track_pen[i] += closeness;
           }
         }
       }
     }
 
-    // le tracce si sommano tra loro: due pedoni minacciosi pesano piu' di uno
     for (size_t i = 0; i < batch; ++i) {
       penalty[i] += track_pen[i];
     }
   }
 
-  // Scrittura del termine 1, elemento per elemento.
-  // NB: l'esponente si applica alla penalita' NORMALIZZATA (che in modalita'
-  // worst_case sta in [0,1]), poi si moltiplica per il peso. Cosi' cost_power
-  // modella la FORMA della spaziatura personale senza stravolgere la scala:
-  //   power 1 -> penalita' lineare con la vicinanza;
-  //   power 2 -> sfiorare il bordo dell'alone costa poco, avvicinarsi davvero
-  //              costa molto di piu' (profilo piu' simile allo spazio personale
-  //              descritto in letteratura). Con power>1 alza anche cost_weight.
   for (size_t i = 0; i < batch; ++i) {
     float p = penalty[i];
     if (power_ > 1) {
@@ -209,43 +190,38 @@ void SpatioTemporalCritic::score(mppi::CriticData & data)
     data.costs(i) += p * weight_;
   }
 
-  // Visualizzazione per RViz: le scie predette dei pedoni + traiettoria robot.
+  // Viz scie dei PEDONI (solo con pedoni), sul loro topic separato.
   if (publish_predictions_ && pred_pub_) {
-    publishPredictions(tracks, data, dt, time);
+    publishPredictions(tracks, dt, time);
   }
 }
 
 void SpatioTemporalCritic::publishPredictions(
   const std::vector<TrackSnapshot> & tracks,
-  const mppi::CriticData & data,
   float dt, size_t time)
 {
   visualization_msgs::msg::MarkerArray arr;
 
-  // Marker 0: cancella i marker del ciclo precedente (evita scie fantasma
-  // quando un pedone scompare).
   visualization_msgs::msg::Marker clear;
   clear.action = visualization_msgs::msg::Marker::DELETEALL;
   arr.markers.push_back(clear);
 
   int id = 1;
-  // Stesso orizzonte di predizione usato in score().
   size_t time_pred = time;
   if (dt > 0.0f) {
     const size_t h = static_cast<size_t>(prediction_horizon_s_ / dt);
     time_pred = std::min(time, std::max<size_t>(1, h));
   }
-  // Campiono alcuni istanti (non tutti: sarebbero troppe sfere). Uno ogni ~0.5 s.
   const size_t step = std::max<size_t>(1, static_cast<size_t>(0.5f / dt));
 
-  // === 1) SCIE DEI PEDONI (dove sara' ogni pedone, verde->rosso) ===
+  // === SCIE DEI PEDONI (dove sara' ogni pedone, verde->rosso) ===
   for (const auto & tr : tracks) {
     const double speed = std::hypot(tr.vx, tr.vy);
     if (speed < min_ped_speed_) {
-      continue;   // i fermi non vengono predetti dal critic
+      continue;
     }
     if (tr.vel_std > max_vel_std_) {
-      continue;   // stesso filtro di score(): tracce troppo incerte scartate
+      continue;
     }
     for (size_t j = 0; j < time_pred; j += step) {
       const float t = static_cast<float>(j) * dt;
@@ -264,19 +240,17 @@ void SpatioTemporalCritic::publishPredictions(
       m.id = id++;
       m.type = visualization_msgs::msg::Marker::SPHERE;
       m.action = visualization_msgs::msg::Marker::ADD;
-      // lifetime: se il critic smette di pubblicare (robot fermo, pedone
-      // sparito), RViz cancella da solo il marker dopo 0.3s invece di
-      // lasciarlo bloccato a schermo.
+      // frame_locked: RViz ri-trasforma col TF piu' recente a ogni frame, cosi'
+      // il marker non viene scartato se la map->odom allo stamp non e' bufferizzata.
+      m.frame_locked = true;
       m.lifetime = rclcpp::Duration::from_seconds(0.3);
       m.pose.position.x = px;
       m.pose.position.y = py;
       m.pose.position.z = 0.1;
       m.pose.orientation.w = 1.0;
-      // diametro = alone di sicurezza (cresce nel tempo, con tetto)
       m.scale.x = 2.0 * radius;
       m.scale.y = 2.0 * radius;
       m.scale.z = 0.05;
-      // colore: verde vicino nel tempo -> rosso lontano nel futuro
       const float frac = static_cast<float>(j) / static_cast<float>(time_pred);
       m.color.r = frac;
       m.color.g = 1.0f - frac;
@@ -286,56 +260,79 @@ void SpatioTemporalCritic::publishPredictions(
     }
   }
 
-  // === 2) TRAIETTORIA MEDIA DEL ROBOT (dove sara' il robot, in BLU) ===
-  // MPPI valuta 2000 traiettorie; disegnarle tutte sarebbe illeggibile.
-  // Mostro la MEDIA del batch a ogni istante: e' il "baricentro" di dove il
-  // robot sta pensando di andare. Cosi' vedi il confronto: al tempo t, il
-  // punto blu (robot) e' dentro il cerchio del pedone allo stesso t? -> collisione.
+  pred_pub_->publish(arr);
+}
+
+void SpatioTemporalCritic::publishRobotTrajectory(
+  const mppi::CriticData & data, float dt, size_t time)
+{
   const auto & traj_x = data.trajectories.x;
   const auto & traj_y = data.trajectories.y;
   const size_t batch = traj_x.shape(0);
-  if (batch > 0) {
-    for (size_t j = 0; j < time_pred; j += step) {
-      // media su tutte le traiettorie a questo istante
-      double mx = 0.0, my = 0.0;
-      for (size_t i = 0; i < batch; ++i) {
-        mx += traj_x(i, j);
-        my += traj_y(i, j);
-      }
-      mx /= static_cast<double>(batch);
-      my /= static_cast<double>(batch);
-
-      visualization_msgs::msg::Marker m;
-      m.header.frame_id = tracks_frame_;
-      m.header.stamp = tracks_stamp_;
-      m.ns = "robot_prediction";
-      m.id = id++;
-      m.type = visualization_msgs::msg::Marker::SPHERE;
-      m.action = visualization_msgs::msg::Marker::ADD;
-      m.lifetime = rclcpp::Duration::from_seconds(0.3);
-      m.pose.position.x = mx;
-      m.pose.position.y = my;
-      m.pose.position.z = 0.15;
-      m.pose.orientation.w = 1.0;
-      // sfere piccole e blu: e' un percorso, non un alone
-      m.scale.x = 0.18;
-      m.scale.y = 0.18;
-      m.scale.z = 0.05;
-      m.color.r = 0.1f;
-      m.color.g = 0.3f;
-      m.color.b = 1.0f;
-      m.color.a = 0.9f;
-      arr.markers.push_back(m);
-    }
+  if (batch == 0) {
+    return;
   }
 
-  pred_pub_->publish(arr);
+  size_t time_pred = time;
+  if (dt > 0.0f) {
+    const size_t h = static_cast<size_t>(prediction_horizon_s_ / dt);
+    time_pred = std::min(time, std::max<size_t>(1, h));
+  }
+
+  // Stamp fresco: questa viz e' pubblicata sempre, anche senza tracce recenti.
+  rclcpp::Time stamp;
+  auto node = parent_.lock();
+  if (node) {
+    stamp = node->now();
+  }
+
+  visualization_msgs::msg::MarkerArray arr;
+  visualization_msgs::msg::Marker clear;
+  clear.action = visualization_msgs::msg::Marker::DELETEALL;
+  arr.markers.push_back(clear);
+
+  // UNA linea (LINE_STRIP) che collega i punti MEDI del batch a ogni istante:
+  // baricentro di dove il robot pensa di andare. NB: media delle traiettorie
+  // campionate (~ nominale), non l'ottima esatta. Campiono ogni istante per una
+  // linea liscia (batch*time e' trascurabile per la CPU).
+  visualization_msgs::msg::Marker line;
+  line.header.frame_id = world_frame_;   // "odom" di default
+  line.header.stamp = stamp;
+  line.ns = "robot_mean";
+  line.id = 0;
+  line.type = visualization_msgs::msg::Marker::LINE_STRIP;
+  line.action = visualization_msgs::msg::Marker::ADD;
+  line.frame_locked = true;
+  line.lifetime = rclcpp::Duration::from_seconds(0.3);
+  line.pose.orientation.w = 1.0;   // LINE_STRIP: i punti sono gia' in world, posa identita'
+  line.scale.x = 0.05;             // spessore linea [m]
+  line.color.r = 0.1f;
+  line.color.g = 0.3f;
+  line.color.b = 1.0f;
+  line.color.a = 0.9f;
+
+  for (size_t j = 0; j < time_pred; ++j) {
+    double mx = 0.0, my = 0.0;
+    for (size_t i = 0; i < batch; ++i) {
+      mx += traj_x(i, j);
+      my += traj_y(i, j);
+    }
+    mx /= static_cast<double>(batch);
+    my /= static_cast<double>(batch);
+
+    geometry_msgs::msg::Point p;
+    p.x = mx;
+    p.y = my;
+    p.z = 0.15;
+    line.points.push_back(p);
+  }
+
+  arr.markers.push_back(line);
+  robot_pub_->publish(arr);
 }
 
 }  // namespace mppi::critics
 
-// Registra la classe come plugin pluginlib, cosi' MPPI la puo' caricare dal
-// nome indicato nel YAML del controller.
 #include <pluginlib/class_list_macros.hpp>
 PLUGINLIB_EXPORT_CLASS(
   mppi::critics::SpatioTemporalCritic,

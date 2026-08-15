@@ -45,6 +45,9 @@ lidar3d_tracker:
     tracking_frame: odom          # frame fisso: NON base_scan (ruota col robot)
     markers_topic: /tracks/markers
 
+    # --- Step 4: uscita verso il critic spazio-temporale MPPI ---
+    tracks_topic: /dynamic_tracks_state   # dynamic_tracker_msgs/TrackArray consumato dal critic
+
     # Kalman (velocità costante)
     accel_std: 0.8                # tarato: statico fermo resta sotto ~0.12 m/s
     meas_std: 0.10               # rumore misura di posizione [m]
@@ -56,7 +59,6 @@ lidar3d_tracker:
     max_assoc_dist: 1.5          # gate euclideo di sicurezza [m]
     recovery_dist: 1.0           # 2° stadio: gate euclideo di recupero [m] per i target
                                  # in manovra (svolta) rifiutati dal Mahalanobis (0 = off)
-
     # ciclo di vita
     min_hits: 3                  # frame per confermare una traccia
     max_age: 10                  # frame di coasting (10 = ~1 s a 10 Hz)
