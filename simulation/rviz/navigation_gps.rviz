@@ -80,8 +80,8 @@ Visualization Manager:
     - Alpha: 1
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
-        Max Value: 10
-        Min Value: -10
+        Max Value: 1.7634919881820679
+        Min Value: -0.04222667217254639
         Value: true
       Axis: Z
       Channel Name: intensity
@@ -89,7 +89,7 @@ Visualization Manager:
       Color: 255; 255; 255
       Color Transformer: AxisColor
       Decay Time: 0
-      Enabled: true
+      Enabled: false
       Invert Rainbow: false
       Max Color: 255; 255; 255
       Max Intensity: 4096
@@ -110,7 +110,7 @@ Visualization Manager:
         Value: /scan/points
       Use Fixed Frame: true
       Use rainbow: true
-      Value: true
+      Value: false
     - Alpha: 1
       Class: rviz_default_plugins/RobotModel
       Collision Enabled: false
@@ -444,30 +444,9 @@ Visualization Manager:
         Value: /local_costmap/costmap_updates
       Use Timestamp: false
       Value: true
-    - Alpha: 0.699999988079071
-      Class: rviz_default_plugins/Map
-      Color Scheme: map
-      Draw Behind: false
-      Enabled: false
-      Name: Dynamic cost
-      Topic:
-        Depth: 5
-        Durability Policy: Volatile
-        Filter size: 10
-        History Policy: Keep Last
-        Reliability Policy: Reliable
-        Value: /dynamic_cost
-      Update Topic:
-        Depth: 5
-        Durability Policy: Volatile
-        History Policy: Keep Last
-        Reliability Policy: Reliable
-        Value: /dynamic_cost_updates
-      Use Timestamp: false
-      Value: false
     - Class: rviz_default_plugins/MarkerArray
       Enabled: false
-      Name: Dynamic_direction
+      Name: Tracking aggregation
       Namespaces:
         {}
       Topic:
@@ -475,20 +454,43 @@ Visualization Manager:
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /dynamic_tracks
+        Value: /detections/markers
       Value: false
     - Class: rviz_default_plugins/MarkerArray
       Enabled: true
-      Name: Prediction
+      Name: Dynamic tracks
       Namespaces:
-        ped_prediction: true
-        robot_prediction: true
+        tracks: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /tracks/markers
+      Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: Trajectories predictions
+      Namespaces:
+        {}
       Topic:
         Depth: 5
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /spatiotemporal_critic/predictions
+      Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: Robot trajectory
+      Namespaces:
+        {}
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /spatiotemporal_critic/robot_trajectory
       Value: true
   Enabled: true
   Global Options:
@@ -525,16 +527,16 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 19.02859115600586
+      Distance: 22.265430450439453
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: 4.923509120941162
-        Y: -2.150099277496338
-        Z: -2.795065402984619
+        X: 0.03479911386966705
+        Y: -1.454026222229004
+        Z: -5.0841522216796875
       Focal Shape Fixed Size: false
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false

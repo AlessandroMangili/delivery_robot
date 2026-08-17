@@ -131,29 +131,6 @@ def generate_launch_description():
             {'use_sim_time': LaunchConfiguration('use_sim_time')},
         ]
     )
-    
-    ekf_params = PathJoinSubstitution([pkg_simulation, 'config', 'ekf_gps.yaml'])
-    ekf_node = Node(
-        package='robot_localization',
-        executable='ekf_node',
-        name='ekf_filter_node',
-        output='screen',
-        parameters=[ekf_params, {'use_sim_time': LaunchConfiguration('use_sim_time')}],
-    )
-
-    navsat_transform_node = Node(
-        package='robot_localization',
-        executable='navsat_transform_node',
-        name='navsat_transform_node',
-        output='screen',
-        parameters=[ekf_params, {'use_sim_time': LaunchConfiguration('use_sim_time')}],
-        remappings=[
-            ('imu', '/imu'),                                # heading
-            ('gps/fix', '/navsat'),                         # NavSatFix's bridge
-            ('odometry/filtered', '/odometry/filtered'),    # Global EKF outcomes
-            ('odometry/gps', '/odometry/gps'),              # EKF odo1 entrance
-        ],
-    )
 
     gz_bridge_node = Node(
         package="ros_gz_bridge",
@@ -163,13 +140,12 @@ def generate_launch_description():
             "/cmd_vel@geometry_msgs/msg/Twist@gz.msgs.Twist",
             "/odom@nav_msgs/msg/Odometry@gz.msgs.Odometry",
             "/joint_states@sensor_msgs/msg/JointState@gz.msgs.Model",
-            "/tf@tf2_msgs/msg/TFMessage@gz.msgs.Pose_V",
+            #"/tf@tf2_msgs/msg/TFMessage@gz.msgs.Pose_V",
             "/camera/image@sensor_msgs/msg/Image@gz.msgs.Image",
             "/camera/camera_info@sensor_msgs/msg/CameraInfo@gz.msgs.CameraInfo",
             "imu@sensor_msgs/msg/Imu@gz.msgs.IMU",
             "/navsat@sensor_msgs/msg/NavSatFix[gz.msgs.NavSat",
             "/scan@sensor_msgs/msg/LaserScan@gz.msgs.LaserScan",
-            "/scan/points@sensor_msgs/msg/PointCloud2@gz.msgs.PointCloudPacked",
             "/camera/depth_image@sensor_msgs/msg/Image@gz.msgs.Image",
             "/scan/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked",
             "/semantic/labels_map@sensor_msgs/msg/Image[gz.msgs.Image",
@@ -196,7 +172,5 @@ def generate_launch_description():
     launchDescriptionObject.add_action(spawn_urdf_node)
     launchDescriptionObject.add_action(gz_bridge_node)
     launchDescriptionObject.add_action(robot_state_publisher_node)
-    launchDescriptionObject.add_action(ekf_node)
-    launchDescriptionObject.add_action(navsat_transform_node)
 
     return launchDescriptionObject
