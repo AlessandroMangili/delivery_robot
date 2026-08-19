@@ -1,7 +1,8 @@
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
-from sensor_msgs.msg import Image, CameraInfo
+from sensor_msgs.msg import Image, CameraInfo, PointCloud2
+from sensor_msgs_py import point_cloud2 as pc2
 from nav_msgs.msg import OccupancyGrid
 from visualization_msgs.msg import Marker
 import numpy as np
@@ -20,6 +21,7 @@ CLASS_COST = {
 DEFAULT_BLOCKERS = [2, 3, 4, 5, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18]
 DEFAULT_DYNAMIC = [11, 12, 13, 14, 15, 16, 17, 18]
 
+
 def transform_to_matrix(t):
     q = t.transform.rotation
     tr = t.transform.translation
@@ -31,6 +33,51 @@ def transform_to_matrix(t):
     ])
     M = np.eye(4); M[:3, :3] = R; M[:3, 3] = [tr.x, tr.y, tr.z]
     return M
+
+
+# ===== POSIZIONAMENTO LiDAR-PRIMARY (funzioni pure, testate in isolamento) =====
+def transform_points(pts, M):
+    """Applica la 4x4 M a punti Nx3 (p' = R p + t). Ritorna Nx3."""
+    pts = np.asarray(pts, dtype=np.float64)
+    return pts @ M[:3, :3].T + M[:3, 3][None, :]
+
+
+def project_to_pixel(pts_cam, K, width, height):
+    """Punti nel frame OTTICO camera -> (u,v) interi + maschera valida (davanti+dentro)."""
+    pts_cam = np.asarray(pts_cam, dtype=np.float64)
+    x, y, z = pts_cam[:, 0], pts_cam[:, 1], pts_cam[:, 2]
+    fx, fy = K[0, 0], K[1, 1]
+    cx, cy = K[0, 2], K[1, 2]
+    in_front = z > 1e-6
+    zz = np.where(in_front, z, 1.0)
+    u = np.round(fx * (x / zz) + cx).astype(np.int64)
+    v = np.round(fy * (y / zz) + cy).astype(np.int64)
+    valid = in_front & (u >= 0) & (u < width) & (v >= 0) & (v < height)
+    u = np.where(valid, u, 0)
+    v = np.where(valid, v, 0)
+    return u, v, valid
+
+
+def position_points(cloud_scan, M_scan2map, M_scan2cam, K, width, height,
+                    bz, max_obs_h, bx, by, map_write_max_range):
+    """cloud_scan: Nx3 nel frame del LiDAR (base_scan).
+    Ritorna uu, vv, X, Y, Xz, Yz, ok, dist (allineati ai punti LiDAR).
+    La POSIZIONE viene dal LiDAR (map), la CLASSE si leggera' dal pixel (uu,vv)."""
+    Pm = transform_points(cloud_scan, M_scan2map)   # punti in map (posizione)
+    Pc = transform_points(cloud_scan, M_scan2cam)   # punti in camera ottica (per la classe)
+    uu, vv, in_img = project_to_pixel(Pc, K, width, height)
+
+    X = Pm[:, 0]; Y = Pm[:, 1]; Zm = Pm[:, 2]
+    # overhead: scarta cio' che sta piu' in alto di max_obs_h sul robot
+    # (tettoie/insegne/chiome: il robot ci passa sotto). z REALE dal LiDAR.
+    overhead = (Zm - bz) > max_obs_h
+    dist = np.hypot(X - bx, Y - by)
+    ok = in_img & (~overhead) & (dist < map_write_max_range)
+
+    Xz = np.where(np.isfinite(X), X, 0.0)
+    Yz = np.where(np.isfinite(Y), Y, 0.0)
+    return uu, vv, X, Y, Xz, Yz, ok, dist
+
 
 class Tracker:
     """Nearest-neighbour world tracking + velocity estimate + moving/static classification."""
@@ -69,6 +116,7 @@ class Tracker:
     def confirmed_static(self, tr):
         return tr['n'] >= self.min_obs and np.hypot(tr['vx'], tr['vy']) <= self.v_thresh
 
+
 class SemanticCostmapNode(Node):
     def __init__(self):
         super().__init__('semantic_costmap_node')
@@ -85,9 +133,7 @@ class SemanticCostmapNode(Node):
         self.declare_parameter('resolution', 0.05)
         self.declare_parameter('initial_size_m', 10.0)
         self.declare_parameter('grow_margin_m', 3.0)
-        self.declare_parameter('pixel_stride', 4)
         self.declare_parameter('max_range', 5.0)
-        self.declare_parameter('min_row_frac', 0.62)
         self.declare_parameter('map_write_max_range', 4.0)
         self.declare_parameter('occ_sector_deg', 2.0)
         self.declare_parameter('occ_margin', 0.15)
@@ -100,11 +146,7 @@ class SemanticCostmapNode(Node):
         self.declare_parameter('deny_penalty', 2.0)
         self.declare_parameter('new_hits', 2)
         self.declare_parameter('change_hits', 2)
-        self.declare_parameter('depth_write_max_m', 6.0)  # scrivi solo entro questa distanza (depth affidabile)
-        self.declare_parameter('depth_topic', '/camera/depth_image')
-        self.declare_parameter('max_obstacle_height', 0.60)
-        self.declare_parameter('depth_max_age_s', 0.5)
-        self.declare_parameter('veto_verbose', False)
+        self.declare_parameter('max_obstacle_height', 0.20)
         self.declare_parameter('blocker_classes', DEFAULT_BLOCKERS)
         self.declare_parameter('dynamic_classes', DEFAULT_DYNAMIC)
         self.declare_parameter('dyn_v_thresh', 0.3)
@@ -115,6 +157,12 @@ class SemanticCostmapNode(Node):
         self.declare_parameter('map_static_dynamics', False)
         self.declare_parameter('dyn_dilate_px', 6)
 
+        # --- LiDAR come sorgente di GEOMETRIA (LiDAR-primary) ---
+        self.declare_parameter('lidar_topic', '/scan/points')
+        self.declare_parameter('lidar_frame', 'base_scan')
+        self.declare_parameter('lidar_max_age_s', 0.3)
+        self.declare_parameter('lidar_min_range', 0.4) 
+
         gp = self.get_parameter
         self.target = gp('target_frame').value
         self.cam_frame = gp('camera_optical_frame').value
@@ -122,9 +170,7 @@ class SemanticCostmapNode(Node):
         self.res = gp('resolution').value
         self.initial_size_m = gp('initial_size_m').value
         self.grow_margin = gp('grow_margin_m').value
-        self.stride = gp('pixel_stride').value
         self.max_range = gp('max_range').value
-        self.min_row_frac = gp('min_row_frac').value
         self.map_write_max_range = float(gp('map_write_max_range').value)
         self.conf_decay = float(gp('conf_decay').value)
         self.conf_max = float(gp('conf_max').value)
@@ -160,15 +206,18 @@ class SemanticCostmapNode(Node):
             else:
                 self.create_subscription(PoseWithCovarianceStamped, self.loc_pose_topic,
                                          self.loc_cb_pwc, 10)
-        self.depth_write_max = float(gp('depth_write_max_m').value)
         self.max_obs_h = float(gp('max_obstacle_height').value)
-        self.depth_max_age = float(gp('depth_max_age_s').value)
-        self.veto_verbose = bool(gp('veto_verbose').value)
-        self.depth = None
-        self.depth_t = -1e9
-        self._veto_warned = False
-        # la depth e' l'UNICA fonte di posizione: sottoscrizione sempre attiva
-        self.create_subscription(Image, gp('depth_topic').value, self.depth_cb, 1)
+
+        # --- LiDAR: cache della nuvola (sorgente di geometria) ---
+        self.lidar_frame = gp('lidar_frame').value
+        self.lidar_max_age = float(gp('lidar_max_age_s').value)
+        self.lidar_min_range = float(gp('lidar_min_range').value)
+        self.cloud = None            # Nx3 nel frame base_scan
+        self.cloud_t = -1e9
+        cloud_qos = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT,
+                               history=HistoryPolicy.KEEP_LAST, depth=1)
+        self.create_subscription(PointCloud2, gp('lidar_topic').value,
+                                 self.cloud_cb, cloud_qos)
 
         blockers = gp('blocker_classes').value
         dynamic = gp('dynamic_classes').value
@@ -260,12 +309,10 @@ class SemanticCostmapNode(Node):
             f'ros2 service call /semantic_costmap_node/save_map std_srvs/srv/Trigger  ->  {save_hint}')
 
         self.get_logger().info(
-            f'Semantic costmap (confidence + dynamics) ready. frame={self.target}.')
+            f'Semantic costmap (LiDAR-primary) ready. frame={self.target}.')
 
     def resolve_maps_dir(self):
-        """Find (or create) the maps/ folder in the semantic package SOURCE tree.
-        Searches for a 'semantic' folder ANYWHERE under <ws>/src (including subfolders),
-        recognised via package.xml. Falls back to the installed share if not found."""
+        """Find (or create) the maps/ folder in the semantic package SOURCE tree."""
         try:
             from ament_index_python.packages import get_package_share_directory
             share = get_package_share_directory('semantic')
@@ -349,8 +396,7 @@ class SemanticCostmapNode(Node):
             return None
 
     def ensure_capacity(self, X, Y):
-        """Grow the grid (auto-grow) if world X,Y fall outside it.
-        Copies existing data into the new grid, updates origin and size."""
+        """Grow the grid (auto-grow) if world X,Y fall outside it."""
         gi_min = int(np.floor((X.min() - self.gox) / self.res))
         gi_max = int(np.floor((X.max() - self.gox) / self.res))
         gj_min = int(np.floor((Y.min() - self.goy) / self.res))
@@ -391,11 +437,7 @@ class SemanticCostmapNode(Node):
         self._update_loc_quality(msg.pose.covariance)
 
     def _update_loc_quality(self, cov):
-        """ROBUST gate: EMA on pose std + HYSTERESIS.
-        - EMA: isolated covariance spikes (typical of AMCL) don't suspend; the TREND counts.
-        - Hysteresis: suspends above loc_std_suspend, resumes below loc_std_resume.
-        - A 'stale' pose doesn't block: if the source stops publishing, the state keeps
-          its last known value."""
+        """ROBUST gate: EMA on pose std + HYSTERESIS."""
         var_x = max(0.0, float(cov[0]))
         var_y = max(0.0, float(cov[7]))
         std_xy = float(np.sqrt(max(var_x, var_y)))
@@ -413,19 +455,20 @@ class SemanticCostmapNode(Node):
                 f'Localization RECOVERED (smoothed std {self.loc_std_smooth:.2f}m < '
                 f'{self.loc_std_resume}m) -> mapping RESUMED.')
 
-    def depth_cb(self, msg: Image):
-        """Depth camera: stored and used in seg_cb to position pixels by height."""
+    def cloud_cb(self, msg: PointCloud2):
+        """Nuvola LiDAR (frame base_scan): messa in cache, usata dal seg_cb per
+        posizionare la semantica (LiDAR-primary)."""
         try:
-            d = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
+            rec = pc2.read_points(msg, field_names=('x', 'y', 'z'), skip_nans=True)
         except Exception:
             return
-        d = np.asarray(d, dtype=np.float32)
-        if d.ndim != 2:
+        n = int(rec.shape[0])
+        if n == 0:
             return
-        if np.nanmedian(d[np.isfinite(d) & (d > 0)]) > 100.0:
-            d = d / 1000.0
-        self.depth = d
-        self.depth_t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        pts = np.empty((n, 3), dtype=np.float64)
+        pts[:, 0] = rec['x']; pts[:, 1] = rec['y']; pts[:, 2] = rec['z']
+        self.cloud = pts
+        self.cloud_t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
 
     def seg_cb(self, msg: Image):
         stamp_sec = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
@@ -445,139 +488,42 @@ class SemanticCostmapNode(Node):
         if T_cam is None or T_base is None:
             return
         M = transform_to_matrix(T_cam)
-        origin = M[:3, 3]; R = M[:3, :3]
+        origin = M[:3, 3]                      # posizione camera in map (serve alle occlusioni)
         bx, by = T_base.transform.translation.x, T_base.transform.translation.y
+        bz = T_base.transform.translation.z
         qb = T_base.transform.rotation
         yaw_b = np.arctan2(2.0 * (qb.w * qb.z + qb.x * qb.y),
                            1.0 - 2.0 * (qb.y * qb.y + qb.z * qb.z))
 
-        r0 = int(h * self.min_row_frac)
-        vs = np.arange(r0, h, self.stride)
-        us = np.arange(0, w, self.stride)
-        uu, vv = np.meshgrid(us, vs)
-        uu = uu.ravel(); vv = vv.ravel()
-
-        fx, fy = self.K[0, 0], self.K[1, 1]
-        cx, cy = self.K[0, 2], self.K[1, 2]
-        # direzione del raggio di ogni pixel nel frame ottico
-        dir_opt = np.stack([(uu - cx) / fx, (vv - cy) / fy, np.ones_like(uu, dtype=float)], axis=1)
-
-        # ===== POSIZIONAMENTO SOLO-DEPTH =====
-        # La posizione di ogni pixel viene MISURATA dalla depth: nessuna
-        # assunzione sul piano del suolo (niente IPM). Un pixel senza depth
-        # valida NON viene scritto -- meglio un buco che una posizione inventata.
-        # Motivazione: con la depth disponibile l'IPM sarebbe solo un ripiego che
-        # assume che ogni pixel stia a terra, falso per tutto cio' che ha altezza
-        # (edifici, alberi, persone) e fonte di smearing. Nel mondo reale, dove la
-        # segmentazione non e' ground truth, un metodo che MISURA e' piu' robusto
-        # di uno che ASSUME sulla base di una classe che potrebbe essere sbagliata.
-        X = np.full(uu.shape, np.nan)
-        Y = np.full(uu.shape, np.nan)
-        ok = np.zeros(uu.shape, dtype=bool)
-        n_depth = 0
-
-        if self.depth is None:
-            self.get_logger().warn(
-                'Nessuna depth ricevuta: in modalita\' solo-depth non si mappa nulla. '
-                'Controlla il topic depth.', throttle_duration_sec=10.0)
-        elif self.depth.shape != seg.shape:
-            self.get_logger().error(
-                f'DEPTH inutilizzabile: {self.depth.shape} != segmentazione {seg.shape}.',
-                throttle_duration_sec=10.0)
-        elif (stamp_sec - self.depth_t) > self.depth_max_age:
-            self.get_logger().warn('DEPTH troppo vecchia in questo frame.',
+        # ===== POSIZIONAMENTO LiDAR-PRIMARY =====
+        # La posizione di ogni punto viene MISURATA dal LiDAR 3D (geometria accurata,
+        # z reale, occlusioni native: il raggio non attraversa i muri). La classe
+        # viene letta dal pixel di segmentazione su cui il punto si proietta.
+        T_scan = self.lookup(self.lidar_frame)          # map <- base_scan
+        if self.cloud is None or T_scan is None:
+            if self.cloud is None:
+                self.get_logger().warn(
+                    'Nessuna nuvola LiDAR ricevuta: non si mappa nulla. '
+                    'Controlla il topic del LiDAR.', throttle_duration_sec=10.0)
+            self.publish_map(bx, by, msg.header.stamp)
+            return
+        if (stamp_sec - self.cloud_t) > self.lidar_max_age:
+            self.get_logger().warn('Nuvola LiDAR troppo vecchia in questo frame.',
                                    throttle_duration_sec=10.0)
-        else:
-            bz = T_base.transform.translation.z
-            dd = self.depth[vv, uu].astype(np.float64)
-            dvalid = np.isfinite(dd) & (dd > 0.05) & (dd < self.depth_write_max)
-            dd = np.where(dvalid, dd, 0.0)
-            # retroproiezione con la distanza MISURATA -> punto 3D nel mondo
-            P_map = (dir_opt * dd[:, None]) @ R.T + origin[None, :]
-            z_rel = P_map[:, 2] - bz
-            # scarta cio' che sta sopra la testa del robot (tettoie, insegne,
-            # chiome: il robot ci passa sotto, non sono ostacoli a terra)
-            overhead = dvalid & (z_rel > self.max_obs_h)
-            use_d = dvalid & ~overhead
-            X = np.where(use_d, P_map[:, 0], np.nan)
-            Y = np.where(use_d, P_map[:, 1], np.nan)
-            ok = use_d
-            n_depth = int(np.count_nonzero(use_d))
-            if self.veto_verbose:
-                self.get_logger().info(
-                    f'Depth: {n_depth} pixel posizionati per MISURA, '
-                    f'{int(np.count_nonzero(overhead))} scartati perche\' sopra '
-                    f'{self.max_obs_h:.2f} m (il robot ci passa sotto)',
-                    throttle_duration_sec=2.0)
+            self.publish_map(bx, by, msg.header.stamp)
+            return
 
-        dist = np.hypot(X - bx, Y - by)
-        ok = ok & np.isfinite(X) & np.isfinite(Y) & (dist < self.map_write_max_range)
-        # i pixel senza depth hanno X,Y = NaN e sono gia' esclusi da ok; li
-        # azzero SOLO per rendere sicuri i cast a intero piu' a valle (arctan2,
-        # astype(int)), che su NaN emetterebbero warning. Il valore 0 e' innocuo
-        # perche' questi pixel non vengono comunque scritti (ok=False).
-        Xz = np.where(np.isfinite(X), X, 0.0)
-        Yz = np.where(np.isfinite(Y), Y, 0.0)
+        M_scan2map = transform_to_matrix(T_scan)
+        M_scan2cam = np.linalg.inv(M) @ M_scan2map      # base_scan -> camera ottica
+        uu, vv, X, Y, Xz, Yz, ok, dist = position_points(
+            self.cloud, M_scan2map, M_scan2cam, self.K, w, h,
+            bz, self.max_obs_h, bx, by, self.map_write_max_range)
 
         classes = seg[vv, uu]
         costs = self.cost_lut[classes]
         ok = ok & (costs >= 0)
 
-        full_dyn = self.dyn_lut[seg].astype(np.uint8)
-        if full_dyn.any():
-            if self.dyn_dilate_px > 0:
-                k = 2 * self.dyn_dilate_px + 1
-                kern = np.ones((k, k), np.uint8)
-                dyn_mask = cv2.dilate(full_dyn, kern, iterations=1)
-            else:
-                dyn_mask = full_dyn
-            in_dyn = dyn_mask[vv, uu].astype(bool)
-
-            if not self.map_static_dynamics:
-                ok = ok & (~in_dyn)
-            else:
-                _, lbl = cv2.connectedComponents(full_dyn)
-                comp_s = lbl[vv, uu]
-                dyn_pix = self.dyn_lut[classes] & ok
-                dets = []; det_cids = []
-                for cid in np.unique(comp_s[dyn_pix]):
-                    if cid == 0:
-                        continue
-                    m = (comp_s == cid) & ok
-                    if not m.any():
-                        continue
-                    idx = np.where(m)[0]
-                    base_i = idx[np.argmax(vv[idx])]
-                    dets.append((float(X[base_i]), float(Y[base_i]))); det_cids.append(cid)
-                assign = self.tracker.update(dets, stamp_sec)
-                keep = np.zeros_like(in_dyn)
-                for cid, tr in zip(det_cids, assign):
-                    if self.tracker.confirmed_static(tr):
-                        keep |= (comp_s == cid)
-                ok = ok & (~(in_dyn & ~keep))
-
-        camx, camy = origin[0], origin[1]
-        ang = np.arctan2(Yz - camy, Xz - camx)
-        rad = np.hypot(Xz - camx, Yz - camy)
-        sec = np.clip(((ang + np.pi) / self.occ_dth).astype(int), 0, self.occ_nsec - 1)
-        is_block = self.block_lut[classes] & ok
-        occ_r = np.full(self.occ_nsec, np.inf, dtype=np.float64)
-        if is_block.any():
-            np.minimum.at(occ_r, sec[is_block], rad[is_block])
-        occluded = rad > (occ_r[sec] + self.occ_margin)
-
-        w_dist = np.clip(1.0 - dist / self.max_range, self.w_dist_min, 1.0)
-        w_occ = np.where(occluded, self.occ_weak, 1.0)
-        wpix = w_dist * w_occ
-
-        okx = ok & np.isfinite(X) & np.isfinite(Y)
-        if okx.any():
-            self.ensure_capacity(X[okx], Y[okx])
-
-        gi = ((Xz - self.gox) / self.res).astype(int)
-        gj = ((Yz - self.goy) / self.res).astype(int)
-        inside = ok & (gi >= 0) & (gi < self.gnx) & (gj >= 0) & (gj < self.gny)
-
+        # --- esclusione dinamici (per classe) + occlusioni + pesi ---
         full_dyn = self.dyn_lut[seg].astype(np.uint8)
         if full_dyn.any():
             if self.dyn_dilate_px > 0:
@@ -730,14 +676,7 @@ class SemanticCostmapNode(Node):
         self.publish_map(bx, by, msg.header.stamp)
 
     def _full_map_timer(self):
-        """Republish the full map periodically, INDEPENDENTLY of camera and TF.
-
-        Republishing a map that EXISTS is unconditional: whether or not the robot is mapping,
-        whether or not localization is ready. Confinement, ssrl_combiner and Nav2 depend on it.
-        Publishing here does not depend on the map->camera TF (with GPS the 'map' frame is
-        published by the EKF) nor on a dirty flag (with evidence-based fusion a consolidated
-        map stays 'clean': cells are only confirmed, cost doesn't change).
-        """
+        """Republish the full map periodically, INDEPENDENTLY of camera and TF."""
         if self.grid is None:
             return
         stamp = self.get_clock().now().to_msg()
@@ -748,8 +687,7 @@ class SemanticCostmapNode(Node):
         self._map_dirty = False
 
     def _grid_to_msg(self, sub, ox, oy, width, height, stamp):
-        """Convert a grid slice into an OccupancyGrid. Uses tobytes (112x faster
-        than .tolist() on large maps)."""
+        """Convert a grid slice into an OccupancyGrid."""
         msg = OccupancyGrid()
         msg.header.stamp = stamp
         msg.header.frame_id = self.target
@@ -782,13 +720,7 @@ class SemanticCostmapNode(Node):
         self.publish_range_marker(bx, by, stamp)
 
     def publish_range_marker(self, bx, by, stamp):
-        """Outline of the area actually written to the map: a quadrilateral (near L/R,
-        far L/R) measured on the points that were actually mapped.
-
-        Uses the pose SAVED WITH the hull, not the TF at draw time: otherwise the outline
-        gets rotated relative to the points that generated it (the robot has moved) and
-        deforms. The reference frame must travel with the data.
-        """
+        """Outline of the area actually written to the map."""
         h = getattr(self, '_hull', None)
         if h is None or len(h) != 9:
             return
@@ -811,6 +743,35 @@ class SemanticCostmapNode(Node):
         m.points = [P(f_lo, ln_max), P(f_hi, lf_max),
                     P(f_hi, lf_min), P(f_lo, ln_min), P(f_lo, ln_max)]
         self.pub_range.publish(m)
+        
+    def cloud_cb(self, msg: PointCloud2):
+        """Nuvola LiDAR (frame base_scan): messa in cache, usata dal seg_cb per
+        posizionare la semantica (LiDAR-primary). Qui la nuvola viene PULITA una
+        volta sola (unico punto d'ingresso): si scartano i punti non finiti
+        (NaN/inf dei raggi senza ritorno del gpu_lidar) e quelli entro
+        lidar_min_range (rumore a corto raggio, come il 'blind' di FAST-LIO)."""
+        try:
+            rec = pc2.read_points(msg, field_names=('x', 'y', 'z'), skip_nans=True)
+        except Exception:
+            return
+        n = int(rec.shape[0])
+        if n == 0:
+            return
+        pts = np.empty((n, 3), dtype=np.float64)
+        pts[:, 0] = rec['x']; pts[:, 1] = rec['y']; pts[:, 2] = rec['z']
+
+        # scarta NaN/inf (skip_nans toglie i NaN ma NON gli inf del gpu_lidar)
+        finite = np.isfinite(pts).all(axis=1)
+        # scarta il rumore a corto raggio (range 3D nel frame base_scan)
+        r2 = pts[:, 0]**2 + pts[:, 1]**2 + pts[:, 2]**2
+        keep = finite & (r2 >= self.lidar_min_range ** 2)
+        pts = pts[keep]
+        if pts.shape[0] == 0:
+            return
+
+        self.cloud = pts
+        self.cloud_t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+
 
 def main():
     rclpy.init()
@@ -820,10 +781,12 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
-        node.get_logger().info('Nodo in chiusura')
+        if getattr(node, 'autosave', False) and node.map_save_path:
+            node.save_map(node.map_save_path)
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
+
 
 if __name__ == '__main__':
     main()
