@@ -19,6 +19,12 @@ def generate_launch_description():
         name='semantic_costmap_node', output='screen',
         parameters=[params, use_sim_time],
     )
+    
+    elevation = Node(
+        package='semantic', executable='elevation_costmap_node',
+        name='elevation_costmap_node', output='screen',
+        parameters=[params, use_sim_time],
+    )
     overlay = Node(
         package='semantic', executable='semantic_overlay_node',
         name='semantic_overlay_node', output='screen',
@@ -39,6 +45,7 @@ def generate_launch_description():
     return LaunchDescription([
         gt_relay,
         costmap,
+        elevation,
         overlay,
         confinement,
         combiner,

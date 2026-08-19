@@ -32,6 +32,7 @@ setup(
             'gt_segmentation_node = semantic.gt_segmentation_relay:main',
             'confinement_layer = semantic.confinement_layer:main',
             'ssrl_combiner = semantic.ssrl_combiner:main',
+            'elevation_costmap_node = semantic.elevation_costmap_node:main',
         ],
     },
 )
