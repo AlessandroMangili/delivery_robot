@@ -36,13 +36,7 @@ ukf_filter_node:
     imu0_relative: false
     imu0_remove_gravitational_acceleration: true
 
-    # ===== PARAMETRI SPECIFICI DELL'UKF (l'EKF non li ha) =====
-    # L'EKF LINEARIZZA il modello (Jacobiana) attorno alla stima corrente. Con GPS + IMU
-    # la parte che soffre e' l'ORIENTAMENTO: le equazioni sono fortemente non lineari e la
-    # linearizzazione introduce errore proprio dove serve precisione.
-    # L'UKF non linearizza: propaga un insieme di punti (sigma points) attraverso il modello
-    # NON lineare e ne ricostruisce media e covarianza. Questi tre parametri governano
-    # COME quei punti vengono sparpagliati attorno alla stima:
+   
     alpha: 0.001   # quanto i sigma points si allontanano dalla media (piccolo = vicini).
                    # 1e-3 e' il valore standard in letteratura. Alzalo (0.01-0.1) solo se
                    # il filtro e' troppo lento a reagire alle svolte.

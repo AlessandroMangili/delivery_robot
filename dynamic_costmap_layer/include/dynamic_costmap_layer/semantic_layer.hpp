@@ -12,11 +12,6 @@
 namespace dynamic_costmap_layer
 {
 
-// Layer che inietta la mappa semantica SSRL (/ssrl_costmap, in frame 'map')
-// nella local costmap ROLLING (in 'odom'), facendo LUI la trasformazione
-// map->odom via TF. Serve perche' lo StaticLayer nativo riceve la mappa ma non
-// la applica sulla finestra rolling. Conserva il gradiente 0..100 -> 0..254 e
-// scrive con updateWithMax: non cancella mai gli altri layer (scan, cono).
 class SemanticLayer : public nav2_costmap_2d::Layer
 {
 public:

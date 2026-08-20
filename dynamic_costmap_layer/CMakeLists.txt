@@ -27,7 +27,6 @@ set(dependencies
 )
 
 add_library(${PROJECT_NAME} SHARED
-  src/dynamic_layer.cpp
   src/semantic_layer.cpp
 )
 
