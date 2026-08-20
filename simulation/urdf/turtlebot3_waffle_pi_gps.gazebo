@@ -53,8 +53,8 @@
                               <min_angle>-3.14156</min_angle>
                               <max_angle>3.14156</max_angle>
                          </horizontal>
-                         <vertical>                          <!-- QUESTO lo rende 3D -->
-                              <samples>16</samples>             <!-- 16 corone, stile VLP-16 -->
+                         <vertical>                          
+                              <samples>128</samples>             
                               <resolution>1</resolution>
                               <min_angle>-0.2618</min_angle>    <!-- -15° -->
                               <max_angle>0.2618</max_angle>     <!-- +15° -->

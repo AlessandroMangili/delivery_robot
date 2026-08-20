@@ -1,34 +1,5 @@
 #!/usr/bin/env python3
-"""
-lidar3d_tracker.py — Core del tracker AB3DMOT (Step 2 della pipeline LiDAR 3D).
 
-Consuma le detection dello Step 1 e produce TRACCE con identità, posizione e
-velocità. Riferimento: AB3DMOT (Kalman a velocità costante + associazione),
-con le buone pratiche di SimpleTrack (CV + gating).
-
-    /detections (PoseArray, frame sensore base_scan)
-        -> TF base_scan -> odom   (frame fisso: nel frame del sensore che ruota
-                                    l'ego-moto fingerebbe una velocità)
-        -> predizione Kalman CV di tutte le tracce
-        -> associazione (greedy) con gate di Mahalanobis + gate euclideo
-        -> correzione Kalman delle tracce associate
-        -> nascita/morte tracce (min_hits per confermare, max_age per il coasting)
-        -> GATE DI VELOCITÀ: pubblica solo le tracce in moto (uccide alberi,
-           panchine, pali: sono statici, v ~ 0)
-
-Uscite:
-    /tracks/markers          visualization_msgs/MarkerArray    (cilindro + freccia
-                                                                velocità + id)
-    /dynamic_tracks_state    dynamic_tracker_msgs/TrackArray    (Step 4: alimenta il
-                                                                critic spazio-temporale MPPI)
-
-Le due uscite condividono LA STESSA decisione "è un pedone dinamico valido"
-(confermato + gate mappa + gate semantico + finestra di coasting): ciò che vedi
-nei marker è esattamente ciò che riceve il critic. La visualizzazione delle scie
-predette (pedoni + robot) la fa il critic su /spatiotemporal_critic/predictions.
-
-Dipendenze: numpy. Associazione greedy (niente scipy nel tracker).
-"""
 import math
 import numpy as np
 

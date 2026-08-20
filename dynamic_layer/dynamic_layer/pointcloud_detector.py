@@ -1,28 +1,5 @@
 #!/usr/bin/env python3
-"""
-pointcloud_detector.py — Stadio di DETECTION per il tracker AB3DMOT (LiDAR 3D).
 
-Step 1 della pipeline. Puramente geometrico, nessuna rete neurale:
-
-    /scan/points (PointCloud2, 16 corone)
-        -> crop (range radiale + box in z)
-        -> voxel downsample
-        -> rimozione piano di terra (RANSAC, normale ~ verticale)
-        -> clustering euclideo (cKDTree region growing, algoritmo PCL)
-        -> filtro geometrico "persona" (altezza / footprint / n. punti)
-        -> centroidi = detection
-
-Uscite:
-    /detections           geometry_msgs/PoseArray          (centroidi accettati)
-    /detections/markers   visualization_msgs/MarkerArray   (verifica in RViz)
-
-Frame: le detection escono NEL FRAME DEL CLOUD (base_scan). La trasformazione
-in odom la fa il tracker a valle (Step 2), non questo nodo: qui restiamo
-puramente geometrici, come il front-end di AB3DMOT.
-
-Dipendenze: numpy, scipy (cKDTree). Se manca scipy:
-    pip install scipy    (oppure: sudo apt install python3-scipy)
-"""
 import math
 import numpy as np
 
