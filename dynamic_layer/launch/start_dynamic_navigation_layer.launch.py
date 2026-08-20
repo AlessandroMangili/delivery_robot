@@ -27,8 +27,6 @@ def generate_launch_description():
     use_sim_time = LaunchConfiguration('use_sim_time')
     params_file = LaunchConfiguration('params_file')
 
-    # nodo del layer anticipatorio: legge i parametri dal esdf.yaml e
-    # riceve use_sim_time dal launch (il param nel yaml e' ridondante ma innocuo).
     pointcloud = Node(
         package='dynamic_layer',
         executable='pointcloud_detector',
