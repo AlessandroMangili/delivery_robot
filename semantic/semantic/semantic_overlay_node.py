@@ -1,15 +1,4 @@
 #!/usr/bin/env python3
-"""
-Overlay di DEBUG: fonde la camera RGB con la segmentazione (GT) e pubblica
-/semantic/overlay_rgb in RELIABLE, cosi' RViz lo vede senza toccare il QoS.
-
-NON serve al funzionamento della pipeline: e' solo un aiuto visivo per
-controllare quanto bene le etichette si sovrappongono alla scena.
-
-Lancio:
-  ros2 run semantic semantic_overlay_node --ros-args -p use_sim_time:=true
-In RViz: display Image sul topic /semantic/overlay_rgb
-"""
 
 import rclpy
 from rclpy.node import Node

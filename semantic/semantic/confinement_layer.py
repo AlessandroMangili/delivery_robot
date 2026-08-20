@@ -1,24 +1,5 @@
 #!/usr/bin/env python3
-"""
-SSRL - Layer di CONFINAMENTO.
-Legge /semantic_costmap (mappa di categorie) e produce un campo di costo che
-penalizza in modo MORBIDO l'avvicinarsi al BORDO del marciapiede, spingendo il
-robot a stare verso il centro. E' una "politica di rischio" separata dalla
-mappa-misura: si somma sopra (vedi ssrl_combiner).
 
-Metodo: sulle celle di marciapiede calcola la distanza dal bordo (distance
-transform) e applica un decadimento esponenziale continuo:
-    conf = conf_max * exp(-dist / falloff)
-alto al bordo, ~0 verso il centro. Fuori dal marciapiede il confinamento e' 0
-(li' al costo ci pensa gia' la classe: strada, erba, ostacoli).
-Pubblica /confinement_cost (OccupancyGrid, stessa geometria dell'ingresso).
-
-CORREZIONI (per la semantic map latched a bassa frequenza):
- 1. subscriber TRANSIENT_LOCAL: riceve subito l'ultima full map latched anche
-    se questo nodo parte dopo il publisher;
- 2. conversione dati con tobytes (100x piu' veloce di .tolist() sulla full map);
- 3. output latched, cosi' SSRL (o chi parte dopo) riceve subito l'ultimo layer.
-"""
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import (QoSProfile, ReliabilityPolicy, HistoryPolicy,

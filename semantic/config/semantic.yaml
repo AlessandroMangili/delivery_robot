@@ -34,7 +34,6 @@ semantic_costmap_node:
     # Occlusion (polar z-buffer) -- ancora attiva; candidata a semplificazione con la geometria 3D nativa
     occ_sector_deg: 2.0                    # [deg] ampiezza angolare dei settori z-buffer
     occ_margin: 0.15                       # [m] oltre il primo ostacolo prima di dichiarare "occluso"
-    occ_weak: 0.10                         # peso di un'osservazione occlusa (quasi ignorata, ma non scartata)
     w_dist_min: 0.03                       # peso minimo a max_range (vicino ~1, lontano piccolo)
 
     blocker_classes: [2,3,4,5,7,8,11,12,13,14,15,16,17,18]
@@ -42,7 +41,7 @@ semantic_costmap_node:
     # Map persistence
     map_save_name: 'map1'                  # vuoto = non salvare
     map_load_name: 'map1'                  # vuoto = parti da zero
-    autosave: true                         # true = salva alla CHIUSURA del nodo
+    autosave: false                         # true = salva alla CHIUSURA del nodo
 
     # Dynamic objects exclusion (per classe; il tracker serve sul reale -> map_static_dynamics:true)
     dynamic_classes: [11,12,13,14,15,16,17,18]
@@ -130,7 +129,7 @@ elevation_costmap_node:
     # Persistenza -- NOME DIVERSO da 'map1'! (i .npz hanno campi diversi: h/var/n vs grid/conf/cls)
     map_save_name: 'elevation1'
     map_load_name: 'elevation1'
-    autosave: true
+    autosave: false
 
 confinement_layer:
   ros__parameters:

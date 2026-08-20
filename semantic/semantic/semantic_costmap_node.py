@@ -137,7 +137,6 @@ class SemanticCostmapNode(Node):
         self.declare_parameter('map_write_max_range', 4.0)
         self.declare_parameter('occ_sector_deg', 2.0)
         self.declare_parameter('occ_margin', 0.15)
-        self.declare_parameter('occ_weak', 0.10)
         self.declare_parameter('w_dist_min', 0.03)
         self.declare_parameter('conf_decay', 0.99)
         self.declare_parameter('conf_max', 8.0)
@@ -185,7 +184,6 @@ class SemanticCostmapNode(Node):
         self.occ_dth = np.deg2rad(gp('occ_sector_deg').value)
         self.occ_nsec = int(np.ceil(2 * np.pi / self.occ_dth))
         self.occ_margin = gp('occ_margin').value
-        self.occ_weak = gp('occ_weak').value
         self.w_dist_min = gp('w_dist_min').value
         self.map_static_dynamics = bool(gp('map_static_dynamics').value)
         self.dyn_dilate_px = int(gp('dyn_dilate_px').value)
@@ -467,8 +465,6 @@ class SemanticCostmapNode(Node):
             return
         pts = np.empty((n, 3), dtype=np.float64)
         pts[:, 0] = rec['x']; pts[:, 1] = rec['y']; pts[:, 2] = rec['z']
-        self.cloud = pts
-        self.cloud_t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
 
     def seg_cb(self, msg: Image):
         stamp_sec = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
@@ -567,9 +563,9 @@ class SemanticCostmapNode(Node):
             np.minimum.at(occ_r, sec[is_block], rad[is_block])
         occluded = rad > (occ_r[sec] + self.occ_margin)
 
+        ok = ok & (~occluded)
         w_dist = np.clip(1.0 - dist / self.max_range, self.w_dist_min, 1.0)
-        w_occ = np.where(occluded, self.occ_weak, 1.0)
-        wpix = w_dist * w_occ
+        wpix = w_dist
 
         okx = ok & np.isfinite(X) & np.isfinite(Y)
         if okx.any():

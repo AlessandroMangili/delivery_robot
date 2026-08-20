@@ -1,15 +1,4 @@
 #!/usr/bin/env python3
-"""
-Relay segmentazione ground-truth (Gazebo) -> ID Cityscapes.
-
-La segmentation camera di Gazebo pubblica /semantic/labels_map dove ogni pixel
-e' la label assegnata nel world (label = ID_Cityscapes + 1, perche' 0 = sfondo).
-Questo nodo riconverte (cs = gz - 1) e pubblica /semantic/segmentation (mono8)
-ESATTAMENTE come farebbe la rete: cosi' semantic_costmap_node.py non cambia.
-
-Usa questo nodo AL POSTO di segmentation_node.py quando vuoi la verita' a terra
-(niente inferenza, frame rate pieno, marciapiede sempre corretto).
-"""
 
 import rclpy
 from rclpy.node import Node

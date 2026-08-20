@@ -1,24 +1,5 @@
 #!/usr/bin/env python3
-"""
-SSRL - COMBINATORE.
-Somma la mappa semantica (misura) con i layer di costo (politiche di rischio:
-confinamento ora, dinamici in futuro) e pubblica la costmap finale /ssrl_costmap,
-quella che andra' data al planner.
 
-Regola: ssrl = semantic + somma(layer), saturato a 100. Le celle ignote (-1)
-nella semantica restano ignote. I layer si allineano per geometria identica
-(stesso origin/risoluzione/size della semantica, da cui derivano).
-Aggiungere un nuovo layer in futuro = aggiungerlo a 'layer_topics'.
-
-CORREZIONI (per la semantic map latched a bassa frequenza):
- 1. il subscriber della semantica e' TRANSIENT_LOCAL: riceve subito l'ultima
-    full map latched anche se pubblicata prima che questo nodo partisse;
- 2. RICOMBINA anche quando arriva un LAYER (non solo la semantica): il
-    confinement deriva dalla semantica e arriva DOPO di lei; senza questo, la
-    combinazione userebbe sempre il confinement del ciclo precedente (stantio);
- 3. conversione dati con tobytes (100x piu' veloce di .tolist() sulla full map);
- 4. output latched: il global costmap di Nav2 riceve la mappa anche se parte dopo.
-"""
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import (QoSProfile, ReliabilityPolicy, HistoryPolicy,

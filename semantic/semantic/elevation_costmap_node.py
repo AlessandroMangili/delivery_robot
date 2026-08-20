@@ -1,53 +1,4 @@
 #!/usr/bin/env python3
-"""
-elevation_costmap_node.py  --  Strato di traversabilita' geometrica (elevation 2.5D interna)
-
-Motore Kalman-per-cella nello stile di Fankhauser 2018 ("Probabilistic Terrain
-Mapping for Mobile Robots With Uncertain Localization", RA-L 2018) ed esteso da
-Erni et al. 2023 (MEM). Ogni cella e' uno stato (h, var):
-  - h   = altezza stimata del terreno in frame map [m]
-  - var = varianza della STIMA di h [m^2]  (confidenza, NON roughness)
-
-PIPELINE (due strati concettuali):
-  1) elevation map 2.5D  (h, var per cella, Kalman)      -> Fankhauser 2018
-  2) da h si DERIVA un costo di TRAVERSABILITA' geometrica -> Wermelinger 2016
-     (slope/roughness/step). L'altezza NON esce mai grezza: a Nav2 va solo il
-     costo 0..100 (0=percorribile, 100=non attraversabile). Topic: /traversability_cost.
-Nota naming: il file/nodo si chiama ancora *elevation* perche' la elevation map
-e' la rappresentazione INTERNA; cio' che pubblica e' traversabilita'.
-
-DINAMICI: esclusi ALL'INGRESSO. I punti LiDAR sono proiettati nel FOV camera
-(PointPainting, Vora et al. 2020) e SCARTATI se cadono su un pixel di classe
-dinamica (pedoni/veicoli) -> niente scie nella mappa. Il nodo quindi NON e' piu'
-puramente geometrico: usa la camera per il veto dinamico (copertura = FOV camera).
-
-Fusione di misura = fusione di due gaussiane (Kalman 1D):
-    K   = var / (var + var_meas)
-    h+  = h + K*(h_meas - h)
-    var+= (1 - K)*var
-I punti dello stesso frame che cadono nella stessa cella sono prima fusi tra loro
-per inverse-variance weighting (una misura per cella per frame), poi fusi nello
-stato. La varianza cresce nel tempo (passo di predizione).
-
-FEDELTA' vs SEMPLIFICAZIONE (per la tesi):
-  * Fedele: stato (h,var) per cella, misura pesata dall'incertezza distanza-dipendente,
-    fusione gaussiana, gate di Mahalanobis sugli outlier (rumore di misura residuo;
-    i DINAMICI sono gia' esclusi all'ingresso via segmentazione camera).
-  * Semplificato per la SIM: il passo di predizione di Fankhauser PROPAGA la
-    covarianza di posa 6-DOF in ogni cella. In sim la posa e' accurata (vedi doc
-    di continuita' 1.3), quindi qui si usa un'inflazione di varianza semplice
-    (process_var_rate * dt). Upgrade per il REALE: sostituire con la propagazione
-    della covarianza da /odometry/global.  <-- PENDING deployment reale.
-
-roughness e slope NON vengono da var (che e' confidenza sulla stima) ma dalla
-GEOMETRIA SPAZIALE del campo h (stile Wermelinger 2016): slope = gradiente
-spaziale di h; roughness = dispersione locale di h in una finestra. La cella var
-serve solo come confidenza geometrica (C_geom) e come gate dati-sufficienti.
-
-Il nodo pubblica SOLO il costo di traversabilita' (/traversability_cost,
-OccupancyGrid 0..100, -1 = ignoto). La FUSIONE con semantica avviene a valle nel
-ssrl_combiner (layer disaccoppiati): coerente con la separazione dei layer scelta.
-"""
 
 import os
 import array
@@ -330,7 +281,8 @@ class ElevationCostmapNode(Node):
         self.gox = -self.initial_size_m / 2.0
         self.goy = -self.initial_size_m / 2.0
         self.h = np.zeros((self.gny, self.gnx), dtype=np.float32)          # altezza stimata
-        self.var = np.full((self.gny, self.gnx), self.var_init, np.float32)  # varianza stima
+        self.var = np.full((self.gny, self.gnx), self.var_init, np.float32)  # varianza stima (corrente)
+        self.var_min = np.full((self.gny, self.gnx), np.inf, np.float32)   # varianza MINIMA storica (validita')
         self.n = np.zeros((self.gny, self.gnx), dtype=np.uint16)          # conteggio osservazioni
 
         # --- Cache nuvola LiDAR (PULITA una volta sola, come nel semantico) ---
@@ -426,6 +378,11 @@ class ElevationCostmapNode(Node):
             self.h = d['h'].astype(np.float32)
             self.var = d['var'].astype(np.float32)
             self.n = d['n'].astype(np.uint16)
+            # retrocompat: mappe vecchie senza var_min -> ricostruisci dalla var corrente
+            if 'var_min' in d.files:
+                self.var_min = d['var_min'].astype(np.float32)
+            else:
+                self.var_min = self.var.copy()
             self.gny, self.gnx = self.h.shape
             self.gox = float(d['gox']); self.goy = float(d['goy'])
             self.get_logger().info(f'Elevation map caricata da {path} ({self.gnx}x{self.gny}).')
@@ -437,7 +394,7 @@ class ElevationCostmapNode(Node):
             if not path.endswith('.npz'):
                 path += '.npz'
             os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-            np.savez_compressed(path, h=self.h, var=self.var, n=self.n,
+            np.savez_compressed(path, h=self.h, var=self.var, var_min=self.var_min, n=self.n,
                                 gnx=self.gnx, gny=self.gny, res=self.res,
                                 gox=self.gox, goy=self.goy)
             self.get_logger().info(f'Elevation map salvata in {path}.')
@@ -602,12 +559,13 @@ class ElevationCostmapNode(Node):
         seen, h_meas, var_meas = aggregate_frame(flat, Zi, var_pts, N)
 
         Hs = self.h.ravel(); Vs = self.var.ravel(); Ns = self.n.ravel()
+        Vmin = self.var_min.ravel()
 
         first = seen & (Ns == 0)
         prev = seen & (Ns > 0)
 
         # gate di Mahalanobis: misure troppo lontane dalla stima = outlier
-        # (dinamici, rumore) -> non fuse, non corrompono il terreno.
+        # (rumore residuo) -> non fuse, non corrompono il terreno.
         maha = np.zeros(N, dtype=np.float64)
         denom = np.sqrt(Vs + var_meas)
         good = prev & (denom > 0)
@@ -624,12 +582,21 @@ class ElevationCostmapNode(Node):
             hf, vf = kalman_fuse(Hs[fuse], Vs[fuse], h_meas[fuse], var_meas[fuse])
             Hs[fuse] = hf; Vs[fuse] = vf
 
+        # varianza MINIMA storica: la migliore confidenza mai raggiunta dalla cella.
+        # E' cio' che decide la VALIDITA' (visibilita'), disaccoppiata dalla var
+        # CORRENTE che l'inflazione fa ricrescere. Una cella mappata bene una volta
+        # resta valida: non svanisce col tempo mentre il robot si allontana.
+        touched = first | fuse
+        if np.any(touched):
+            Vmin[touched] = np.minimum(Vmin[touched], Vs[touched])
+
         # conteggio (i gated non incrementano: non li consideriamo osservazioni valide)
         Ns[first] = 1
         Ns[fuse] = np.minimum(Ns[fuse] + 1, 65535)
 
         self.h = Hs.reshape(self.gny, self.gnx)
         self.var = Vs.reshape(self.gny, self.gnx)
+        self.var_min = Vmin.reshape(self.gny, self.gnx)
         self.n = Ns.reshape(self.gny, self.gnx)
 
     def ensure_capacity(self, X, Y):
@@ -647,11 +614,13 @@ class ElevationCostmapNode(Node):
         ngx = self.gnx + pl + pr; ngy = self.gny + pb + pt
         nh = np.zeros((ngy, ngx), np.float32)
         nv = np.full((ngy, ngx), self.var_init, np.float32)
+        nvm = np.full((ngy, ngx), np.inf, np.float32)
         nn = np.zeros((ngy, ngx), np.uint16)
         nh[pb:pb + self.gny, pl:pl + self.gnx] = self.h
         nv[pb:pb + self.gny, pl:pl + self.gnx] = self.var
+        nvm[pb:pb + self.gny, pl:pl + self.gnx] = self.var_min
         nn[pb:pb + self.gny, pl:pl + self.gnx] = self.n
-        self.h = nh; self.var = nv; self.n = nn
+        self.h = nh; self.var = nv; self.var_min = nvm; self.n = nn
         self.gnx = ngx; self.gny = ngy
         self.gox -= pl * self.res; self.goy -= pb * self.res
         self.get_logger().info(
@@ -660,7 +629,10 @@ class ElevationCostmapNode(Node):
 
     # ---------------- pubblicazione (deriva costo) ----------------
     def publish_timer(self):
-        known = (self.n > 0) & (self.var < self.min_var_for_valid)
+        # VALIDITA' su var_min (migliore confidenza storica), NON su var corrente:
+        # una cella mappata bene una volta resta pubblicata anche se l'inflazione
+        # ha fatto ricrescere la sua var. Cosi' le zone gia' viste non svaniscono.
+        known = (self.n > 0) & (self.var_min < self.min_var_for_valid)
         if not np.any(known):
             return
         slope, rough, valid = derive_slope_roughness(
