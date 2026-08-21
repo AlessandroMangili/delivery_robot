@@ -247,10 +247,10 @@ class SemanticCostmapNode(Node):
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
 
-        self.create_subscription(CameraInfo, '/camera/camera_info', self.info_cb, 1)
+        self.create_subscription(CameraInfo, '/camera/camera_info', self.info_cb, 1)    # Change with real topic
         seg_qos = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT,
                              history=HistoryPolicy.KEEP_LAST, depth=1)
-        self.create_subscription(Image, '/semantic/segmentation', self.seg_cb, seg_qos)
+        self.create_subscription(Image, '/semantic/segmentation', self.seg_cb, seg_qos) # Change with real topic
 
         latched_qos = QoSProfile(reliability=ReliabilityPolicy.RELIABLE,
                                  durability=DurabilityPolicy.TRANSIENT_LOCAL,

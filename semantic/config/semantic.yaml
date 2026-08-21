@@ -6,19 +6,17 @@ gt_segmentation_relay:
 
 semantic_costmap_node:
   ros__parameters:
-    # Frames
     target_frame: map                                 # persistent map frame (fixed, global)
-    camera_optical_frame: camera_rgb_optical_frame    # frame ottico camera: proietta i punti LiDAR nell'immagine per leggerne la CLASSE
-    base_frame: base_footprint                        # robot base frame (pose / window)
+    camera_optical_frame: camera_rgb_optical_frame    # Change with real robot frame
+    base_frame: base_footprint                        # Change with real robot frame
 
     # Grid
     resolution: 0.05                       # [m/cell] risoluzione mappa (5 cm) -- giustificata dal density study (>=1 pt/cella fino a ~10 m)
     initial_size_m: 10.0                   # [m] lato iniziale, poi auto-grow
     grow_margin_m: 3.0                     # [m] margine aggiunto a ogni espansione
 
-    # LiDAR (sorgente di GEOMETRIA: LiDAR-primary)
-    lidar_topic: /scan/points              # nuvola grezza nel frame base_scan (NON la deskewata di FAST-LIO)
-    lidar_frame: base_scan                 # frame del LiDAR
+    lidar_topic: /scan/points   # Change with real topic
+    lidar_frame: base_scan      # Change with real robot frame
     lidar_max_age_s: 0.3                   # [s] nuvola piu' vecchia di cosi' = non usata in quel frame
     lidar_min_range: 0.4                   # [m] scarta i punti piu' vicini
 
@@ -73,11 +71,10 @@ semantic_costmap_node:
 
 elevation_costmap_node:
   ros__parameters:
-    # Frames
     target_frame: map
-    base_frame: base_footprint
-    lidar_frame: base_scan
-    camera_optical_frame: camera_rgb_optical_frame   # per proiettare i punti ed escludere i dinamici
+    base_frame: base_footprint  # Change with real robot frame
+    lidar_frame: base_scan      # Change with real robot frame
+    camera_optical_frame: camera_rgb_optical_frame  # Change with real robot frame
 
     # Grid (stessa risoluzione della semantica: layer co-registrati)
     resolution: 0.05
@@ -85,7 +82,7 @@ elevation_costmap_node:
     grow_margin_m: 3.0
 
     # LiDAR (geometria)
-    lidar_topic: /scan/points
+    lidar_topic: /scan/points   # Change with real topic
     lidar_max_age_s: 0.3
     lidar_min_range: 0.4
     map_write_max_range: 5.0

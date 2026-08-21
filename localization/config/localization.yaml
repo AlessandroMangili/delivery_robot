@@ -1,6 +1,6 @@
 ekf_local:
   ros__parameters:
-    use_sim_time: true
+    use_sim_time: true    # false
     frequency: 30.0
     sensor_timeout: 0.1
     two_d_mode: true
@@ -11,10 +11,10 @@ ekf_local:
 
     map_frame: map
     odom_frame: odom
-    base_link_frame: base_footprint
+    base_link_frame: base_footprint   # Change with real robot frame
     world_frame: odom
 
-    odom0: /odom
+    odom0: /odom    # Change with real topic
     odom0_config: [false, false, false,
                    false, false, false,
                    true,  true,  false,
@@ -33,8 +33,7 @@ ekf_local:
     odom1_differential: true
     odom1_queue_size: 10
 
-    imu0: /imu
-
+    imu0: /imu    # Change with real topic
     imu0_config: [false, false, false,
                   false, false, true,
                   false, false, false,
@@ -48,7 +47,7 @@ ekf_local:
 
 ekf_global:
   ros__parameters:
-    use_sim_time: true
+    use_sim_time: true  # false
     frequency: 30.0
     sensor_timeout: 0.1
     two_d_mode: true                 
@@ -59,11 +58,10 @@ ekf_global:
 
     map_frame: map
     odom_frame: odom
-    base_link_frame: base_footprint
-    world_frame: map                 # -> pubblica la trasformata map->odom
+    base_link_frame: base_footprint   # Change with real robot frame
+    world_frame: map                
 
-    # --- odometria ruote (/odom dal DiffDrive): uso le VELOCITA' ---
-    odom0: /odom
+    odom0: /odom    # Change with real topic
     odom0_config: [false, false, false,
                    false, false, false,
                    true,  true,  false,
@@ -73,8 +71,7 @@ ekf_global:
     odom0_differential: false
     odom0_relative: false
 
-    # --- IMU (/imu): uso yaw, vel. yaw, accel. x ---
-    imu0: /imu
+    imu0: /imu    # Change with real topic
     imu0_config: [false, false, false,
                   false, false, true,
                   false, false, false,
@@ -108,9 +105,9 @@ ekf_global:
 
 navsat_transform_node:
   ros__parameters:
-    use_sim_time: true
+    use_sim_time: true  #false
     frequency: 30.0
-    delay: 3.0                       # attende che odom/imu siano stabili
+    delay: 3.0                      
     magnetic_declination_radians: 0.0
     yaw_offset: 0.0
     zero_altitude: true
