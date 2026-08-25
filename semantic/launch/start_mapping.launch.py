@@ -45,7 +45,7 @@ def generate_launch_description():
     return LaunchDescription([
         gt_relay,
         costmap,
-        #elevation,
+        elevation,
         overlay,
         confinement,
         combiner,

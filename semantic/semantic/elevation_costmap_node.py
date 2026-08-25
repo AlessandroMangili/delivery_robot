@@ -100,6 +100,27 @@ def kalman_fuse(h, var, h_meas, var_meas):
     return h_new, var_new
 
 
+def median_smooth_masked(h, known, ksize=3):
+    """Smoothing MEDIANO di h sulle celle note, PRIMA di derivare slope/rough/step.
+    Perche' serve: slope/roughness/step sono DERIVATE spaziali di h, e le derivate
+    AMPLIFICANO il rumore. Anche 1-2 cm di rumore residuo in h (normale dopo la
+    fusione, e rimescolato ad ogni ri-osservazione per il micro-offset di posa)
+    diventano roughness/step visibili -> aloni grigi sul terreno piatto.
+    Il filtro MEDIANO e' edge-preserving: uccide il rumore isolato cella-a-cella
+    ma PRESERVA i salti reali (un cordolo resta un cordolo). Le celle ignote sono
+    riempite temporaneamente con la media locale nota, per non creare falsi bordi."""
+    if ksize < 3:
+        return h
+    h = h.astype(np.float32)
+    knownf = known.astype(np.float32)
+    h0 = np.where(known, h, 0.0).astype(np.float32)
+    cnt = cv2.boxFilter(knownf, -1, (5, 5), normalize=False, borderType=cv2.BORDER_REPLICATE)
+    s = cv2.boxFilter(h0, -1, (5, 5), normalize=False, borderType=cv2.BORDER_REPLICATE)
+    filled = np.where(known, h, s / np.where(cnt > 0, cnt, 1.0)).astype(np.float32)
+    sm = cv2.medianBlur(filled, int(ksize))
+    return np.where(known, sm, h).astype(np.float32)
+
+
 def derive_slope_roughness(h, known, res, rough_win, min_known):
     """Da campo altezza h (float32) + maschera known -> (slope, roughness, valid).
     slope     = |grad h| [m/m] (adimensionale; tan della pendenza).
@@ -132,7 +153,8 @@ def derive_slope_roughness(h, known, res, rough_win, min_known):
 
 
 def elevation_cost(slope, roughness, step, valid,
-                   slope_crit, rough_crit, step_crit):
+                   slope_crit, rough_crit, step_crit,
+                   slope_dead=0.0, rough_dead=0.0, step_dead=0.0):
     """f(M): combina i pericoli geometrici in un costo 0..100.
       - scoscese : slope alto        -> cost_slope
       - accidentato: roughness alta  -> cost_rough
@@ -140,9 +162,16 @@ def elevation_cost(slope, roughness, step, valid,
     Ognuno satura al proprio critico; si combina con MAX (il pericolo peggiore
     domina) e si satura a 100. Celle non valide -> -1 (ignoto: il robot le esplora,
     coerente con include_unknown_as_edge:false della confinement)."""
-    cs = np.clip(slope / max(slope_crit, 1e-6), 0.0, 1.0)
-    cr = np.clip(roughness / max(rough_crit, 1e-6), 0.0, 1.0)
-    ck = np.clip(step / max(step_crit, 1e-6), 0.0, 1.0)
+    # DEAD-ZONE: sotto la soglia di rumore il contributo e' ESATTAMENTE 0 (non
+    # 'poco'). La normalizzazione lineare da 0 dava un filo di costo anche a 1.5cm
+    # di roughness (rumore) -> grigio. Con la dead-zone, sotto *_dead = 0 netto;
+    # sopra sale linearmente da *_dead a *_crit. Uccide il residuo che sopravvive
+    # al mediano, senza toccare i pericoli veri (che stanno sopra *_dead).
+    def _band(x, dead, crit):
+        return np.clip((x - dead) / max(crit - dead, 1e-6), 0.0, 1.0)
+    cs = _band(slope, slope_dead, slope_crit)
+    cr = _band(roughness, rough_dead, rough_crit)
+    ck = _band(step, step_dead, step_crit)
     c = np.maximum(np.maximum(cs, cr), ck) * 100.0
     cost = np.where(valid, np.clip(np.round(c), 0, 100), -1).astype(np.int16)
     return cost
@@ -213,7 +242,14 @@ class ElevationCostmapNode(Node):
         self.declare_parameter('rough_min_known', 6)        # min vicini noti per validita'
         self.declare_parameter('slope_crit', 0.35)          # [m/m] ~19 deg -> costo max
         self.declare_parameter('rough_crit', 0.06)          # [m] std locale -> costo max
-        self.declare_parameter('step_crit', 0.12)           # [m] salto -> costo max
+        self.declare_parameter('step_crit', 0.06)           # [m] salto -> costo max (cordolo)
+        # smoothing mediano di h prima di derivare (5 = pulisce bene il rumore 1cm;
+        # 3 = piu' leggero; 0/1 = off). Con ksize 5 la soglia step affidabile e' ~5cm.
+        self.declare_parameter('median_ksize', 5)
+        # dead-zone / soglia minima: sotto = rumore (0), sopra sale verso *_crit
+        self.declare_parameter('slope_dead', 0.08)          # [m/m] sotto = piatto
+        self.declare_parameter('rough_dead', 0.025)         # [m] sotto = liscio (rumore)
+        self.declare_parameter('step_dead', 0.02)           # [m] step_min: sotto = rumore
 
         # --- Publishing ---
         self.declare_parameter('publish_period_s', 1.0)
@@ -265,6 +301,10 @@ class ElevationCostmapNode(Node):
         self.slope_crit = float(gp('slope_crit').value)
         self.rough_crit = float(gp('rough_crit').value)
         self.step_crit = float(gp('step_crit').value)
+        self.median_ksize = int(gp('median_ksize').value)
+        self.slope_dead = float(gp('slope_dead').value)
+        self.rough_dead = float(gp('rough_dead').value)
+        self.step_dead = float(gp('step_dead').value)
 
         self.publish_period = float(gp('publish_period_s').value)
 
@@ -635,12 +675,16 @@ class ElevationCostmapNode(Node):
         known = (self.n > 0) & (self.var_min < self.min_var_for_valid)
         if not np.any(known):
             return
+        # SMOOTHING MEDIANO di h PRIMA di derivare: uccide il rumore residuo
+        # cella-a-cella (causa degli aloni) preservando i bordi veri (cordoli).
+        h_sm = median_smooth_masked(self.h, known, self.median_ksize)
         slope, rough, valid = derive_slope_roughness(
-            self.h, known, self.res, self.rough_win, self.rough_min_known)
-        step = neighbor_step(self.h, known, self.res)
+            h_sm, known, self.res, self.rough_win, self.rough_min_known)
+        step = neighbor_step(h_sm, known, self.res)
         valid = valid & known
         cost = elevation_cost(slope, rough, step, valid,
-                              self.slope_crit, self.rough_crit, self.step_crit)
+                              self.slope_crit, self.rough_crit, self.step_crit,
+                              self.slope_dead, self.rough_dead, self.step_dead)
 
         msg = OccupancyGrid()
         msg.header.stamp = self.get_clock().now().to_msg()

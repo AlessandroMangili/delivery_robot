@@ -141,14 +141,14 @@
         <collision name="collision">
           <geometry>
             <box>
-              <size>70.000 0.180 0.080</size>
+              <size>70.000 0.180 0.200</size>
             </box>
           </geometry>
         </collision>
         <visual name="visual">
           <geometry>
             <box>
-              <size>70.000 0.180 0.080</size>
+              <size>70.000 0.180 0.200</size>
             </box>
           </geometry>
           <material>

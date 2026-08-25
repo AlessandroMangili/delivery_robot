@@ -89,15 +89,15 @@ elevation_costmap_node:
     camera_info_topic: /camera/camera_info
     seg_max_age_s: 0.3
     dynamic_classes: [11,12,13,14,15,16,17,18]
-    dyn_dilate_px: 6
+    dyn_dilate_px: 12
 
     # Modello Kalman (misura + predizione)
     sensor_var_base: 0.0009            # (0.03 m)^2 rumore base
     sensor_var_dist: 0.0004            # coeff. * range^2 (piu' lontano = meno affidabile)
     var_init: 1.0                      # varianza cella mai vista
     var_max: 1.0                       # tetto varianza (inflazione)
-    process_var_rate: 0.005            # [m^2/s] inflazione nel tempo (SIM: sostituto della prop. di posa)
-    maha_thresh: 3.0                   # gate outlier (rumore residuo)
+    process_var_rate: 0.05            # [m^2/s] inflazione nel tempo (SIM: sostituto della prop. di posa)
+    maha_thresh: 5.0                   # gate outlier (rumore residuo)
     min_var_for_valid: 0.25            # var oltre = cella non affidabile -> ignoto
 
     # Derivazione COSTO (traversabilita': slope/roughness/step)
@@ -105,7 +105,13 @@ elevation_costmap_node:
     rough_min_known: 6                 # min vicini noti per validita'
     slope_crit: 0.35                   # [m/m] ~19 deg -> costo max
     rough_crit: 0.06                   # [m] std locale -> costo max
-    step_crit: 0.12                    # [m] salto (cordolo) -> costo max
+    step_crit: 0.06                    # [m] salto (cordolo) -> costo max
+
+    # ADDED
+    median_ksize: 5        # smoothing mediano (3=on; 0/1=off per confronto)
+    slope_dead: 0.04
+    rough_dead: 0.025
+    step_dead: 0.02
 
     # Publishing
     publish_period_s: 1.0
