@@ -1426,5 +1426,35 @@
       <static>true</static>
       <plugin name="ignition::gazebo::systems::Label" filename="ignition-gazebo-label-system"><label>14</label></plugin>
     </include>
+
+
+    <!--<model name="ramp_up">
+      <static>true</static>
+      <pose>3.0 0.0 0.135 0.0 -0.0997 0.0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <box>
+              <size>1.507 1.2 0.05</size>
+            </box>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <box>
+              <size>1.507 1.2 0.05</size>
+            </box>
+          </geometry>
+          <material>
+            <ambient>0.6 0.5 0.3 1</ambient>
+            <diffuse>0.7 0.6 0.4 1</diffuse>
+          </material>
+        </visual>
+      </link>
+      <plugin filename="ignition-gazebo-label-system" name="ignition::gazebo::systems::Label">
+        <label>2</label>
+      </plugin>
+    </model>-->
+
   </world>
 </sdf>
