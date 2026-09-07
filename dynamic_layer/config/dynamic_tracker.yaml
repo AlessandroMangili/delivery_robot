@@ -12,7 +12,7 @@ pointcloud_detector:
     crop_max_z: 2.5
 
     # downsample
-    voxel_size: 0.05       # alza se il clustering è lento
+    voxel_size: 0.10       # alza se il clustering è lento
 
     # rimozione piano di terra (RANSAC)
     ground_dist_thresh: 0.08
@@ -34,7 +34,7 @@ pointcloud_detector:
     max_footprint: 1.00         # ingombro orizzontale max (muri lunghi cadono qui)
 
     # diagnostica / debug
-    debug_show_rejected: true   # cluster scartati in rosso in RViz (per tarare)
+    debug_show_rejected: false   # cluster scartati in rosso in RViz (per tarare)
     diag_period_frames: 20
 
 
@@ -70,24 +70,44 @@ lidar3d_tracker:
     promote_frames: 4            # frame di moto coerente consecutivi per promuovere
     demote_frames: 8             # frame lenti consecutivi per retrocedere (anti-lampeggio)
 
-    # cross-check con la mappa semantica statica
-    use_static_map_gate: true
-    static_map_topic: /semantic_costmap
-    static_cost_thresh: 99          # 100 = struttura dura mappata (muro/edificio/albero)
-    static_gate_radius_cells: 2     # finestra di celle attorno alla traccia (assorbe il jitter)
-    # gate semantico camera sulle tracce (/semantic/segmentation, ID Cityscapes)
-    use_semantic_gate: true
-    seg_topic: /semantic/segmentation
+    # --- ramo semantico asincrono: associazione 2D-3D su bbox YOLO ---
+    use_person_gate: true
+    yolo_topic: /yolo/detections
     camera_info_topic: /camera/camera_info
     camera_frame: camera_rgb_optical_frame
-    probe_height: 0.9              # [m] quota a cui proiettare la traccia (mezzo busto)
-    probe_patch: 2                # semi-finestra pixel per il voto di maggioranza
-    sem_static_hits: 2            # letture statiche consecutive per scartare la traccia
-    static_seg_classes: [2, 3, 4, 5, 7, 8]              # building/wall/fence/pole/sign/vegetation
-    dynamic_seg_classes: [11, 12, 13, 14, 15, 16, 17, 18]  # person/rider/car/.../bike
+    probe_height: 0.9
+    bbox_margin: 12            # px: espansione bbox, assorbe la latenza YOLO
+    person_confirm_hits: 2     # associazioni positive per confermare persona
 
     # visualizzazione
     marker_z: 0.6
     arrow_time_scale: 1.0        # lunghezza freccia = velocità * questo [s]
     publish_static: false        # true = mostra in grigio anche le tracce ferme (debug)
+    diag_period_frames: 20
+
+bbox_lidar_detector:
+  ros__parameters:
+    use_sim_time: true
+    points_topic: /scan/points
+    detections_in_topic: /yolo/detections
+    camera_info_topic: /camera/camera_info
+    output_topic: /detections
+    markers_topic: /detections/markers
+    camera_frame: camera_rgb_optical_frame
+    cloud_buffer: 15
+    sync_tolerance: 0.20
+    min_range: 0.30
+    max_range: 12.0
+    voxel_size: 0.05
+    ground_dist_thresh: 0.08
+    ground_max_iter: 60
+    ground_normal_z_min: 0.85
+    remove_below_ground: true
+    bbox_shrink: 0.10
+    front_z_min: 0.05
+    min_points_in_frustum: 4
+    cluster_tolerance: 0.30
+    cluster_min_points: 4
+    cluster_max_points: 2000
+    merge_dist: 0.45
     diag_period_frames: 20

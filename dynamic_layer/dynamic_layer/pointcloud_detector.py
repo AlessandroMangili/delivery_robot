@@ -16,19 +16,17 @@ from visualization_msgs.msg import Marker, MarkerArray
 from std_msgs.msg import ColorRGBA
 
 
-# ---------------------------------------------------------------------------
-# Funzioni geometriche pure (testabili in isolamento, senza ROS)
-# ---------------------------------------------------------------------------
 def cloud_to_xyz(msg):
-    """PointCloud2 -> ndarray (N,3) float64. Robusto tra versioni di sensor_msgs_py."""
-    try:
-        arr = pc2.read_points_numpy(msg, field_names=['x', 'y', 'z'], skip_nans=True)
-        xyz = np.asarray(arr, dtype=np.float64).reshape(-1, 3)
-    except Exception:
-        pts = pc2.read_points(msg, field_names=('x', 'y', 'z'), skip_nans=True)
-        xyz = np.array([[p[0], p[1], p[2]] for p in pts], dtype=np.float64)
-    if xyz.size == 0:
-        return xyz.reshape(0, 3)
+    """PointCloud2 -> (N,3) float64, senza loop Python: vista strutturata sul buffer."""
+    names = [f.name for f in msg.fields]
+    dt = {'x': np.float32, 'y': np.float32, 'z': np.float32}  # assunzione tipica: float32
+    # offset reali dei campi x,y,z
+    offs = {f.name: f.offset for f in msg.fields}
+    raw = np.frombuffer(msg.data, dtype=np.uint8).reshape(-1, msg.point_step)
+    def col(name):
+        o = offs[name]
+        return raw[:, o:o+4].copy().view(np.float32).ravel()
+    xyz = np.stack([col('x'), col('y'), col('z')], axis=1).astype(np.float64)
     return xyz[np.isfinite(xyz).all(axis=1)]
 
 

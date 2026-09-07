@@ -30,6 +30,7 @@ setup(
         'console_scripts': [
             'pointcloud_detector = dynamic_layer.pointcloud_detector:main',
             'lidar3d_tracker = dynamic_layer.lidar3d_tracker:main',
+            'bbox_lidar_detector = dynamic_layer.bbox_lidar_detector:main',
         ],
     },
 )
