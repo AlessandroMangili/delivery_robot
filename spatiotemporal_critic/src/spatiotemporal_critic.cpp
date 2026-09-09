@@ -112,16 +112,26 @@ void SpatioTemporalCritic::score(mppi::CriticData & data)
     publishRobotTrajectory(data, dt, time);
   }
 
-  // Copio le tracce sotto lock (arrivano su un altro thread).
+  // Copio le tracce E lo stamp sotto lock (arrivano su un altro thread).
   std::vector<TrackSnapshot> tracks;
+  builtin_interfaces::msg::Time tracks_stamp;
   {
     std::lock_guard<std::mutex> lock(tracks_mutex_);
     tracks = tracks_;
+    tracks_stamp = tracks_stamp_;
   }
-  // Il termine di collisione futura ha senso solo con pedoni: se non ce ne
-  // sono, la viz del robot e' gia' stata pubblicata sopra, quindi esco.
   if (tracks.empty()) {
     return;
+  }
+
+  // --- scarto tracce stantie: age = now - stamp dell'ultimo TrackArray ---
+  // Senza questo, se il tracker si ferma il critic propaga all'infinito la CV
+  // sull'ultima traccia. La viz del robot e' gia' uscita sopra, quindi esco pulito.
+  if (auto node = parent_.lock()) {
+    const double age = (node->now() - rclcpp::Time(tracks_stamp)).seconds();
+    if (age > static_cast<double>(max_track_age_s_)) {
+      return;
+    }
   }
 
   // Penalita' per traiettoria. std::vector (non xtensor): la scrittura finale
