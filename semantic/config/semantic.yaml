@@ -148,3 +148,4 @@ ssrl_combiner:
     soft_ceiling: 97                       # tetto del soft (100 riservato al letale)
     elev_can_be_lethal: false    # true = comportamento vecchio (per l'A/B)
     elev_lethal_thr: 92                    # sopra = ostacolo fisico → 100
+    grid_tol_cells: 0.01

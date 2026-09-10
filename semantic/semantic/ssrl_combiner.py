@@ -10,6 +10,63 @@ def grid_key(info):
             round(info.resolution, 4))
 
 
+def check_grid_compatible(l_res, l_ox, l_oy, l_quat,
+                          r_res, r_ox, r_oy, r_quat,
+                          tol_cells=0.01):
+    """Verifica le IPOTESI su cui si regge align_to_ref. Ritorna (ok, motivo).
+
+    align_to_ref allinea un layer alla griglia di riferimento con un semplice
+    shift INTERO di celle:
+
+        dx = round((l_ox - r_ox) / res)
+
+    Questo e' corretto SOLO se valgono quattro cose, che finora nessuno
+    verificava e la cui violazione non produce alcun errore -- solo mappe
+    sbagliate in silenzio:
+
+      1. stessa risoluzione. align_to_ref usa la `res` del RIFERIMENTO anche
+         per il layer: se differiscono, le celle hanno dimensioni diverse e sia
+         lo shift sia la sovrapposizione sono privi di senso.
+      2. orientamento identita' su ENTRAMBE le griglie. Una griglia ruotata non
+         si allinea con una traslazione di celle.
+      3. origini sullo STESSO RETICOLO, cioe' distanti un multiplo intero di
+         res. Un residuo sub-cella viene assorbito dal round() -> errore
+         sistematico fino a mezza cella (2.5 cm a res 0.05).
+      4. risoluzione positiva.
+
+    NB: con i nodi attuali la (3) e' garantita per costruzione (origine iniziale
+    = -initial_size_m/2, crescita per numero INTERO di celle). Questa guardia
+    non corregge nulla: rende VISIBILE la rottura se un domani cambia un
+    parametro (es. una `resolution` diversa fra i due nodi, o un
+    `initial_size_m` la cui meta' non e' multipla di res).
+
+    Funzione PURA -> testabile senza ROS.
+    l_quat / r_quat: tuple (x, y, z, w).
+    """
+    if r_res <= 0.0 or l_res <= 0.0:
+        return False, f"risoluzione non positiva (layer={l_res}, rif={r_res})"
+
+    if abs(l_res - r_res) > 1e-6:
+        return False, (f"risoluzione diversa: layer={l_res:.4f} m, "
+                       f"riferimento={r_res:.4f} m")
+
+    for nome, q in (("layer", l_quat), ("riferimento", r_quat)):
+        qx, qy, qz, qw = q
+        if (abs(qx) > 1e-6 or abs(qy) > 1e-6 or abs(qz) > 1e-6
+                or abs(abs(qw) - 1.0) > 1e-6):
+            return False, (f"orientamento non identita' sulla griglia {nome}: "
+                           f"({qx:.4f}, {qy:.4f}, {qz:.4f}, {qw:.4f})")
+
+    for asse, lo, ro in (("x", l_ox, r_ox), ("y", l_oy, r_oy)):
+        celle = (lo - ro) / r_res
+        residuo = abs(celle - round(celle))
+        if residuo > tol_cells:
+            return False, (f"origini fuori reticolo su {asse}: residuo "
+                           f"{residuo:.3f} celle ({residuo * r_res * 100:.1f} cm)")
+
+    return True, ""
+
+
 def align_to_ref(layer, l_ox, l_oy, ref_ox, ref_oy, res, ref_h, ref_w, fill=-1):
     """Rimappa 'layer' (origine l_ox,l_oy) sulla griglia di riferimento (semantica).
     Semantica ed elevation sono nodi separati con griglie di dimensione/origine
@@ -39,12 +96,12 @@ def fuse_elevation(base, elev, w_elev, soft_ceiling, elev_lethal_thr,
       Il soft_ceiling limita QUANTO l'elevation puo' AGGIUNGERE, non e' un tetto
       sulla base. Senza questo, una cella letale (100) della semantica veniva
       schiacciata a soft_ceiling (97) -> in Nav2 perde lo stato LETHAL_OBSTACLE
-      e non semina piu' inflation (bug osservato con elevation vuota).
+      e non semina piu' inflation.
 
     REGOLA 2 (letale solo se voluto): elev_can_be_lethal=False significa che
       l'elevation contribuisce SOLO costo soft. Rugosita' e pendenza sono
       terreno scomodo, non muri: promuoverle a 100 le rende letali E le fa
-      gonfiare dall'inflation di Nav2, che e' l'alone spurio osservato.
+      gonfiare dall'inflation di Nav2 (alone spurio).
     """
     if elev is None:
         return np.clip(base, 0.0, 100.0)
@@ -71,6 +128,12 @@ from rclpy.qos import (QoSProfile, ReliabilityPolicy, HistoryPolicy,
 from nav_msgs.msg import OccupancyGrid
 
 
+def quat_of(info):
+    """(x, y, z, w) dell'orientamento di una MapMetaData."""
+    o = info.origin.orientation
+    return (float(o.x), float(o.y), float(o.z), float(o.w))
+
+
 class SSRLCombiner(Node):
     def __init__(self):
         super().__init__('ssrl_combiner')
@@ -79,11 +142,13 @@ class SSRLCombiner(Node):
         self.declare_parameter('elevation_topic', '/elevation_cost')
         self.declare_parameter('out_topic', '/ssrl_costmap')
         # --- parametri fusione elevation (traversabilita') ---
-        self.declare_parameter('use_elevation', True)       # OFF = semantica+confinement soltanto
-        self.declare_parameter('w_elev', 0.6)               # aggressivita' incremento soft
-        self.declare_parameter('soft_ceiling', 97)          # tetto di cio' che l'elevation AGGIUNGE
-        self.declare_parameter('elev_can_be_lethal', False) # l'elevation puo' dichiarare 100?
-        self.declare_parameter('elev_lethal_thr', 92)       # soglia, usata solo se sopra e' True
+        self.declare_parameter('use_elevation', True)        # OFF = semantica+confinement soltanto
+        self.declare_parameter('w_elev', 0.6)                # aggressivita' incremento soft
+        self.declare_parameter('soft_ceiling', 97)           # tetto di cio' che l'elevation AGGIUNGE
+        self.declare_parameter('elev_can_be_lethal', False)  # l'elevation puo' dichiarare 100?
+        self.declare_parameter('elev_lethal_thr', 92)        # soglia, usata solo se sopra e' True
+        # --- guardia di compatibilita' delle griglie ---
+        self.declare_parameter('grid_tol_cells', 0.01)       # residuo di reticolo tollerato [celle]
 
         self.semantic_topic = self.get_parameter('semantic_topic').value
         self.layer_topics = list(self.get_parameter('layer_topics').value)
@@ -94,6 +159,7 @@ class SSRLCombiner(Node):
         self.soft_ceiling = float(self.get_parameter('soft_ceiling').value)
         self.elev_can_be_lethal = bool(self.get_parameter('elev_can_be_lethal').value)
         self.elev_lethal_thr = float(self.get_parameter('elev_lethal_thr').value)
+        self.grid_tol_cells = float(self.get_parameter('grid_tol_cells').value)
 
         # la semantica e' pubblicata LATCHED (transient_local): sottoscrivo
         # transient_local per ricevere subito l'ultima mappa anche partendo dopo.
@@ -149,6 +215,21 @@ class SSRLCombiner(Node):
         self.combine_and_publish()
 
     # -------------------------------------------------------------------------
+    def _compatible(self, nome, linfo, ref_info):
+        """Guardia: un layer incompatibile viene SCARTATO con un errore chiaro,
+        invece di essere fuso producendo una mappa sbagliata in silenzio."""
+        ok, motivo = check_grid_compatible(
+            float(linfo.resolution), float(linfo.origin.position.x),
+            float(linfo.origin.position.y), quat_of(linfo),
+            float(ref_info.resolution), float(ref_info.origin.position.x),
+            float(ref_info.origin.position.y), quat_of(ref_info),
+            tol_cells=self.grid_tol_cells)
+        if not ok:
+            self.get_logger().error(
+                f'Layer "{nome}" INCOMPATIBILE con la griglia semantica: {motivo}. '
+                f'Layer SCARTATO da questa fusione.', throttle_duration_sec=5.0)
+        return ok
+
     def combine_and_publish(self):
         key, sem, header, info = self.last_sem
         known = sem >= 0
@@ -160,6 +241,8 @@ class SSRLCombiner(Node):
         # --- BASE: semantica + layer PURI (confinement), RIALLINEATI alla semantica ---
         base = sem.astype(np.float32).copy()
         for topic, (linfo, arr) in self.layers.items():
+            if not self._compatible(topic, linfo, info):
+                continue
             a = align_to_ref(arr, linfo.origin.position.x, linfo.origin.position.y,
                              ref_ox, ref_oy, res, ref_h, ref_w, fill=0)  # fill 0: non aggiunge
             add = np.clip(a, 0, 100).astype(np.float32)
@@ -170,9 +253,11 @@ class SSRLCombiner(Node):
         elev = None
         if self.use_elevation and self.elev is not None:
             einfo, earr = self.elev
-            elev = align_to_ref(earr, einfo.origin.position.x, einfo.origin.position.y,
-                                ref_ox, ref_oy, res, ref_h, ref_w, fill=0)
-            elev = np.clip(elev, 0, 100).astype(np.float32)
+            if self._compatible(self.elevation_topic, einfo, info):
+                elev = align_to_ref(earr, einfo.origin.position.x,
+                                    einfo.origin.position.y,
+                                    ref_ox, ref_oy, res, ref_h, ref_w, fill=0)
+                elev = np.clip(elev, 0, 100).astype(np.float32)
 
         total = fuse_elevation(base, elev, self.w_elev, self.soft_ceiling,
                                self.elev_lethal_thr, self.elev_can_be_lethal)

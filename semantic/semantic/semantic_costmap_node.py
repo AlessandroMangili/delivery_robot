@@ -160,7 +160,7 @@ class SemanticCostmapNode(Node):
         self.declare_parameter('lidar_topic', '/scan/points')
         self.declare_parameter('lidar_frame', 'base_scan')
         self.declare_parameter('lidar_max_age_s', 0.3)
-        self.declare_parameter('lidar_min_range', 0.4) 
+        self.declare_parameter('lidar_min_range', 0.4)
 
         gp = self.get_parameter
         self.target = gp('target_frame').value
@@ -453,19 +453,6 @@ class SemanticCostmapNode(Node):
                 f'Localization RECOVERED (smoothed std {self.loc_std_smooth:.2f}m < '
                 f'{self.loc_std_resume}m) -> mapping RESUMED.')
 
-    def cloud_cb(self, msg: PointCloud2):
-        """Nuvola LiDAR (frame base_scan): messa in cache, usata dal seg_cb per
-        posizionare la semantica (LiDAR-primary)."""
-        try:
-            rec = pc2.read_points(msg, field_names=('x', 'y', 'z'), skip_nans=True)
-        except Exception:
-            return
-        n = int(rec.shape[0])
-        if n == 0:
-            return
-        pts = np.empty((n, 3), dtype=np.float64)
-        pts[:, 0] = rec['x']; pts[:, 1] = rec['y']; pts[:, 2] = rec['z']
-
     def seg_cb(self, msg: Image):
         stamp_sec = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
         if self.K is None:
@@ -739,13 +726,19 @@ class SemanticCostmapNode(Node):
         m.points = [P(f_lo, ln_max), P(f_hi, lf_max),
                     P(f_hi, lf_min), P(f_lo, ln_min), P(f_lo, ln_max)]
         self.pub_range.publish(m)
-        
+
     def cloud_cb(self, msg: PointCloud2):
         """Nuvola LiDAR (frame base_scan): messa in cache, usata dal seg_cb per
         posizionare la semantica (LiDAR-primary). Qui la nuvola viene PULITA una
         volta sola (unico punto d'ingresso): si scartano i punti non finiti
         (NaN/inf dei raggi senza ritorno del gpu_lidar) e quelli entro
-        lidar_min_range (rumore a corto raggio, come il 'blind' di FAST-LIO)."""
+        lidar_min_range (rumore a corto raggio, come il 'blind' di FAST-LIO).
+
+        NB: questa e' l'UNICA definizione di cloud_cb. In precedenza ne esisteva
+        una seconda, piu' in alto nella classe, che leggeva la nuvola ma NON
+        assegnava self.cloud: essendo definita prima, veniva sovrascritta da
+        questa e non faceva danni, ma bastava riordinare i metodi perche' il
+        nodo smettesse di scrivere in mappa senza alcun errore visibile."""
         try:
             rec = pc2.read_points(msg, field_names=('x', 'y', 'z'), skip_nans=True)
         except Exception:
