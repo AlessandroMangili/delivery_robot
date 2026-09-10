@@ -1,15 +1,10 @@
-// Critic spazio-temporale per MPPI (Nav2 Humble).
-//
-// TERMINE 1 - collisione futura: confronta dove sara' il pedone e dove sara' il
-//   robot allo STESSO istante t, e penalizza l'incontro. E' cio' che il cono
-//   statico non puo' fare, perche' non sa QUANDO il robot passera' di li'.
-
 #include "spatiotemporal_critic/spatiotemporal_critic.hpp"
 
 #include "geometry_msgs/msg/point.hpp"
 
 #include <cmath>
 #include <algorithm>
+#include <limits>
 #include <utility>
 
 #include <xtensor/xmath.hpp>
@@ -34,6 +29,25 @@ void SpatioTemporalCritic::initialize()
   getParam(prediction_horizon_s_, "prediction_horizon_s", 3.0f);
   getParam(max_radius_, "max_radius", 1.5f);
   getParam(worst_case_, "worst_case", true);
+
+  // Forma del costo. Default "both": i due termini coprono i rispettivi punti ciechi.
+  getParam(cost_mode_, "cost_mode", std::string("both"));
+  getParam(ttc_weight_, "ttc_weight", 20.0f);
+  getParam(ttc_power_, "ttc_power", 1.0f);
+  getParam(ttc_epsilon_, "ttc_epsilon", 0.1f);
+
+  use_overlap_ = (cost_mode_ == "overlap" || cost_mode_ == "both");
+  use_ttc_ = (cost_mode_ == "inv_ttc" || cost_mode_ == "both");
+  if (!use_overlap_ && !use_ttc_) {
+    RCLCPP_WARN(
+      logger_, "cost_mode '%s' non valido: ripiego su 'both'.", cost_mode_.c_str());
+    cost_mode_ = "both";
+    use_overlap_ = true;
+    use_ttc_ = true;
+  }
+
+  // Diagnostica aggregata (0 = spenta).
+  getParam(diag_period_calls_, "diag_period_calls", 0);
 
   // Parametri di visualizzazione.
   getParam(publish_predictions_, "publish_predictions", true);
@@ -62,10 +76,11 @@ void SpatioTemporalCritic::initialize()
 
   RCLCPP_INFO(
     logger_,
-    "SpatioTemporalCritic avviato (termine 1: collisione futura). "
-    "enabled=%d, weight=%.1f, collision_radius=%.2f, min_ped_speed=%.2f, tracks_topic=%s",
-    static_cast<int>(enabled_), weight_, collision_radius_, min_ped_speed_,
-    tracks_topic_.c_str());
+    "SpatioTemporalCritic: mode=%s | overlap w=%.1f (worst_case=%d) | "
+    "ttc w=%.1f pow=%.2f eps=%.2f | horizon=%.1fs radius=%.2f | tracks_topic=%s",
+    cost_mode_.c_str(), weight_, static_cast<int>(worst_case_),
+    ttc_weight_, ttc_power_, ttc_epsilon_, prediction_horizon_s_,
+    collision_radius_, tracks_topic_.c_str());
 }
 
 void SpatioTemporalCritic::tracksCallback(
@@ -120,6 +135,8 @@ void SpatioTemporalCritic::score(mppi::CriticData & data)
     tracks = tracks_;
     tracks_stamp = tracks_stamp_;
   }
+  // Il termine di collisione futura ha senso solo con pedoni: se non ce ne
+  // sono, la viz del robot e' gia' stata pubblicata sopra, quindi esco.
   if (tracks.empty()) {
     return;
   }
@@ -146,7 +163,14 @@ void SpatioTemporalCritic::score(mppi::CriticData & data)
     time_pred = std::min(time, std::max<size_t>(1, h));
   }
 
-  std::vector<float> track_pen(batch, 0.0f);
+  const size_t kNoHit = std::numeric_limits<size_t>::max();
+  std::vector<float> track_pen(batch, 0.0f);     // OVERLAP: profondita' nella bolla
+  std::vector<size_t> first_hit(batch, kNoHit);  // TTC: passo del primo contatto
+
+  // accumulatori di diagnostica: qualche somma per ciclo, costo trascurabile
+  double diag_sum_ovl = 0.0, diag_sum_ttc = 0.0;
+  size_t diag_n_hit = 0, diag_n_tracks = 0;
+  size_t diag_tau_min = kNoHit;
 
   for (const auto & tr : tracks) {
     const double speed = std::hypot(tr.vx, tr.vy);
@@ -156,8 +180,10 @@ void SpatioTemporalCritic::score(mppi::CriticData & data)
     if (tr.vel_std > max_vel_std_) {
       continue;
     }
+    ++diag_n_tracks;
 
     std::fill(track_pen.begin(), track_pen.end(), 0.0f);
+    std::fill(first_hit.begin(), first_hit.end(), kNoHit);
 
     for (size_t j = 0; j < time_pred; ++j) {
       const float t = static_cast<float>(j) * dt;
@@ -169,26 +195,64 @@ void SpatioTemporalCritic::score(mppi::CriticData & data)
         radius = max_radius_;
       }
       const double r2 = radius * radius;
+
       for (size_t i = 0; i < batch; ++i) {
         const double ddx = traj_x(i, j) - px;
         const double ddy = traj_y(i, j) - py;
         const double d2 = ddx * ddx + ddy * ddy;
-        if (d2 < r2) {
-          const float closeness =
-            static_cast<float>(1.0 - std::sqrt(d2) / radius);
-          if (worst_case_) {
-            if (closeness > track_pen[i]) {
-              track_pen[i] = closeness;
-            }
-          } else {
-            track_pen[i] += closeness;
+        if (d2 >= r2) {
+          continue;
+        }
+
+        // TEMPO: j cresce in modo monotono, quindi la PRIMA volta che
+        // entriamo qui e' gia' l'istante di primo contatto. Nessuna
+        // ricerca aggiuntiva, nessun costo extra.
+        if (first_hit[i] == kNoHit) {
+          first_hit[i] = j;
+        }
+
+        // PROFONDITA': la sqrt serve solo all'overlap. Se il termine e'
+        // spento la saltiamo -- e' il loop piu' interno (batch x time).
+        if (!use_overlap_) {
+          continue;
+        }
+        const float closeness =
+          static_cast<float>(1.0 - std::sqrt(d2) / radius);
+        if (worst_case_) {
+          if (closeness > track_pen[i]) {
+            track_pen[i] = closeness;
           }
+        } else {
+          track_pen[i] += closeness;
         }
       }
     }
 
+    // Combinazione dei due termini, ciascuno col PROPRIO peso.
+    // NB: i pesi si applicano QUI, non piu' alla fine: cost_weight governa
+    // l'overlap, ttc_weight il termine temporale, e restano indipendenti.
     for (size_t i = 0; i < batch; ++i) {
-      penalty[i] += track_pen[i];
+      if (use_overlap_) {
+        const float c = weight_ * track_pen[i];
+        penalty[i] += c;
+        diag_sum_ovl += c;
+      }
+      if (first_hit[i] != kNoHit) {
+        ++diag_n_hit;
+        if (first_hit[i] < diag_tau_min) {
+          diag_tau_min = first_hit[i];
+        }
+        if (use_ttc_) {
+          const float tau = static_cast<float>(first_hit[i]) * dt;
+          float c = 1.0f / (tau + ttc_epsilon_);
+          if (std::fabs(ttc_power_ - 1.0f) > 1e-6f) {
+            c = std::pow(c, ttc_power_);   // percorso lento solo se esponente != 1
+          }
+          c *= ttc_weight_;
+          penalty[i] += c;
+          diag_sum_ttc += c;
+        }
+      }
     }
   }
 
@@ -197,7 +261,31 @@ void SpatioTemporalCritic::score(mppi::CriticData & data)
     if (power_ > 1) {
       p = std::pow(p, static_cast<float>(power_));
     }
-    data.costs(i) += p * weight_;
+    data.costs(i) += p;
+  }
+
+  // --- diagnostica aggregata (una riga ogni diag_period_calls_ chiamate) ---
+  // data.costs qui contiene GIA' il contributo degli altri critic (questo e'
+  // l'ultimo della lista), quindi il confronto penalita'/costo dice davvero
+  // quanto pesa questo critic sul totale.
+  if (diag_period_calls_ > 0 && (++score_calls_ % diag_period_calls_) == 0) {
+    float pen_max = 0.0f, cost_max = 0.0f;
+    for (size_t i = 0; i < batch; ++i) {
+      if (penalty[i] > pen_max) {
+        pen_max = penalty[i];
+      }
+      if (data.costs(i) > cost_max) {
+        cost_max = data.costs(i);
+      }
+    }
+    const double tau_min = (diag_tau_min == kNoHit)
+      ? -1.0 : static_cast<double>(diag_tau_min) * dt;
+    RCLCPP_INFO(
+      logger_,
+      "[STC] mode=%s tracce=%zu contatti=%zu/%zu tau_min=%.2fs | "
+      "overlap=%.1f ttc=%.1f | mia penalita' max=%.1f su costo max=%.1f",
+      cost_mode_.c_str(), diag_n_tracks, diag_n_hit, batch * diag_n_tracks,
+      tau_min, diag_sum_ovl, diag_sum_ttc, pen_max, cost_max);
   }
 
   // Viz scie dei PEDONI (solo con pedoni), sul loro topic separato.

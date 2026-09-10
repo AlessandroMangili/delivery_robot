@@ -82,7 +82,12 @@ controller_server:
       SpatioTemporalCritic:
         enabled: true
         tracks_topic: "/dynamic_tracks_state"
-        cost_weight: 40.0
+        cost_mode: "both"        # "overlap" | "inv_ttc" | "both"
+        cost_weight: 40.0        # peso del termine closeness (profondita')
+        ttc_weight: 20.0         # peso del termine 1/tau (tempo)
+        ttc_power: 1.0           # 1.0 = graduale · 2.0 = concentrato sull'imminente
+        ttc_epsilon: 0.1         # [s] tetto: costo max = (1/0.1)^ttc_power
+        diag_period_calls: 10    # 0 = diagnostica spenta · 10 = ~1 log/s
         cost_power: 1
         collision_radius: 0.5
         vel_std_gain: 0.4
@@ -91,9 +96,9 @@ controller_server:
         max_radius: 1.5
         min_ped_speed: 0.4
         max_track_age_s: 0.5
+        worst_case: true
         publish_predictions: true
         predictions_topic: "/spatiotemporal_critic/predictions"
-        worst_case: false
 
       ConstraintCritic:
         enabled: true
@@ -177,19 +182,26 @@ local_costmap:
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer"
         enabled: True
-        observation_sources: pointcloud
-        scan:
+        footprint_clearing_enabled: True
+        observation_sources: pc_mark pc_clear
+        pc_mark:                          # MARCA: solo cio' che sta sopra il terreno
           topic: /scan/points
           data_type: "PointCloud2"
-          min_obstacle_height: 0.8
-          max_obstacle_height: 2.0
-          clearing: True
           marking: True
-          #inf_is_valid: True
-          raytrace_max_range: 5.0
-          raytrace_min_range: 0.0
+          clearing: False
+          min_obstacle_height: 0.10
+          max_obstacle_height: 2.0
           obstacle_max_range: 4.5
-          obstacle_min_range: 0.0
+          obstacle_min_range: 0.35
+        pc_clear:                         # PULISCE: include il terreno, servono i capolinea
+          topic: /scan/points
+          data_type: "PointCloud2"
+          marking: False
+          clearing: True
+          min_obstacle_height: -0.5
+          max_obstacle_height: 2.0
+          raytrace_max_range: 5.0
+          raytrace_min_range: 0.35
 
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
