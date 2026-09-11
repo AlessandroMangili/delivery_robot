@@ -128,24 +128,23 @@ elevation_costmap_node:
     map_load_name: 'elevation1'
     autosave: false
 
-confinement_layer:
-  ros__parameters:
-    in_topic: /semantic_costmap            # semantic map in (latched)
-    out_topic: /confinement_cost           # confinement field out (latched)
-    sidewalk_cost_max: 15                  # celle con costo <= questo = marciapiede
-    conf_max: 40.0                         # costo di confinamento AL bordo del marciapiede
-    falloff: 0.4                           # [m] decadimento esponenziale verso il centro
-    include_unknown_as_edge: false         # false = l'ignoto NON respinge, cosi' il robot lo esplora
-
 ssrl_combiner:
   ros__parameters:
-    semantic_topic: /semantic_costmap      # mappa di misura (classi -> costi)
-    layer_topics: ['/confinement_cost']    # layer di rischio da sommare (futuro: elevation qui)
-    elevation_topic: /elevation_cost       # il nuovo topic sottoscritto
-    out_topic: /ssrl_costmap               # costmap finale per la global costmap Nav2
-    use_elevation: true          # false = solo semantica + confinement
-    w_elev: 0.6                            # aggressività dell'incremento (alza per far pesare di più la traversabilità)
-    soft_ceiling: 97                       # tetto del soft (100 riservato al letale)
-    elev_can_be_lethal: false    # true = comportamento vecchio (per l'A/B)
-    elev_lethal_thr: 92                    # sopra = ostacolo fisico → 100
+    semantic_topic: /semantic_costmap
+    elevation_topic: /elevation_cost
+    out_topic: /ssrl_costmap
+    # --- confinamento, ora calcolato qui ---
+    use_confinement: true
+    sidewalk_cost_max: 15
+    conf_max: 40.0
+    falloff: 0.4
+    include_unknown_as_edge: false
+    publish_confinement: true          # ripubblica /confinement_cost per RViz
+    confinement_topic: /confinement_cost
+    # --- elevation ---
+    use_elevation: true
+    w_elev: 0.6
+    soft_ceiling: 97
+    elev_can_be_lethal: false
+    elev_lethal_thr: 92
     grid_tol_cells: 0.01
