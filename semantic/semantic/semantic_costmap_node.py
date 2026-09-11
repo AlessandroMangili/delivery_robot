@@ -620,8 +620,9 @@ class SemanticCostmapNode(Node):
         CD[new_cand] = frame_cls[new_cand]
         CN[new_cand] = 1
 
-        CD[fresh & (CD != frame_cls)] = frame_cls[fresh & (CD != frame_cls)]
-        CN[fresh & (CD != frame_cls)] = 0
+        cambio_candidata = fresh & (CD != frame_cls)
+        CD[cambio_candidata] = frame_cls[cambio_candidata]
+        CN[cambio_candidata] = 0
         CN[fresh] = np.minimum(CN[fresh] + 1, 255)
 
         commit = ((fresh & (CN >= self.new_hits)) |

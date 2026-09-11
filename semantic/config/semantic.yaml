@@ -20,7 +20,7 @@ semantic_costmap_node:
     lidar_min_range: 0.4                   # [m] scarta i punti piu' vicini
 
     max_range: 5.5                         # [m] distanza max per peso-distanza e occlusioni (alzabile ora che e' LiDAR, es. 10)
-    map_write_max_range: 5.0               # [m] SCRIVI in mappa solo entro questa distanza (alzabile, es. 8-10, il LiDAR e' accurato lontano)
+    map_write_max_range: 3.0               # [m] SCRIVI in mappa solo entro questa distanza (alzabile, es. 8-10, il LiDAR e' accurato lontano)
     max_obstacle_height: 0.20              # [m] CLEARANCE: sopra questa quota (sul robot) non scrivere -> il robot ci passa sotto (panchine, tavoli, tettoie)
 
     # Full map publishing
@@ -96,7 +96,7 @@ elevation_costmap_node:
     sensor_var_dist: 0.0004            # coeff. * range^2 (piu' lontano = meno affidabile)
     var_init: 1.0                      # varianza cella mai vista
     var_max: 1.0                       # tetto varianza (inflazione)
-    process_var_rate: 0.05            # [m^2/s] inflazione nel tempo (SIM: sostituto della prop. di posa)
+    process_var_rate: 0.05   #0.005    # [m^2/s] inflazione nel tempo (SIM: sostituto della prop. di posa)
     maha_thresh: 5.0                   # gate outlier (rumore residuo)
     min_var_for_valid: 0.25            # var oltre = cella non affidabile -> ignoto
 
