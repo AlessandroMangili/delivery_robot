@@ -385,8 +385,13 @@ class ElevationCostmapNode(Node):
         self.get_logger().info(
             f'Elevation 2.5D (Kalman-per-cella, LiDAR-primary) pronto. frame={self.target}. '
             f'res={self.res} m. Uscita: {gp("out_topic").value}.')
+        
+        save_hint = self.map_save_path or os.path.join(self.maps_dir, 'elevation_map')
         if self.autosave:
             self.get_logger().info(f'AUTOSAVE alla chiusura (Ctrl-C) -> {self.map_save_path}')
+        self.get_logger().info(
+            'Salvataggio su richiesta: '
+            f'ros2 service call /elevation_costmap_node/save_map std_srvs/srv/Trigger  ->  {save_hint}')
 
     # ---------------- persistenza ----------------
     def resolve_maps_dir(self):
