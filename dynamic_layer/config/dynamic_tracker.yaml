@@ -12,7 +12,7 @@ pointcloud_detector:
     crop_max_z: 2.5
 
     # downsample
-    voxel_size: 0.05       # alza se il clustering è lento
+    voxel_size: 0.10       # alza se il clustering è lento
 
     # rimozione piano di terra (RANSAC)
     ground_dist_thresh: 0.08
