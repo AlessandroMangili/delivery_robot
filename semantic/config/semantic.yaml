@@ -10,7 +10,6 @@ semantic_costmap_node:
     camera_optical_frame: camera_rgb_optical_frame    # Change with real robot frame
     base_frame: base_footprint                        # Change with real robot frame
 
-    # Grid
     resolution: 0.05                       # [m/cell] risoluzione mappa (5 cm) -- giustificata dal density study (>=1 pt/cella fino a ~10 m)
     initial_size_m: 10.0                   # [m] lato iniziale, poi auto-grow
     grow_margin_m: 3.0                     # [m] margine aggiunto a ogni espansione
@@ -20,9 +19,8 @@ semantic_costmap_node:
     lidar_max_age_s: 0.3                   # [s] nuvola piu' vecchia di cosi' = non usata in quel frame
     lidar_min_range: 0.4                   # [m] scarta i punti piu' vicini
 
-    # Range
     max_range: 5.5                         # [m] distanza max per peso-distanza e occlusioni (alzabile ora che e' LiDAR, es. 10)
-    map_write_max_range: 5.0               # [m] SCRIVI in mappa solo entro questa distanza (alzabile, es. 8-10, il LiDAR e' accurato lontano)
+    map_write_max_range: 3.0               # [m] SCRIVI in mappa solo entro questa distanza (alzabile, es. 8-10, il LiDAR e' accurato lontano)
     max_obstacle_height: 0.20              # [m] CLEARANCE: sopra questa quota (sul robot) non scrivere -> il robot ci passa sotto (panchine, tavoli, tettoie)
 
     # Full map publishing
@@ -36,7 +34,6 @@ semantic_costmap_node:
 
     blocker_classes: [2,3,4,5,7,8,11,12,13,14,15,16,17,18]
 
-    # Map persistence
     map_save_name: 'map1'                  # vuoto = non salvare
     map_load_name: 'map1'                  # vuoto = parti da zero
     autosave: false                         # true = salva alla CHIUSURA del nodo
@@ -76,7 +73,6 @@ elevation_costmap_node:
     lidar_frame: base_scan      # Change with real robot frame
     camera_optical_frame: camera_rgb_optical_frame  # Change with real robot frame
 
-    # Grid (stessa risoluzione della semantica: layer co-registrati)
     resolution: 0.05
     initial_size_m: 10.0
     grow_margin_m: 3.0
@@ -94,15 +90,15 @@ elevation_costmap_node:
     camera_info_topic: /camera/camera_info
     seg_max_age_s: 0.3
     dynamic_classes: [11,12,13,14,15,16,17,18]
-    dyn_dilate_px: 6
+    dyn_dilate_px: 12
 
     # Modello Kalman (misura + predizione)
     sensor_var_base: 0.0009            # (0.03 m)^2 rumore base
     sensor_var_dist: 0.0004            # coeff. * range^2 (piu' lontano = meno affidabile)
     var_init: 1.0                      # varianza cella mai vista
     var_max: 1.0                       # tetto varianza (inflazione)
-    process_var_rate: 0.005            # [m^2/s] inflazione nel tempo (SIM: sostituto della prop. di posa)
-    maha_thresh: 3.0                   # gate outlier (rumore residuo)
+    process_var_rate: 0.05   #0.005    # [m^2/s] inflazione nel tempo (SIM: sostituto della prop. di posa)
+    maha_thresh: 5.0                   # gate outlier (rumore residuo)
     min_var_for_valid: 0.25            # var oltre = cella non affidabile -> ignoto
 
     # Derivazione COSTO (traversabilita': slope/roughness/step)
@@ -110,7 +106,13 @@ elevation_costmap_node:
     rough_min_known: 6                 # min vicini noti per validita'
     slope_crit: 0.35                   # [m/m] ~19 deg -> costo max
     rough_crit: 0.06                   # [m] std locale -> costo max
-    step_crit: 0.12                    # [m] salto (cordolo) -> costo max
+    step_crit: 0.06                    # [m] salto (cordolo) -> costo max
+
+    # ADDED
+    median_ksize: 5        # smoothing mediano (3=on; 0/1=off per confronto)
+    slope_dead: 0.04
+    rough_dead: 0.025
+    step_dead: 0.02
 
     # Publishing
     publish_period_s: 1.0
@@ -123,22 +125,27 @@ elevation_costmap_node:
     loc_std_resume_m: 0.5
     loc_cov_ema: 0.4
 
-    # Persistenza -- NOME DIVERSO da 'map1'! (i .npz hanno campi diversi: h/var/n vs grid/conf/cls)
     map_save_name: 'elevation1'
     map_load_name: 'elevation1'
     autosave: false
 
-confinement_layer:
-  ros__parameters:
-    in_topic: /semantic_costmap            # semantic map in (latched)
-    out_topic: /confinement_cost           # confinement field out (latched)
-    sidewalk_cost_max: 15                  # celle con costo <= questo = marciapiede
-    conf_max: 35.0                         # costo di confinamento AL bordo del marciapiede
-    falloff: 0.4                           # [m] decadimento esponenziale verso il centro
-    include_unknown_as_edge: false         # false = l'ignoto NON respinge, cosi' il robot lo esplora
-
 ssrl_combiner:
   ros__parameters:
-    semantic_topic: /semantic_costmap      # mappa di misura (classi -> costi)
-    layer_topics: ['/confinement_cost']    # layer di rischio da sommare (futuro: elevation qui)
-    out_topic: /ssrl_costmap               # costmap finale per la global costmap Nav2
+    semantic_topic: /semantic_costmap
+    elevation_topic: /elevation_cost
+    out_topic: /ssrl_costmap
+    # --- confinamento, ora calcolato qui ---
+    use_confinement: true
+    sidewalk_cost_max: 15
+    conf_max: 40.0
+    falloff: 0.4
+    include_unknown_as_edge: false
+    publish_confinement: true          # ripubblica /confinement_cost per RViz
+    confinement_topic: /confinement_cost
+    # --- elevation ---
+    use_elevation: true
+    w_elev: 0.6
+    soft_ceiling: 97
+    elev_can_be_lethal: false
+    elev_lethal_thr: 92
+    grid_tol_cells: 0.01
