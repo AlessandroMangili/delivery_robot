@@ -14,9 +14,10 @@ def generate_launch_description():
     use_gps = LaunchConfiguration('use_gps')
  
     declare_use_sim_time = DeclareLaunchArgument(
-        'use_sim_time', default_value='True',
+        'use_sim_time', default_value='False',
         description='true in simulazione, false sul robot reale.'
     )
+    
     declare_use_gps = DeclareLaunchArgument(
         'use_gps', default_value='True',
         description='false = non avvia navsat (per testare il fallback LiDAR senza GPS).'

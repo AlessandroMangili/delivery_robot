@@ -1,6 +1,6 @@
 ekf_local:
   ros__parameters:
-    use_sim_time: true    # false
+    use_sim_time: false
     frequency: 30.0
     sensor_timeout: 0.1
     two_d_mode: true
@@ -47,7 +47,7 @@ ekf_local:
 
 ekf_global:
   ros__parameters:
-    use_sim_time: true  # false
+    use_sim_time: false
     frequency: 30.0
     sensor_timeout: 0.1
     two_d_mode: true                 
@@ -105,7 +105,7 @@ ekf_global:
 
 navsat_transform_node:
   ros__parameters:
-    use_sim_time: true  #false
+    use_sim_time: false
     frequency: 30.0
     delay: 3.0                      
     magnetic_declination_radians: 0.0
