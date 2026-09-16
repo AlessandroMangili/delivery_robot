@@ -31,11 +31,6 @@ def generate_launch_description():
         parameters=[use_sim_time],
     )
 
-    confinement = Node(
-        package='semantic', executable='confinement_layer',
-        name='confinement_layer', output='screen',
-        parameters=[params, use_sim_time],
-    )
     combiner = Node(
         package='semantic', executable='ssrl_combiner',
         name='ssrl_combiner', output='screen',
@@ -47,6 +42,5 @@ def generate_launch_description():
         costmap,
         elevation,
         overlay,
-        confinement,
         combiner,
     ])
