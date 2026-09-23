@@ -579,7 +579,6 @@ class SemanticCostmapNode(Node):
                         float(bx), float(by), float(yaw_b))
 
         gi_u = gi[inside]; gj_u = gj[inside]
-        co_u = costs[inside].astype(np.float32)
         cl_u = classes[inside].astype(np.uint8)
         w_u = wpix[inside].astype(np.float32)
         if gi_u.size == 0:
@@ -587,60 +586,63 @@ class SemanticCostmapNode(Node):
             return
 
         flat = gj_u * self.gnx + gi_u
-        N = self.gnx * self.gny
         order = np.argsort(w_u)
         flat_s = flat[order]
-        frame_cost = np.full(N, -1.0, dtype=np.float32)
-        frame_w = np.full(N, -1.0, dtype=np.float32)
-        frame_cost[flat_s] = co_u[order]
-        frame_w[flat_s] = w_u[order]
-        seen = frame_w >= 0.0
-
-        frame_cls = np.full(N, 255, dtype=np.uint8)
-        frame_cls[flat_s] = cl_u[order]
+        # Si lavora solo sulle celle toccate da questo frame (poche migliaia):
+        # prima ogni maschera e array temporaneo era grande quanto l'intera
+        # mappa (~600k celle), ~15 ms per frame. inv conserva l'ordine per
+        # peso, quindi con celle duplicate vince ancora il peso piu' alto.
+        # Verificato bit a bit contro la versione a griglia intera.
+        u, inv = np.unique(flat_s, return_inverse=True)
+        frame_w = np.full(u.size, -1.0, dtype=np.float32)
+        frame_w[inv] = w_u[order]
+        frame_cls = np.full(u.size, 255, dtype=np.uint8)
+        frame_cls[inv] = cl_u[order]
 
         V = self.grid.ravel(); C = self.conf.ravel()
         CL = self.cls.ravel(); CD = self.cand.ravel(); CN = self.cand_n.ravel()
-        V_before = V.copy()
-        w = np.where(seen, frame_w, 0.0).astype(np.float32)
+        Vs, Cs, CLs, CDs, CNs = V[u], C[u], CL[u], CD[u], CN[u]
+        V_before = Vs.copy()
+        w = frame_w
 
-        known = seen & (CL != 255)
-        agree = known & (frame_cls == CL)
-        deny = known & (frame_cls != CL)
-        fresh = seen & (CL == 255)
+        known = CLs != 255
+        agree = known & (frame_cls == CLs)
+        deny = known & (frame_cls != CLs)
+        fresh = CLs == 255
 
-        C[agree] = np.minimum(C[agree] + self.confirm_gain * w[agree], self.conf_max)
-        CD[agree] = 255
-        CN[agree] = 0
+        Cs[agree] = np.minimum(Cs[agree] + self.confirm_gain * w[agree], self.conf_max)
+        CDs[agree] = 255
+        CNs[agree] = 0
 
-        C[deny] = C[deny] - self.deny_penalty * w[deny]
-        same_cand = deny & (CD == frame_cls)
-        new_cand = deny & (CD != frame_cls)
-        CN[same_cand] = np.minimum(CN[same_cand] + 1, 255)
-        CD[new_cand] = frame_cls[new_cand]
-        CN[new_cand] = 1
+        Cs[deny] = Cs[deny] - self.deny_penalty * w[deny]
+        same_cand = deny & (CDs == frame_cls)
+        new_cand = deny & (CDs != frame_cls)
+        CNs[same_cand] = np.minimum(CNs[same_cand] + 1, 255)
+        CDs[new_cand] = frame_cls[new_cand]
+        CNs[new_cand] = 1
 
-        cambio_candidata = fresh & (CD != frame_cls)
-        CD[cambio_candidata] = frame_cls[cambio_candidata]
-        CN[cambio_candidata] = 0
-        CN[fresh] = np.minimum(CN[fresh] + 1, 255)
+        cambio_candidata = fresh & (CDs != frame_cls)
+        CDs[cambio_candidata] = frame_cls[cambio_candidata]
+        CNs[cambio_candidata] = 0
+        CNs[fresh] = np.minimum(CNs[fresh] + 1, 255)
 
-        commit = ((fresh & (CN >= self.new_hits)) |
-                  (deny & (C <= 0.0) & (CN >= self.change_hits)))
+        commit = ((fresh & (CNs >= self.new_hits)) |
+                  (deny & (Cs <= 0.0) & (CNs >= self.change_hits)))
         if commit.any():
-            CL[commit] = frame_cls[commit]
-            V[commit] = self.cost_lut[frame_cls[commit]].astype(np.float32)
-            C[commit] = self.conf_init
-            CD[commit] = 255
-            CN[commit] = 0
+            CLs[commit] = frame_cls[commit]
+            Vs[commit] = self.cost_lut[frame_cls[commit]].astype(np.float32)
+            Cs[commit] = self.conf_init
+            CDs[commit] = 255
+            CNs[commit] = 0
 
+        V[u], C[u], CL[u], CD[u], CN[u] = Vs, Cs, CLs, CDs, CNs
         np.clip(C, 0.0, self.conf_max, out=C)
         accept = commit
 
         if accept.any():
             self._map_dirty = True
             self._dirty_since_save = True
-            old_vals = V_before[accept]; new_vals = V[accept]
+            old_vals = V_before[accept]; new_vals = Vs[accept]
             crossed = ((old_vals < 50) & (new_vals >= 50)) | \
                       ((old_vals >= 50) & (new_vals < 50)) | (old_vals < 0)
             self._significant_change = int(np.count_nonzero(crossed))
@@ -649,7 +651,9 @@ class SemanticCostmapNode(Node):
             if self._last_decay_t is not None:
                 dt = stamp_sec - self._last_decay_t
                 if dt > 0.0:
-                    C[~seen] *= self.conf_decay ** dt
+                    unseen = np.ones(C.size, dtype=bool)
+                    unseen[u] = False
+                    C[unseen] *= self.conf_decay ** dt
             self._last_decay_t = stamp_sec
 
         self.grid = V.reshape(self.gny, self.gnx)
