@@ -1,0 +1,135 @@
+yolo_detect_node:
+  ros__parameters:
+    use_sim_time: true
+    model_path: yolov8n.pt
+    image_topic: /camera/image
+    image_out_topic: /yolo/detections_image
+    det_out_topic: /yolo/detections
+    conf: 0.5
+    imgsz: 320
+    person_only: true
+    device: cpu
+    # 2: YOLO girava a ~18 Hz ma il tracker usa solo l'ultima detection 2D a
+    # ogni nuvola LiDAR (~4.5 Hz reali): 3 inferenze su 4 venivano buttate.
+    # A ~9 Hz l'ultima detection disponibile resta recente (<~110 ms).
+    process_every_n: 2
+
+pointpillars_detector:
+  ros__parameters:
+    use_sim_time: true
+    cloud_topic: /scan/points
+    detections_topic: /detections
+    markers_topic: /detections/markers
+    detections3d_topic: /detections3d
+    cfg_file: cfgs/custom_models/pointpillar.yaml
+    cfg_dir: /mnt/2tbpartition/mangili/OpenPCDet/tools
+    ckpt: /home/mangili/Downloads/checkpoint_epoch_80.pth
+    score_thresh: 0.30
+    debug_show_rejected: false
+    diag_period_frames: 20
+
+eagermot_tracker_node:
+  ros__parameters:
+    use_sim_time: true
+    detections3d_topic: /detections3d
+    yolo_topic: /yolo/detections
+    camera_info_topic: /camera/camera_info
+    tracks_topic: /dynamic_tracks_state
+    markers_topic: /tracks/markers
+    tracking_frame: odom
+    sensor_frame: base_scan
+    camera_frame: camera_rgb_optical_frame
+
+    # --- soglie EagerMOT (valori del paper, riga pedestrian di NuScenes) ---
+    theta_fusion: 0.3
+    theta_3d: 1.8
+    theta_2d: 0.5
+
+    # --- ciclo di vita, in FRAME. A 5 Hz (vedi nota Hz in fondo) 1 frame = 0.2 s ---
+    # age_max alzato da 3 a 6: a 5 Hz, 3 frame morivano dopo 0.6 s soli, troppo
+    # aggressivo per un pedone che coasta un paio di frame su misura 3D persa.
+    # age_max alzato ancora a 10: dal vivo lo stesso oggetto fermo moriva e
+    # rinasceva con ID nuovo (18 -> 24 -> 35, a 0.1 m) perche' il detector lo
+    # perdeva piu' a lungo di 6 frame, e il detector arriva a 100-500 ms.
+    # age_max = per quanto si RICORDA un ID; confirm_coast_frames (sotto) =
+    # per quanto lo si PUBBLICA senza misure. Con age_max > coast una traccia
+    # persa sparisce dal critic dopo 5 frame, ma se ricompare entro 10
+    # riprende il suo ID invece di nascerne uno nuovo.
+    age_max: 10
+    age_2d: 3
+
+    # --- le DUE deviazioni dal paper: ENTRAMBE accese qui, sono la cura del
+    #     blinking. Vedi le note nel docstring di EagerTrack.confermata(). ---
+    # age_3d: -1 = regola stretta del paper (serve evidenza 2D). Con un LiDAR
+    #   a 360 gradi e una camera a ~72, un pedone di lato non ha mai evidenza
+    #   2D e la regola del paper lo scarterebbe SEMPRE dal critic pur essendo
+    #   tracciato benissimo in 3D. age_3d=5 lo conferma anche col solo 3D.
+    # age_3d = 8 = confirm_coast_frames: con 5 una traccia vista solo dal LiDAR
+    #   smetteva di essere confermata dopo 5 frame senza misure, prima degli 8
+    #   di coasting, e spariva (replay su bag: 22 episodi di coast su 48
+    #   troncati esattamente al 5o frame). Con 8: buchi di pubblicazione 9 -> 4,
+    #   frame di pedoni al critic +8%, nessuno statico o doppione in piu'.
+    age_3d: 8
+    # confirm_coast_frames: 0 = conferma non appiccicosa (regola del paper):
+    #   un solo frame senza match de-conferma la traccia -> sparisce
+    #   dall'uscita per un frame e rientra subito dopo = lo sfarfallio
+    #   osservato. confirm_coast_frames=5 la fa sopravvivere a 5 frame senza
+    #   match (~1 s a 5 Hz).
+    # 8 invece di 5 (dal bag il tracker gira a ~10 Hz di tempo simulato,
+    # quindi ~0.8 s): un pedone che attraversa davanti al robot spariva dal
+    # critic dopo pochi frame di detection mancate, proprio
+    # nell'attraversamento. Per le tracce solo-LiDAR vale solo con age_3d >= 8. Il moto e' quasi rettilineo, quindi la predizione
+    # a velocita' costante regge; e intanto pos_std cresce e allarga l'alone.
+    confirm_coast_frames: 8
+    # dup_suppress_radius: 0.0 = regola del paper (ogni istanza 3D orfana
+    #   apre una traccia). Osservato dal vivo: traccia sparita e una nuova
+    #   nata 0.5 s dopo a 0.3 m = stesso pedone, ID nuovo. Con 0.5 un'istanza
+    #   orfana a meno di 0.5 m da una traccia viva la aggiorna (se lo stadio 1
+    #   l'ha mancata) o viene scartata (doppia detection). 0.5 m ~ ingombro di
+    #   un pedone: due persone piu' vicine di cosi' sono spalla a spalla.
+    dup_suppress_radius: 0.5
+    # min_hits_3d: 0 = nessun vincolo. Con age_3d una traccia vista SOLO dal
+    #   LiDAR era confermata al primo frame. Su un bag di 88 s: 9 statici
+    #   fantasma su 13 e tutti i doppioni accanto a un pedone in moto (il 238)
+    #   avevano UN solo aggiornamento in tutta la vita, ma restavano pubblicati
+    #   ~1 s. Con 3 (replay sullo stesso bag): statici pubblicati 13 -> 2,
+    #   frame con doppioni 31 -> 0, nessun pedone in moto perso e nessun
+    #   ritardo in piu' (il critic aspetta comunque ~3 frame per la velocita').
+    #   La conferma via camera (age_2d) non ha questo vincolo.
+    min_hits_3d: 3
+
+    # --- covarianze del Kalman ---
+    # I default AB3DMOT (p_vel=10000, q_pos=1.0, r_meas=1.0) sono tarati su
+    # AUTO KITTI a 10 Hz. Con quelli, simulando il filtro su un pedone a 1 m/s
+    # tracciato senza perdere un frame, vel_std restava a ~1.0 m/s dopo 6 s:
+    # MAI sotto max_vel_std=0.8 del critic MPPI (navigation.yaml), che quindi
+    # scartava ogni traccia e sembrava non ricevere nulla dal tracker.
+    #   - q_pos=1.0 dice che il pedone "salta" a caso di 1 m ogni frame oltre
+    #     al moto a velocita' costante: la velocita' diventa inosservabile.
+    #   - r_meas=1.0 dice che il LiDAR sbaglia il centro di ~1 m: il filtro si
+    #     fida poco delle misure e converge lento.
+    # Con p_vel=9, q_pos=0.1, r_meas=0.1 (stessa simulazione): vel_std < 0.8
+    # dopo ~6 frame (1.2 s), a regime 0.43; pos_std 0.80 -> 0.25 (aloni del
+    # critic meno gonfiati); errore di predizione in una svolta a 90 gradi
+    # invariato (0.50 m contro 0.51 m). q_vel non va alzato: alza vel_std a
+    # regime quasi senza migliorare le svolte.
+    # Seconda taratura: q_pos=0.1 diceva che la posizione salta a caso di 0.3 m
+    # a ogni frame, e quel rumore si confonde con la velocita'. Risultato: un
+    # pedone nuovo che attraversa a 1.2 m/s veniva accettato dal critic solo
+    # dopo 7 frame (1.26 s). Con q_pos=0.01 (la posizione non salta) e
+    # q_vel=0.05 (le accelerazioni le assorbe la velocita', che e' il modello
+    # corretto) bastano 3 frame (0.54 s), che e' il minimo possibile: servono
+    # 2 misure per avere una velocita'. L'errore in una svolta a 90 gradi
+    # migliora (0.37 m contro 0.44) e vel_std a regime resta 0.44.
+    kf_p_pos: 10.0
+    kf_p_vel: 9.0
+    kf_q_pos: 0.01
+    kf_q_vel: 0.05
+    kf_r_meas: 0.03
+
+    # --- pubblicazione ---
+    min_speed: 0.0
+    marker_z: 0.6
+    arrow_time_scale: 1.0
+    diag_period_frames: 20
+    tf_timeout_s: 0.10

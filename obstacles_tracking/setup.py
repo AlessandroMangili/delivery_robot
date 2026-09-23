@@ -2,7 +2,7 @@ from setuptools import find_packages, setup
 import os
 from glob import glob
 
-package_name = 'dynamic_layer'
+package_name = 'obstacles_tracking'
 
 setup(
     name=package_name,
@@ -19,7 +19,10 @@ setup(
     zip_safe=True,
     maintainer='alessandro',
     maintainer_email='alessandro.mangili1@studenti.unimi.it',
-    description='TODO: Package description',
+    description=(
+        'Detection (PointPillars, YOLO) e tracking dinamico EagerMOT: fusione, '
+        'tracker a due stadi, ciclo di vita nascita/conferma/morte.'
+    ),
     license='TODO: License declaration',
     extras_require={
         'test': [
@@ -28,9 +31,9 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'pointcloud_detector = dynamic_layer.pointcloud_detector:main',
-            'lidar3d_tracker = dynamic_layer.lidar3d_tracker:main',
-            'bbox_lidar_detector = dynamic_layer.bbox_lidar_detector:main',
+            'eagermot_node = obstacles_tracking.eagermot_node:main',
+            'pointpillars_detector = obstacles_tracking.pointpillars_detector:main',
+            'yolo_detect_node = obstacles_tracking.yolo_detect_node:main',
         ],
     },
 )
