@@ -120,12 +120,10 @@ void SpatioTemporalCritic::score(mppi::CriticData & data)
     return;
   }
 
-  // === VIZ TRAIETTORIA ROBOT: SEMPRE, su topic dedicato ===
-  // Pubblicata a ogni ciclo di controllo, indipendente dai pedoni. E' la media
-  // del batch gia' calcolato: costo trascurabile (nessuna candidate ricostruita).
-  if (publish_robot_traj_ && robot_pub_) {
-    publishRobotTrajectory(data, dt, time);
-  }
+  // La viz del robot mostra il campione a costo minimo: va pubblicata quando
+  // data.costs e' definitivo, cioe' dopo la nostra penalita' (siamo l'ultimo
+  // critic) oppure su un'uscita anticipata, dove non aggiungiamo nulla.
+  const bool pub_robot = publish_robot_traj_ && robot_pub_;
 
   // Copio le tracce E lo stamp sotto lock (arrivano su un altro thread).
   std::vector<TrackSnapshot> tracks;
@@ -135,18 +133,23 @@ void SpatioTemporalCritic::score(mppi::CriticData & data)
     tracks = tracks_;
     tracks_stamp = tracks_stamp_;
   }
-  // Il termine di collisione futura ha senso solo con pedoni: se non ce ne
-  // sono, la viz del robot e' gia' stata pubblicata sopra, quindi esco.
+  // Il termine di collisione futura ha senso solo con pedoni.
   if (tracks.empty()) {
+    if (pub_robot) {
+      publishRobotTrajectory(data, dt, time);
+    }
     return;
   }
 
   // --- scarto tracce stantie: age = now - stamp dell'ultimo TrackArray ---
   // Senza questo, se il tracker si ferma il critic propaga all'infinito la CV
-  // sull'ultima traccia. La viz del robot e' gia' uscita sopra, quindi esco pulito.
+  // sull'ultima traccia.
   if (auto node = parent_.lock()) {
     const double age = (node->now() - rclcpp::Time(tracks_stamp)).seconds();
     if (age > static_cast<double>(max_track_age_s_)) {
+      if (pub_robot) {
+        publishRobotTrajectory(data, dt, time);
+      }
       return;
     }
   }
@@ -264,7 +267,11 @@ void SpatioTemporalCritic::score(mppi::CriticData & data)
     data.costs(i) += p;
   }
 
-  // --- diagnostica aggregata (una riga ogni diag_period_calls_ chiamate) ---
+  if (pub_robot) {
+    publishRobotTrajectory(data, dt, time);
+  }
+
+  // --- diagnostica aggregata ---
   // data.costs qui contiene GIA' il contributo degli altri critic (questo e'
   // l'ultimo della lista), quindi il confronto penalita'/costo dice davvero
   // quanto pesa questo critic sul totale.
@@ -371,6 +378,17 @@ void SpatioTemporalCritic::publishRobotTrajectory(
     return;
   }
 
+  // Campione a costo minimo (costo TOTALE: siamo l'ultimo critic). NON e' la
+  // traiettoria eseguita (quella e' "Optimal Trajectory" su /trajectories, da
+  // visualize: true), ma e' un campione reale, a differenza della media del
+  // batch, che puo' passare dove nessun campione passa.
+  size_t best = 0;
+  for (size_t i = 1; i < batch; ++i) {
+    if (data.costs(i) < data.costs(best)) {
+      best = i;
+    }
+  }
+
   size_t time_pred = time;
   if (dt > 0.0f) {
     const size_t h = static_cast<size_t>(prediction_horizon_s_ / dt);
@@ -389,14 +407,10 @@ void SpatioTemporalCritic::publishRobotTrajectory(
   clear.action = visualization_msgs::msg::Marker::DELETEALL;
   arr.markers.push_back(clear);
 
-  // UNA linea (LINE_STRIP) che collega i punti MEDI del batch a ogni istante:
-  // baricentro di dove il robot pensa di andare. NB: media delle traiettorie
-  // campionate (~ nominale), non l'ottima esatta. Campiono ogni istante per una
-  // linea liscia (batch*time e' trascurabile per la CPU).
   visualization_msgs::msg::Marker line;
   line.header.frame_id = world_frame_;   // "odom" di default
   line.header.stamp = stamp;
-  line.ns = "robot_mean";
+  line.ns = "robot_best_sample";
   line.id = 0;
   line.type = visualization_msgs::msg::Marker::LINE_STRIP;
   line.action = visualization_msgs::msg::Marker::ADD;
@@ -410,17 +424,9 @@ void SpatioTemporalCritic::publishRobotTrajectory(
   line.color.a = 0.9f;
 
   for (size_t j = 0; j < time_pred; ++j) {
-    double mx = 0.0, my = 0.0;
-    for (size_t i = 0; i < batch; ++i) {
-      mx += traj_x(i, j);
-      my += traj_y(i, j);
-    }
-    mx /= static_cast<double>(batch);
-    my /= static_cast<double>(batch);
-
     geometry_msgs::msg::Point p;
-    p.x = mx;
-    p.y = my;
+    p.x = traj_x(best, j);
+    p.y = traj_y(best, j);
     p.z = 0.15;
     line.points.push_back(p);
   }
