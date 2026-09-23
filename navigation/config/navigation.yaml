@@ -64,11 +64,16 @@ controller_server:
       temperature: 0.1            # era 0.3: PIU' BASSO = si concentra sulla traiettoria migliore e SCEGLIE un lato, invece di mediare sx+dx -> dritto.
       gamma: 0.015
       motion_model: "DiffDrive"
-      visualize: false            
+      # visualize: pubblica su /trajectories la traiettoria OTTIMA (namespace
+      # "Optimal Trajectory": control_sequence aggiornata e integrata, quella
+      # che MPPI esegue) e un sottoinsieme dei candidati.
+      visualize: true
       regenerate_noises: true
 
       TrajectoryVisualizer:
-        trajectory_step: 5
+        # 2000 = un solo candidato: interessa la Optimal Trajectory. Con 100 erano
+        # 620 marker per messaggio (~2900/s), uno per punto, un peso per RViz.
+        trajectory_step: 2000
         time_step: 3
 
       AckermannConstraints:
@@ -90,7 +95,10 @@ controller_server:
         diag_period_calls: 10    # 0 = diagnostica spenta · 10 = ~1 log/s
         diag_csv_path: "/tmp/stc.csv"
         cost_power: 1
-        collision_radius: 0.5
+        # contatto fisico = robot_radius 0.22 + pedone 0.30 = 0.52 m; +0.20 di
+        # margine (= danger_margin del proximity monitor). Con 0.5 l'alone era
+        # piu' piccolo del contatto quando pos_std e' basso.
+        collision_radius: 0.72
         vel_std_gain: 0.4
         max_vel_std: 0.8
         prediction_horizon_s: 3.0

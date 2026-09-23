@@ -43,11 +43,10 @@ protected:
     const std::vector<TrackSnapshot> & tracks,
     float dt, size_t time);
 
-  // Pubblica la traiettoria del ROBOT (media del batch), su un topic SEPARATO
-  // e a OGNI ciclo di controllo, indipendente dalla presenza di pedoni.
-  // NB: e' la MEDIA delle traiettorie campionate (~ nominale), non l'ottima
-  // esatta di MPPI; e' un ripiego leggero (nessun calcolo extra: media il batch
-  // gia' prodotto dall'ottimizzatore) al posto di visualize=true.
+  // Pubblica il campione a costo minimo del batch (debug del critic), su un
+  // topic SEPARATO, a ogni chiamata di score(). Va chiamata a costi definitivi.
+  // La traiettoria eseguita da MPPI e' invece "Optimal Trajectory" su
+  // /trajectories (visualize: true).
   void publishRobotTrajectory(
     const mppi::CriticData & data, float dt, size_t time);
 
