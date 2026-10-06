@@ -7,14 +7,17 @@ ekf_local:
     transform_time_offset: 0.0
     transform_timeout: 0.0
     print_diagnostics: true
-    publish_tf: true
+    # false: hunter_base (driver AgileX) e' gia' l'unico publisher di odom->base_footprint.
+    # Se ekf_local pubblicasse anche lui la stessa tf avremmo due broadcaster sullo stesso
+    # arco (tf "sdoppiata"/instabile). L'output fuso resta disponibile su /odometry/local.
+    publish_tf: false
 
     map_frame: map
     odom_frame: odom
-    base_link_frame: base_footprint   # Change with real robot frame
+    base_link_frame: base_footprint
     world_frame: odom
 
-    odom0: /odom    # Change with real topic
+    odom0: /odom
     odom0_config: [false, false, false,
                    false, false, false,
                    true,  true,  false,
@@ -24,7 +27,7 @@ ekf_local:
     odom0_differential: false
     odom0_relative: false
 
-    odom1: /Odometry
+    odom1: /Odometry   # FAST-LIO (non ancora attivo): riserva per quando ci sara' lidar odometry
     odom1_config: [true,  true,  false,
                    false, false, true,
                    false, false, false,
@@ -33,7 +36,7 @@ ekf_local:
     odom1_differential: true
     odom1_queue_size: 10
 
-    imu0: /imu    # Change with real topic
+    imu0: /imu/data   # Xsens MTi (xsens_mti_ros2_driver)
     imu0_config: [false, false, false,
                   false, false, true,
                   false, false, false,
@@ -50,18 +53,20 @@ ekf_global:
     use_sim_time: false
     frequency: 30.0
     sensor_timeout: 0.1
-    two_d_mode: true                 
+    two_d_mode: true
     transform_time_offset: 0.0
     transform_timeout: 0.0
     print_diagnostics: true
+    # true: nessun altro nodo pubblica map->odom, quindi ekf_global e' l'unico
+    # broadcaster di questo arco (nessun conflitto con hunter_base).
     publish_tf: true
 
     map_frame: map
     odom_frame: odom
-    base_link_frame: base_footprint   # Change with real robot frame
-    world_frame: map                
+    base_link_frame: base_footprint
+    world_frame: map
 
-    odom0: /odom    # Change with real topic
+    odom0: /odom
     odom0_config: [false, false, false,
                    false, false, false,
                    true,  true,  false,
@@ -71,7 +76,7 @@ ekf_global:
     odom0_differential: false
     odom0_relative: false
 
-    imu0: /imu    # Change with real topic
+    imu0: /imu/data   # Xsens MTi (xsens_mti_ros2_driver)
     imu0_config: [false, false, false,
                   false, false, true,
                   false, false, false,
@@ -93,7 +98,7 @@ ekf_global:
     odom1_relative: false
 
 
-    # FAST-LIO nel global: riserva assoluta durante i buchi GPS
+    # FAST-LIO nel global: riserva assoluta durante i buchi GPS (non ancora attivo)
     odom2: /Odometry
     odom2_config: [true,  true,  false,
                    false, false, true,
@@ -107,8 +112,8 @@ navsat_transform_node:
   ros__parameters:
     use_sim_time: false
     frequency: 30.0
-    delay: 3.0                      
-    magnetic_declination_radians: 0.0
+    delay: 3.0
+    magnetic_declination_radians: 0.0   # TODO: declinazione magnetica del sito di test (0.0 = nord magnetico=nord vero)
     yaw_offset: 0.0
     zero_altitude: true
     broadcast_utm_transform: false

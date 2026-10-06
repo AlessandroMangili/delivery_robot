@@ -1,26 +1,22 @@
-gt_segmentation_relay:
-  ros__parameters:
-    labels_topic: /semantic/labels_map     # Gazebo semantic camera topic (input)
-    out_topic: /semantic/segmentation      # segmentation in Cityscapes IDs (output)
-    publish_overlay: true                  # also publish the coloured debug overlay
-
 semantic_costmap_node:
   ros__parameters:
-    target_frame: map                                 # persistent map frame (fixed, global)
-    camera_optical_frame: camera_rgb_optical_frame    # Change with real robot frame
+    target_frame: odom                                 # persistent map frame (fixed, global)
+    camera_optical_frame: camera_optical               # camera1: sorgente della segmentazione YOLO (su camera2 il modello vede solo 'road')
+    camera_info_topic: /camera1/camera_info
+    seg_topic: /semantic/segmentation
     base_frame: base_footprint                        # Change with real robot frame
 
     resolution: 0.05                       # [m/cell] risoluzione mappa (5 cm) -- giustificata dal density study (>=1 pt/cella fino a ~10 m)
     initial_size_m: 10.0                   # [m] lato iniziale, poi auto-grow
     grow_margin_m: 3.0                     # [m] margine aggiunto a ogni espansione
 
-    lidar_topic: /scan/points   # Change with real topic
-    lidar_frame: base_scan      # Change with real robot frame
+    lidar_topic: /rslidar_points          
+    lidar_frame: rslidar
     lidar_max_age_s: 0.3                   # [s] nuvola piu' vecchia di cosi' = non usata in quel frame
     lidar_min_range: 0.4                   # [m] scarta i punti piu' vicini
 
-    max_range: 5.5                         # [m] distanza max per peso-distanza e occlusioni (alzabile ora che e' LiDAR, es. 10)
-    map_write_max_range: 3.0               # [m] SCRIVI in mappa solo entro questa distanza (alzabile, es. 8-10, il LiDAR e' accurato lontano)
+    max_range: 10.0                        # [m] distanza max per peso-distanza e occlusioni (>= map_write_max_range)
+    map_write_max_range: 8.0               # [m] camera1 vede il terreno solo da ~3-5 m: con 3.0 non scriverebbe quasi nulla
     max_obstacle_height: 0.20              # [m] CLEARANCE: sopra questa quota (sul robot) non scrivere -> il robot ci passa sotto (panchine, tavoli, tettoie)
 
     # Full map publishing
@@ -59,7 +55,7 @@ semantic_costmap_node:
     change_hits: 2         # conferme consecutive della classe OPPOSTA per ribaltare una cella (oltre a C che arriva a 0)
 
     # Gate di localizzazione ROBUSTO (EMA + isteresi)
-    use_loc_quality_gate: true             # abilita/disabilita il gate
+    use_loc_quality_gate: false             # abilita/disabilita il gate
     loc_pose_topic: /odometry/global       # topic posa-con-covarianza
     loc_cov_source: odometry               # 'odometry' per EKF (robot_localization)
     loc_std_suspend_m: 1.0                 # [m] std liscia sopra questo -> SOSPENDI
@@ -68,26 +64,26 @@ semantic_costmap_node:
 
 elevation_costmap_node:
   ros__parameters:
-    target_frame: map
+    target_frame: odom
     base_frame: base_footprint  # Change with real robot frame
-    lidar_frame: base_scan      # Change with real robot frame
-    camera_optical_frame: camera_rgb_optical_frame  # Change with real robot frame
+    lidar_frame: rslidar
+    camera_optical_frame: camera_optical               # camera1: sorgente della segmentazione YOLO (su camera2 il modello vede solo 'road')
 
     resolution: 0.05
     initial_size_m: 10.0
     grow_margin_m: 3.0
 
     # LiDAR (geometria)
-    lidar_topic: /scan/points   # Change with real topic
+    lidar_topic: /rslidar_points
     lidar_max_age_s: 0.3
     lidar_min_range: 0.4
-    map_write_max_range: 5.0
+    map_write_max_range: 8.0           # [m] camera1 vede il terreno solo da ~3-5 m
     elev_min_rel: -1.0                 # [m] sotto (rel. al robot) = buco profondo: scartato
     elev_max_rel: 1.0                  # [m] sopra = overhead (chiome/insegne): scartato
 
     # Camera + segmentazione (SOLO per escludere i dinamici)
     seg_topic: /semantic/segmentation
-    camera_info_topic: /camera/camera_info
+    camera_info_topic: /camera1/camera_info
     seg_max_age_s: 0.3
     dynamic_classes: [11,12,13,14,15,16,17,18]
     dyn_dilate_px: 12
@@ -119,7 +115,7 @@ elevation_costmap_node:
     out_topic: /elevation_cost
 
     # Gate di localizzazione (stesso schema del semantico)
-    use_loc_quality_gate: true
+    use_loc_quality_gate: false
     loc_pose_topic: /odometry/global
     loc_std_suspend_m: 1.0
     loc_std_resume_m: 0.5
@@ -149,3 +145,31 @@ ssrl_combiner:
     elev_can_be_lethal: false
     elev_lethal_thr: 92
     grid_tol_cells: 0.01
+
+seg_infer_node:
+  ros__parameters:
+    image_topic: /camera1/image_raw
+    seg_topic: /semantic/segmentation
+    image_encoding: bgr8
+
+    # --- Modello / inferenza ---
+    model_path: yolo26n-sem.pt
+    device: cuda:0
+    imgsz: 1024
+    half: true
+    warmup: true
+
+    # --- Contratto col consumer ---
+    publish_at_input_res: true             # OBBLIGATORIO: seg alla stessa risoluzione della CameraInfo di camera2
+    ignore_id: 255
+
+    # Remap opzionale id-modello -> trainId. Vuoto = identita' (pesi ufficiali Cityscapes).
+    label_remap: ""
+
+    log_period_s: 5.0
+    
+semantic_overlay_node:
+  ros__parameters:
+    rgb_topic: /camera1/image_raw          # STESSA camera di seg_infer_node.image_topic (stamp identici)
+    seg_topic: /semantic/segmentation
+    out_topic: /semantic/overlay_rgb       # da guardare in RViz / rqt_image_view

@@ -1,18 +1,18 @@
 pointcloud_detector:
   ros__parameters:
-    use_sim_time: true
-    input_topic: /scan/points
+    use_sim_time: false
+    input_topic: /rslidar_points
     detections_topic: /detections
     markers_topic: /detections/markers
 
     # crop
     min_range: 0.30        # scarta il corpo del robot / punti troppo vicini
-    max_range: 12.0        # oltre, il LiDAR è rado/rumoroso
+    max_range: 8.0        # oltre, il LiDAR è rado/rumoroso
     crop_min_z: -1.0       # box in z, frame sensore (base_scan)
     crop_max_z: 2.5
 
     # downsample
-    voxel_size: 0.05       # alza se il clustering è lento
+    voxel_size: 0.15       # alza se il clustering è lento
 
     # rimozione piano di terra (RANSAC)
     ground_dist_thresh: 0.08
@@ -40,7 +40,7 @@ pointcloud_detector:
 
 lidar3d_tracker:
   ros__parameters:
-    use_sim_time: true
+    use_sim_time: false
     input_topic: /detections
     tracking_frame: odom          # frame fisso: NON base_scan (ruota col robot)
     markers_topic: /tracks/markers
@@ -71,15 +71,15 @@ lidar3d_tracker:
     demote_frames: 8             # frame lenti consecutivi per retrocedere (anti-lampeggio)
 
     # cross-check con la mappa semantica statica
-    use_static_map_gate: true
+    use_static_map_gate: false
     static_map_topic: /semantic_costmap
     static_cost_thresh: 99          # 100 = struttura dura mappata (muro/edificio/albero)
     static_gate_radius_cells: 2     # finestra di celle attorno alla traccia (assorbe il jitter)
     # gate semantico camera sulle tracce (/semantic/segmentation, ID Cityscapes)
     use_semantic_gate: true
     seg_topic: /semantic/segmentation
-    camera_info_topic: /camera/camera_info
-    camera_frame: camera_rgb_optical_frame
+    camera_info_topic: /camera_info
+    camera_frame: camera
     probe_height: 0.9              # [m] quota a cui proiettare la traccia (mezzo busto)
     probe_patch: 2                # semi-finestra pixel per il voto di maggioranza
     sem_static_hits: 2            # letture statiche consecutive per scartare la traccia

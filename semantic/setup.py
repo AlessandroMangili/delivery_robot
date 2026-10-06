@@ -13,6 +13,7 @@ setup(
         ('share/' + package_name, ['package.xml']),
         (os.path.join('share', package_name, 'launch'), glob('launch/*.launch.py')),
         (os.path.join('share', package_name, 'config'), glob('config/*.yaml')),
+        (os.path.join('share', package_name, 'models'), glob('models/*.pt')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -29,7 +30,8 @@ setup(
         'console_scripts': [
             'semantic_overlay_node = semantic.semantic_overlay_node:main',
             'semantic_costmap_node = semantic.semantic_costmap_node:main',
-            'gt_segmentation_node = semantic.gt_segmentation_relay:main',
+            'seg_infer_node = semantic.seg_infer_node:main',
+            'image_brighten_node = semantic.image_brighten_node:main',
             'confinement_layer = semantic.confinement_layer:main',
             'ssrl_combiner = semantic.ssrl_combiner:main',
             'elevation_costmap_node = semantic.elevation_costmap_node:main',

@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.8)
+project(hunter)
+find_package(ament_cmake REQUIRED)
+install(DIRECTORY description launch DESTINATION share/${PROJECT_NAME})
+ament_package()

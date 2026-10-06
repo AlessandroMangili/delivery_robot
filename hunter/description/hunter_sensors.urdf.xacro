@@ -1,0 +1,98 @@
+<?xml version="1.0"?>
+<robot name="hunter_with_sensors" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <xacro:include filename="$(find hunter_description)/description/robot.urdf.xacro"/>
+
+  <link name="base_footprint"/>
+  <joint name="base_footprint_to_base_link" type="fixed">
+    <parent link="base_footprint"/>
+    <child link="base_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <material name="sensor_dark_grey">
+    <color rgba="0.35 0.35 0.35 1.0"/>
+  </material>
+
+  <!-- Mesh RSLidar non disponibile (nessun pacchetto *_description Robosense nel
+       workspace): placeholder cilindrico con ingombro indicativo. Sostituire con
+       la mesh reale se/quando disponibile. -->
+  <link name="rslidar">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.05" length="0.07"/>
+      </geometry>
+      <material name="sensor_dark_grey"/>
+    </visual>
+  </link>
+  <!-- roll/pitch/z dal piano del terreno visto dal LiDAR (calib/lidar_ground.py,
+       mediana su 6 luoghi a robot fermo, dispersione ~0.25 deg). x, y, yaw non
+       osservabili dal terreno: restano quelli misurati a mano (era 0 0 0.95). -->
+  <joint name="base_to_rslidar" type="fixed">
+    <parent link="base_footprint"/>
+    <child link="rslidar"/>
+    <origin xyz="-0.21 0 0.989" rpy="0.0374 0.0127 0"/>
+  </joint>
+
+  <link name="camera_link">
+    <visual>
+      <origin xyz="0 0 0.01425" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://flir_camera_description/meshes/flir_blackfly_s.stl"/>
+      </geometry>
+      <material name="sensor_dark_grey"/>
+    </visual>
+  </link>
+  <joint name="base_to_camera" type="fixed">
+    <parent link="base_footprint"/>
+    <child link="camera_link"/>
+    <origin xyz="-0.10 0 0.83" rpy="0 0 0"/>
+  </joint>
+  <!-- frame ottico (z avanti): convenzione REP-103, NON cambiare la rotazione.
+       Se la camera e' inclinata verso il basso, metti il pitch nel joint sopra. -->
+  <link name="camera_optical"/>
+  <joint name="camera_to_optical" type="fixed">
+    <parent link="camera_link"/>
+    <child link="camera_optical"/>
+    <origin xyz="0 0 0" rpy="-1.5708 0 -1.5708"/>
+  </joint>
+
+	<link name="camera2_link">
+	  <visual>
+	    <origin xyz="0 0 0.01425" rpy="0 0 0"/>
+	    <geometry>
+	      <mesh filename="package://flir_camera_description/meshes/flir_blackfly_s.stl"/>
+	    </geometry>
+	    <material name="sensor_dark_grey"/>
+	  </visual>
+	</link>
+	<joint name="base_to_camera2" type="fixed">
+	  <parent link="base_footprint"/>
+	  <child link="camera2_link"/>
+	  <origin xyz="-0.085 -0.07 0.80" rpy="0 0.3491 0"/>
+	</joint>
+
+	<!-- Frame ottico REP-103 -->
+	<link name="camera2_optical"/>
+	<joint name="camera2_to_optical" type="fixed">
+	  <parent link="camera2_link"/>
+	  <child link="camera2_optical"/>
+	  <origin xyz="0 0 0" rpy="-1.5708 0 -1.5708"/>
+	</joint>
+
+  <link name="imu_link"/>
+  <joint name="base_to_imu" type="fixed">
+    <parent link="base_footprint"/>
+    <child link="imu_link"/>
+    <origin xyz="-0.21 0 0.05" rpy="0 0 0"/>
+  </joint>
+
+  <link name="gps_link"/>
+  <joint name="base_to_gps" type="fixed">
+    <parent link="base_footprint"/>
+    <child link="gps_link"/>
+    <origin xyz="-0.21 -0.10 0.95" rpy="0 0 0"/>
+  </joint>
+
+</robot>

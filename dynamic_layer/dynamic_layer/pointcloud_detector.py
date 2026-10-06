@@ -16,20 +16,61 @@ from visualization_msgs.msg import Marker, MarkerArray
 from std_msgs.msg import ColorRGBA
 
 
-# ---------------------------------------------------------------------------
-# Funzioni geometriche pure (testabili in isolamento, senza ROS)
-# ---------------------------------------------------------------------------
+# codici datatype di sensor_msgs/PointField
+_PF = {1: np.int8, 2: np.uint8, 3: np.int16, 4: np.uint16,
+       5: np.int32, 6: np.uint32, 7: np.float32, 8: np.float64}
+ 
+ 
+def dtype_da_campi(fields, point_step, is_bigendian=False):
+    """Costruisce il dtype strutturato che descrive UN punto del messaggio,
+    padding compreso. Funzione PURA -> testabile senza ROS.
+ 
+    I campi possono non essere contigui (Gazebo tipicamente pubblica
+    x,y,z,intensity,ring con buchi): il padding esplicito e' cio' che permette
+    di interpretare il buffer in un colpo solo invece che punto per punto.
+    Ritorna None se un campo ha un datatype ignoto o count != 1.
+    """
+    voci = []
+    offset = 0
+    for f in sorted(fields, key=lambda f: f.offset):
+        if f.datatype not in _PF or getattr(f, 'count', 1) != 1:
+            return None
+        if f.offset < offset:          # campi sovrapposti: non gestibile
+            return None
+        if f.offset > offset:
+            voci.append((f'_pad{offset}', np.uint8, f.offset - offset))
+        voci.append((f.name, _PF[f.datatype]))
+        offset = f.offset + np.dtype(_PF[f.datatype]).itemsize
+    if offset > point_step:
+        return None
+    if offset < point_step:
+        voci.append(('_padfine', np.uint8, point_step - offset))
+    dt = np.dtype(voci)
+    return dt.newbyteorder('>') if is_bigendian else dt
+ 
+ 
 def cloud_to_xyz(msg):
-    """PointCloud2 -> ndarray (N,3) float64. Robusto tra versioni di sensor_msgs_py."""
-    try:
-        arr = pc2.read_points_numpy(msg, field_names=['x', 'y', 'z'], skip_nans=True)
-        xyz = np.asarray(arr, dtype=np.float64).reshape(-1, 3)
-    except Exception:
-        pts = pc2.read_points(msg, field_names=('x', 'y', 'z'), skip_nans=True)
-        xyz = np.array([[p[0], p[1], p[2]] for p in pts], dtype=np.float64)
-    if xyz.size == 0:
-        return xyz.reshape(0, 3)
+    """PointCloud2 -> ndarray (N,3) float64, senza NaN/inf.
+ 
+    Percorso veloce: una sola `frombuffer` piu' tre letture di colonna.
+    Se il layout non e' interpretabile (datatype esotico, campi sovrapposti),
+    ritorna un array vuoto invece di ricadere in un ciclo Python: meglio un
+    frame perso e un warning che 150 ms buttati a ogni ciclo.
+    """
+    dt = dtype_da_campi(msg.fields, msg.point_step,
+                        getattr(msg, 'is_bigendian', False))
+    if dt is None or not all(n in dt.names for n in ('x', 'y', 'z')):
+        return np.zeros((0, 3), dtype=np.float64)
+ 
+    n = len(msg.data) // msg.point_step
+    if n == 0:
+        return np.zeros((0, 3), dtype=np.float64)
+ 
+    rec = np.frombuffer(bytes(msg.data), dtype=dt, count=n)
+    xyz = np.stack([rec['x'], rec['y'], rec['z']], axis=1).astype(np.float64)
     return xyz[np.isfinite(xyz).all(axis=1)]
+ 
+
 
 
 def voxel_downsample(xyz, vox):

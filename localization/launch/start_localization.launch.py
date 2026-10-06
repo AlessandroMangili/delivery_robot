@@ -54,10 +54,10 @@ def generate_launch_description():
         condition=IfCondition(use_gps),
         parameters=[ekf_params, {'use_sim_time': LaunchConfiguration('use_sim_time')}],
         remappings=[
-            ('imu', '/imu'),                                # heading
-            ('gps/fix', '/navsat'),                         # NavSatFix's bridge
-            ('odometry/filtered', '/odometry/global'),       # Local EKF outcomes
-            ('odometry/gps', '/odometry/gps'),              # EKF odo1 entrance
+            ('imu', '/imu/data'),                           # Xsens MTi heading
+            ('gps/fix', '/gnss'),                           # Xsens MTi NavSatFix
+            ('odometry/filtered', '/odometry/global'),      # ekf_global output (per la yaw di riferimento)
+            ('odometry/gps', '/odometry/gps'),              # entra in ekf_global come odom1
         ],
     )
 

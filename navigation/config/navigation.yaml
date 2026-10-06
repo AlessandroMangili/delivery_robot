@@ -1,6 +1,6 @@
 bt_navigator:
   ros__parameters:
-    use_sim_time: true
+    use_sim_time: False
     global_frame: map
     robot_base_frame: base_link
     odom_topic: /odom
@@ -19,7 +19,7 @@ bt_navigator:
 
 controller_server:
   ros__parameters:
-    use_sim_time: true
+    use_sim_time: False
     controller_frequency: 10.0
     costmap_update_timeout: 0.30
     min_x_velocity_threshold: 0.001
@@ -162,7 +162,7 @@ controller_server:
 local_costmap:
   local_costmap:
     ros__parameters:
-      use_sim_time: true
+      use_sim_time: False
       update_frequency: 10.0
       publish_frequency: 5.0
       global_frame: odom
@@ -212,7 +212,7 @@ local_costmap:
 global_costmap:
   global_costmap:
     ros__parameters:
-      use_sim_time: true
+      use_sim_time: False
       width: 50
       height: 50
       update_frequency: 5.0
@@ -240,7 +240,7 @@ global_costmap:
 
 planner_server:
   ros__parameters:
-    use_sim_time: true
+    use_sim_time: False
     expected_planner_frequency: 1.0
     planner_plugins: ["GridBased"]
 
@@ -263,7 +263,7 @@ planner_server:
 
 smoother_server:
   ros__parameters:
-    use_sim_time: true
+    use_sim_time: False
     smoother_plugins: ["simple_smoother"]
     simple_smoother:
       plugin: "nav2_smoother::SimpleSmoother"
@@ -273,7 +273,7 @@ smoother_server:
 
 behavior_server:
   ros__parameters:
-    use_sim_time: true
+    use_sim_time: False
     local_costmap_topic: local_costmap/costmap_raw
     global_costmap_topic: global_costmap/costmap_raw
     local_footprint_topic: local_costmap/published_footprint
@@ -301,7 +301,7 @@ behavior_server:
 
 waypoint_follower:
   ros__parameters:
-    use_sim_time: true
+    use_sim_time: False
     loop_rate: 20
     stop_on_failure: false
     action_server_result_timeout: 900.0
@@ -313,7 +313,7 @@ waypoint_follower:
 
 velocity_smoother:
   ros__parameters:
-    use_sim_time: true
+    use_sim_time: False
     smoothing_frequency: 20.0
     scale_velocities: False
     feedback: "OPEN_LOOP"

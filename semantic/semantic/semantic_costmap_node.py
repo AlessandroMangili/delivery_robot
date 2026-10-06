@@ -129,6 +129,8 @@ class SemanticCostmapNode(Node):
         self.declare_parameter('loc_std_resume_m', 0.5)
         self.declare_parameter('loc_cov_ema', 0.4)
         self.declare_parameter('camera_optical_frame', 'camera_rgb_optical_frame')
+        self.declare_parameter('camera_info_topic', '/camera_info')
+        self.declare_parameter('seg_topic', '/semantic/segmentation')
         self.declare_parameter('base_frame', 'base_footprint')
         self.declare_parameter('resolution', 0.05)
         self.declare_parameter('initial_size_m', 10.0)
@@ -247,10 +249,10 @@ class SemanticCostmapNode(Node):
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
 
-        self.create_subscription(CameraInfo, '/camera/camera_info', self.info_cb, 1)    # Change with real topic
+        self.create_subscription(CameraInfo, gp('camera_info_topic').value, self.info_cb, 1)
         seg_qos = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT,
                              history=HistoryPolicy.KEEP_LAST, depth=1)
-        self.create_subscription(Image, '/semantic/segmentation', self.seg_cb, seg_qos) # Change with real topic
+        self.create_subscription(Image, gp('seg_topic').value, self.seg_cb, seg_qos)
 
         latched_qos = QoSProfile(reliability=ReliabilityPolicy.RELIABLE,
                                  durability=DurabilityPolicy.TRANSIENT_LOCAL,

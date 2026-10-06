@@ -12,7 +12,7 @@ def generate_launch_description():
     pkg_navigation = get_package_share_directory('navigation')
 
     sim_time_arg = DeclareLaunchArgument(
-        'use_sim_time', default_value='True',
+        'use_sim_time', default_value='False',
         description='Flag to enable use_sim_time'
     )
 
