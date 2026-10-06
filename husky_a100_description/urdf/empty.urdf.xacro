@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<!--
+  File "extras" vuoto. Equivale a empty.urdf di husky_description (noetic), dove si usava
+  la variabile d'ambiente HUSKY_URDF_EXTRAS; qui e' l'argomento xacro urdf_extras.
+
+  Per aggiungere sensori senza toccare il modello base, crea un tuo file e passalo con:
+    xacro husky_a100.urdf.xacro urdf_extras:=/percorso/miei_sensori.urdf.xacro
+  agganciando i sensori a top_chassis_link (centro del piano superiore) o a base_footprint.
+-->
+<robot xmlns:xacro="http://ros.org/wiki/xacro">
+</robot>

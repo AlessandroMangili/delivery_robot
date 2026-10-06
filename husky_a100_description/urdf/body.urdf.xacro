@@ -1,0 +1,151 @@
+<?xml version="1.0"?>
+<!--
+  Corpo dell'Husky A100: telaio, piastre laterali, paraurti tubolari.
+  Non esiste una mesh del corpo A100: le mesh A200 di husky_description hanno un'altra forma,
+  quindi il corpo e' costruito con primitive dimensionate sul disegno ufficiale (manuale §2.2).
+
+  Le macro usano le proprietà globali definite in husky_a100.urdf.xacro.
+  Tutte le quote z qui sono nel frame base_link, che sta all'altezza degli assi: z_bl = z_terra - r.
+
+  Formule del telaio (sezione laterale = rettangolo basso + trapezio alto):
+    h1 = z_ch - gc                      altezza parte bassa (dal fondo all'inizio degli smussi)
+    h2 = H - z_ch                       altezza parte alta (trapezio)
+    dx = (Lc - Lt) / 2,  dz = h2        cateti dello smusso
+    hyp = sqrt(dx^2 + dz^2)             lunghezza dello smusso
+    d = dx * dz / hyp                   spessore del box ruotato = altezza del triangolo sull'ipotenusa
+                                        (così il box riempie esattamente il triangolo tra i due box)
+    theta = atan2(-dx, dz)              rotazione attorno a Y del box anteriore (posteriore: +)
+    centro = punto medio dell'ipotenusa - (d/2) * normale esterna,  n_out = (dz, dx) / hyp
+
+  Formule del paraurti (nel frame del paraurti, con -X verso l'interno del robot):
+    xb = L/2 - db/2        asse del tratto dritto (faccia esterna = ingombro ufficiale L/2)
+    ys = W/2 - db/2        asse dei tratti laterali (faccia esterna = ingombro ufficiale W/2)
+    delta = ys - a         lato dello smusso a 45 gradi
+    l_stub = xb - Lr/2 - delta   tratto laterale fino all'inizio della piastra laterale
+-->
+<robot xmlns:xacro="http://ros.org/wiki/xacro">
+
+  <!-- Inerzia di un parallelepipedo pieno -->
+  <xacro:macro name="box_inertia" params="m x y z *origin">
+    <inertial>
+      <mass value="${m}"/>
+      <xacro:insert_block name="origin"/>
+      <inertia ixx="${m * (y**2 + z**2) / 12.0}" ixy="0" ixz="0"
+               iyy="${m * (x**2 + z**2) / 12.0}" iyz="0"
+               izz="${m * (x**2 + y**2) / 12.0}"/>
+    </inertial>
+  </xacro:macro>
+
+  <!-- Box con visual e collision identici -->
+  <xacro:macro name="a100_box" params="xyz rpy size material">
+    <visual>
+      <origin xyz="${xyz}" rpy="${rpy}"/>
+      <geometry><box size="${size}"/></geometry>
+      <material name="${material}"/>
+    </visual>
+    <collision>
+      <origin xyz="${xyz}" rpy="${rpy}"/>
+      <geometry><box size="${size}"/></geometry>
+    </collision>
+  </xacro:macro>
+
+  <!-- Cilindro (tubo) con visual e collision identici. rpy = (0, pi/2, psi) -> asse lungo (cos psi, sin psi, 0) -->
+  <xacro:macro name="a100_tube" params="xyz yaw length radius material">
+    <visual>
+      <origin xyz="${xyz}" rpy="0 ${pi / 2} ${yaw}"/>
+      <geometry><cylinder radius="${radius}" length="${length}"/></geometry>
+      <material name="${material}"/>
+    </visual>
+    <collision>
+      <origin xyz="${xyz}" rpy="0 ${pi / 2} ${yaw}"/>
+      <geometry><cylinder radius="${radius}" length="${length}"/></geometry>
+    </collision>
+  </xacro:macro>
+
+  <!-- TELAIO: geometria e inerzia del corpo, dentro base_link -->
+  <xacro:macro name="a100_chassis">
+    <xacro:property name="h1" value="${z_ch - gc}"/>
+    <xacro:property name="h2" value="${H - z_ch}"/>
+    <xacro:property name="dx" value="${(Lc - Lt) / 2.0}"/>
+    <xacro:property name="hyp" value="${sqrt(dx**2 + h2**2)}"/>
+    <xacro:property name="d" value="${dx * h2 / hyp}"/>
+    <xacro:property name="cx" value="${(Lc + Lt) / 4.0 - 0.5 * d * h2 / hyp}"/>
+    <xacro:property name="cz" value="${(z_ch + H) / 2.0 - 0.5 * d * dx / hyp - r}"/>
+
+    <link name="base_link">
+      <xacro:box_inertia m="${m_chassis}" x="${Lc}" y="${Wc}" z="${H - gc}">
+        <origin xyz="0 0 ${(gc + H) / 2.0 - r}" rpy="0 0 0"/>
+      </xacro:box_inertia>
+      <!-- parte bassa: dal fondo (gc) all'inizio degli smussi (z_ch) -->
+      <xacro:a100_box xyz="0 0 ${(gc + z_ch) / 2.0 - r}" rpy="0 0 0"
+                      size="${Lc} ${Wc} ${h1}" material="black"/>
+      <!-- parte alta: piano superiore piatto -->
+      <xacro:a100_box xyz="0 0 ${(z_ch + H) / 2.0 - r}" rpy="0 0 0"
+                      size="${Lt} ${Wc} ${h2}" material="black"/>
+      <!-- smussi anteriore e posteriore -->
+      <xacro:a100_box xyz="${cx} 0 ${cz}" rpy="0 ${atan2(-dx, h2)} 0"
+                      size="${d} ${Wc} ${hyp}" material="yellow"/>
+      <xacro:a100_box xyz="${-cx} 0 ${cz}" rpy="0 ${atan2(dx, h2)} 0"
+                      size="${d} ${Wc} ${hyp}" material="yellow"/>
+    </link>
+
+    <!-- Riferimento per il montaggio dei sensori: centro del piano superiore -->
+    <link name="top_chassis_link"/>
+    <joint name="top_chassis_joint" type="fixed">
+      <parent link="base_link"/>
+      <child link="top_chassis_link"/>
+      <origin xyz="0 0 ${H - r}" rpy="0 0 0"/>
+    </joint>
+  </xacro:macro>
+
+  <!-- PIASTRA LATERALE: faccia esterna sull'ingombro ufficiale W/2, centrata sull'asse ruote -->
+  <xacro:macro name="a100_side_rail" params="side sign">
+    <link name="${side}_rail_link">
+      <xacro:box_inertia m="${m_rail}" x="${Lr}" y="${t_rail}" z="${h_rail}">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+      </xacro:box_inertia>
+      <xacro:a100_box xyz="0 0 0" rpy="0 0 0" size="${Lr} ${t_rail} ${h_rail}" material="yellow"/>
+    </link>
+    <joint name="${side}_rail_joint" type="fixed">
+      <parent link="base_link"/>
+      <child link="${side}_rail_link"/>
+      <origin xyz="0 ${sign * (W / 2.0 - t_rail / 2.0)} 0" rpy="0 0 0"/>
+    </joint>
+  </xacro:macro>
+
+  <!-- PARAURTI: frame con -X verso l'interno. Anteriore yaw=0, posteriore yaw=pi (stessa geometria specchiata) -->
+  <xacro:macro name="a100_bumper" params="name sign">
+    <xacro:property name="rb" value="${db / 2.0}"/>
+    <xacro:property name="xb" value="${L / 2.0 - rb}"/>
+    <xacro:property name="ys" value="${W / 2.0 - rb}"/>
+    <xacro:property name="delta" value="${ys - a_bump}"/>
+    <xacro:property name="l_stub" value="${xb - Lr / 2.0 - delta}"/>
+    <xacro:property name="l_ch" value="${delta * sqrt(2.0)}"/>
+    <!-- baricentro: media delle posizioni x dei segmenti pesata con le lunghezze -->
+    <xacro:property name="x_com" value="${(2 * l_ch * (-delta / 2.0) + 2 * l_stub * (-(delta + l_stub / 2.0))) / (2 * a_bump + 2 * l_ch + 2 * l_stub)}"/>
+
+    <link name="${name}_bumper_link">
+      <xacro:box_inertia m="${m_bumper}" x="${delta + l_stub}" y="${2 * ys}" z="${db}">
+        <origin xyz="${x_com} 0 0" rpy="0 0 0"/>
+      </xacro:box_inertia>
+      <!-- tratto dritto trasversale -->
+      <xacro:a100_tube xyz="0 0 0" yaw="${pi / 2}" length="${2 * a_bump}" radius="${rb}" material="black"/>
+      <!-- smussi a 45 gradi -->
+      <xacro:a100_tube xyz="${-delta / 2.0} ${(a_bump + ys) / 2.0} 0" yaw="${atan2(delta, -delta)}"
+                       length="${l_ch}" radius="${rb}" material="black"/>
+      <xacro:a100_tube xyz="${-delta / 2.0} ${-(a_bump + ys) / 2.0} 0" yaw="${atan2(-delta, -delta)}"
+                       length="${l_ch}" radius="${rb}" material="black"/>
+      <!-- tratti laterali fino alla piastra laterale -->
+      <xacro:a100_tube xyz="${-(delta + l_stub / 2.0)} ${ys} 0" yaw="0"
+                       length="${l_stub}" radius="${rb}" material="black"/>
+      <xacro:a100_tube xyz="${-(delta + l_stub / 2.0)} ${-ys} 0" yaw="0"
+                       length="${l_stub}" radius="${rb}" material="black"/>
+    </link>
+    <joint name="${name}_bumper_joint" type="fixed">
+      <parent link="base_link"/>
+      <child link="${name}_bumper_link"/>
+      <origin xyz="${sign * xb} 0 ${z_bump - r}" rpy="0 0 ${0 if sign > 0 else pi}"/>
+    </joint>
+  </xacro:macro>
+
+</robot>

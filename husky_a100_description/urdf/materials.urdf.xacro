@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<!--
+  Materiali ripresi da husky/husky_description (branch noetic-devel, decorations.urdf.xacro).
+  Copyright (c) 2015, Clearpath Robotics, Inc. Licenza BSD (vedi meshes/LICENSE.husky_description).
+-->
+<robot xmlns:xacro="http://ros.org/wiki/xacro">
+  <material name="dark_grey"><color rgba="0.2 0.2 0.2 1.0"/></material>
+  <material name="medium_grey"><color rgba="0.6 0.6 0.6 1.0"/></material>
+  <material name="light_grey"><color rgba="0.8 0.8 0.8 1.0"/></material>
+  <material name="yellow"><color rgba="0.8 0.8 0.0 1.0"/></material>
+  <material name="black"><color rgba="0.15 0.15 0.15 1.0"/></material>
+</robot>

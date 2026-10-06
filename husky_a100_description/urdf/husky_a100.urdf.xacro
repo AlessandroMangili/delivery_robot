@@ -1,0 +1,109 @@
+<?xml version="1.0"?>
+<!--
+  Clearpath Husky A100 (2010) - descrizione URDF parametrica, 6 ruote (3 per lato).
+
+  Dimensioni: config/a100_dimensions.yaml (quote ufficiali del manuale §2.2 + misure dal disegno in scala).
+  Struttura, macro ruota, materiali, mesh ruota e meccanismo "extras" ripresi da
+  husky/husky_description (branch noetic-devel), Copyright (c) 2015 Clearpath Robotics, licenza BSD.
+
+  Albero dei frame:
+    base_footprint (a terra, sotto il centro del robot)
+      └ base_link (all'altezza degli assi: z = r)
+          ├ {front,middle,rear}_{left,right}_wheel_link   (giunti continui; le centrali mimic delle anteriori)
+          ├ {left,right}_rail_link                         (piastre laterali)
+          ├ {front,rear}_bumper_link                       (paraurti tubolari)
+          └ top_chassis_link                               (centro del piano superiore, per i sensori)
+
+  Posizione delle ruote rispetto a base_link:  (x_i, +-T/2, 0),  x_i in {+s, 0, -s}
+  Argomenti:
+    dimensions_file  file YAML delle dimensioni
+    urdf_extras      file xacro aggiuntivo (sensori)
+    use_gazebo       true per includere i plugin di Gazebo Fortress
+-->
+<robot name="husky_a100" xmlns:xacro="http://ros.org/wiki/xacro">
+
+  <!-- Argomenti vuoti = file di default del pacchetto. I percorsi relativi sono risolti da xacro
+       rispetto a questo file (sia in include che in load_yaml), quindi niente $(find) obbligatorio. -->
+  <xacro:arg name="dimensions_file" default=""/>
+  <xacro:arg name="urdf_extras" default=""/>
+  <xacro:arg name="use_gazebo" default="false"/>
+
+  <xacro:property name="_dims_arg" value="$(arg dimensions_file)"/>
+  <xacro:property name="_extras_arg" value="$(arg urdf_extras)"/>
+  <xacro:property name="dims_file" value="${_dims_arg if _dims_arg else '../config/a100_dimensions.yaml'}"/>
+  <xacro:property name="extras_file" value="${_extras_arg if _extras_arg else 'empty.urdf.xacro'}"/>
+  <!-- lazy_eval=false: il file YAML viene letto subito, nel contesto di questo file -->
+  <xacro:property name="dims" value="${xacro.load_yaml(dims_file)}" lazy_eval="false"/>
+
+  <!-- Ingombri ufficiali -->
+  <xacro:property name="L" value="${dims['overall']['length']}"/>
+  <xacro:property name="W" value="${dims['overall']['width']}"/>
+  <xacro:property name="H" value="${dims['overall']['height']}"/>
+  <xacro:property name="gc" value="${dims['overall']['ground_clearance']}"/>
+  <!-- Telaio -->
+  <xacro:property name="Lc" value="${dims['chassis']['length']}"/>
+  <xacro:property name="Lt" value="${dims['chassis']['top_length']}"/>
+  <xacro:property name="Wc" value="${dims['chassis']['width']}"/>
+  <xacro:property name="z_ch" value="${dims['chassis']['chamfer_start_height']}"/>
+  <xacro:property name="m_chassis" value="${dims['chassis']['mass']}"/>
+  <!-- Ruote -->
+  <xacro:property name="r" value="${dims['wheels']['radius']}"/>
+  <xacro:property name="w" value="${dims['wheels']['width']}"/>
+  <xacro:property name="s" value="${dims['wheels']['axle_spacing']}"/>
+  <xacro:property name="T" value="${dims['wheels']['track']}"/>
+  <xacro:property name="m_wheel" value="${dims['wheels']['mass']}"/>
+  <!-- Piastre laterali -->
+  <xacro:property name="Lr" value="${dims['side_rails']['length']}"/>
+  <xacro:property name="h_rail" value="${dims['side_rails']['height']}"/>
+  <xacro:property name="t_rail" value="${dims['side_rails']['thickness']}"/>
+  <xacro:property name="m_rail" value="${dims['side_rails']['mass']}"/>
+  <!-- Paraurti -->
+  <xacro:property name="db" value="${dims['bumpers']['tube_diameter']}"/>
+  <xacro:property name="z_bump" value="${dims['bumpers']['axis_height']}"/>
+  <xacro:property name="a_bump" value="${dims['bumpers']['straight_half_width']}"/>
+  <xacro:property name="m_bumper" value="${dims['bumpers']['mass']}"/>
+  <!-- Mesh e contatto -->
+  <xacro:property name="wheel_mesh" value="${dims['mesh']['wheel_file']}"/>
+  <xacro:property name="mesh_d" value="${dims['mesh']['wheel_native_diameter']}"/>
+  <xacro:property name="mesh_w" value="${dims['mesh']['wheel_native_width']}"/>
+  <xacro:property name="gz" value="${dims['gazebo']}"/>
+
+  <xacro:include filename="materials.urdf.xacro"/>
+  <xacro:include filename="wheel.urdf.xacro"/>
+  <xacro:include filename="body.urdf.xacro"/>
+
+  <!-- Frame a terra (root), come per la base Hunter: niente TF duplicate con il driver -->
+  <link name="base_footprint"/>
+  <joint name="base_footprint_joint" type="fixed">
+    <parent link="base_footprint"/>
+    <child link="base_link"/>
+    <origin xyz="0 0 ${r}" rpy="0 0 0"/>
+  </joint>
+
+  <xacro:a100_chassis/>
+  <xacro:a100_side_rail side="left" sign="1"/>
+  <xacro:a100_side_rail side="right" sign="-1"/>
+  <xacro:a100_bumper name="front" sign="1"/>
+  <xacro:a100_bumper name="rear" sign="-1"/>
+
+  <!-- Ruote: le centrali copiano le anteriori dello stesso lato (accoppiamento meccanico) -->
+  <xacro:macro name="wheel_at" params="prefix x y mimic:=''">
+    <xacro:a100_wheel prefix="${prefix}" x="${x}" y="${y}" radius="${r}" width="${w}" mass="${m_wheel}"
+                      mesh_file="${wheel_mesh}" mesh_d="${mesh_d}" mesh_w="${mesh_w}"
+                      mu1="${gz['wheel_mu1']}" mu2="${gz['wheel_mu2']}"
+                      kp="${gz['wheel_kp']}" kd="${gz['wheel_kd']}" mimic="${mimic}"/>
+  </xacro:macro>
+  <xacro:wheel_at prefix="front_left" x="${s}" y="${T / 2.0}"/>
+  <xacro:wheel_at prefix="middle_left" x="0" y="${T / 2.0}" mimic="front_left_wheel_joint"/>
+  <xacro:wheel_at prefix="rear_left" x="${-s}" y="${T / 2.0}"/>
+  <xacro:wheel_at prefix="front_right" x="${s}" y="${-T / 2.0}"/>
+  <xacro:wheel_at prefix="middle_right" x="0" y="${-T / 2.0}" mimic="front_right_wheel_joint"/>
+  <xacro:wheel_at prefix="rear_right" x="${-s}" y="${-T / 2.0}"/>
+
+  <xacro:if value="$(arg use_gazebo)">
+    <xacro:include filename="gazebo.urdf.xacro"/>
+    <xacro:a100_gazebo/>
+  </xacro:if>
+
+  <xacro:include filename="${extras_file}"/>
+</robot>

@@ -1,0 +1,61 @@
+# Clearpath Husky A100 - dimensioni per l'URDF parametrico.
+# Unità SI (metri, chilogrammi).
+#
+# Legenda della provenienza di ogni valore:
+#   UFFICIALE = manuale Clearpath "Husky A100 User Guide" (2010), §2.2 Fig. 1 (quote 860/605/350/92 mm)
+#   DISEGNO   = misurato sul disegno in scala della Fig. 1, calibrato sulle quote ufficiali
+#               860 mm e 605 mm (1.8175 mm/pixel). Incertezza stimata circa +-3 mm.
+#   MESH      = misurato sulla mesh importata (bounding box)
+#   MISURATO  = misurato sul robot reale (prevale sul manuale)
+#   STIMA     = dato non disponibile nel manuale: da misurare o pesare sul robot reale
+#
+# Convenzioni: X avanti, Y sinistra, Z su (REP 103). Il frame base_footprint sta a terra,
+# sotto il centro del robot (= sotto l'asse della ruota centrale, che e' al centro dell'ingombro).
+
+overall:
+  length: 0.860            # UFFICIALE: ingombro totale con paraurti tubolari
+  width: 0.620             # MISURATO (manuale: 0.605): ingombro totale, facce esterne di piastre laterali / tubi
+  height: 0.340            # MISURATO (manuale: 0.350): da terra al piano superiore del corpo
+  ground_clearance: 0.092  # UFFICIALE: da terra al fondo del corpo
+
+chassis:
+  length: 0.718            # DISEGNO: corpo nella parte bassa (vista dall'alto)
+  top_length: 0.587        # DISEGNO: piano superiore piatto (vista laterale)
+  width: 0.402             # DISEGNO: vista di testa
+  chamfer_start_height: 0.230  # DISEGNO: quota da terra dove iniziano gli smussi anteriore/posteriore
+  mass: 38.0               # STIMA: corpo + 2 batterie piombo 12 V 21 Ah + elettronica
+
+wheels:
+  radius: 0.105            # MISURATO: gomma alta 0.21 m da terra = diametro (disegno: 0.229)
+  width: 0.062             # DISEGNO: larghezza gomma (vista di testa)
+  axle_spacing: 0.266      # DISEGNO: distanza tra assi adiacenti (asse centrale al centro)
+  track: 0.484             # DISEGNO: centro-centro ruote sinistra/destra
+                           #   (il manuale usa 0.50 m come "larghezza effettiva" per la cinematica,
+                           #    che include lo slittamento: non e' la carreggiata geometrica)
+  mass: 1.5                # STIMA (per ruota)
+
+side_rails:                # piastre laterali gialle esterne alle ruote, all'altezza degli assi
+  length: 0.600            # DISEGNO
+  height: 0.055            # DISEGNO
+  thickness: 0.025         # DISEGNO
+  mass: 1.0                # STIMA (per piastra)
+
+bumpers:                   # paraurti tubolari anteriore e posteriore (tratto dritto + smussi 45 gradi + tratti laterali)
+  tube_diameter: 0.0254    # DISEGNO: tubo da 1 pollice
+  axis_height: 0.211       # DISEGNO: quota da terra dell'asse del tubo
+  straight_half_width: 0.219  # DISEGNO: semi-lunghezza del tratto dritto trasversale
+  mass: 1.0                # STIMA (per paraurti)
+
+mesh:
+  wheel_file: package://husky_a100_description/meshes/wheel.dae  # da husky_description (noetic-devel)
+  wheel_native_diameter: 0.3556  # MESH
+  wheel_native_width: 0.1143     # MESH
+
+gazebo:                    # solo per la simulazione (Gazebo Fortress)
+  wheel_mu1: 1.0           # attrito ruote, valori della macro ruota noetic
+  wheel_mu2: 1.0
+  wheel_kp: 10000000.0
+  wheel_kd: 1.0
+  odom_publish_frequency: 50.0
+  max_linear_velocity: 1.5      # manuale §2.1: velocità massima 1.5 m/s
+  max_linear_acceleration: 0.5  # manuale §2.1: accelerazione ruota raccomandata 0.5 m/s^2

@@ -1,0 +1,66 @@
+<?xml version="1.0"?>
+<!--
+  Macro ruota per l'Husky A100.
+  Derivata da husky/husky_description (branch noetic-devel, wheel.urdf.xacro, macro husky_wheel),
+  Copyright (c) 2015, Clearpath Robotics, Inc. Licenza BSD (vedi meshes/LICENSE.husky_description).
+
+  Differenze rispetto all'originale A200:
+    - dimensioni e massa dal file YAML (non valori fissi);
+    - mesh della ruota A200 scalata in modo non uniforme alle dimensioni A100;
+    - nomi dei joint "<prefix>_wheel_joint", uguali a quelli pubblicati dallo stack Clearpath
+      del container (front_left_wheel_joint, ...), così le ruote girano anche in visualizzazione;
+    - parametro opzionale "mimic": le ruote centrali copiano quelle anteriori
+      (le tre ruote di ogni lato sono accoppiate meccanicamente, manuale §2.3);
+    - rimossa la <transmission> ROS 1.
+
+  Formule:
+    scala mesh:  s_r = 2 r / D_mesh   (radiale, assi X e Z)    s_w = w / W_mesh   (assiale, asse Y)
+    inerzia cilindro con asse Y:  Ixx = Izz = m (3 r^2 + w^2) / 12,   Iyy = m r^2 / 2
+-->
+<robot xmlns:xacro="http://ros.org/wiki/xacro">
+
+  <xacro:macro name="a100_wheel" params="prefix x y radius width mass mesh_file mesh_d mesh_w mu1 mu2 kp kd mimic:=''">
+    <link name="${prefix}_wheel_link">
+      <inertial>
+        <mass value="${mass}"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <inertia ixx="${mass * (3 * radius**2 + width**2) / 12.0}" ixy="0" ixz="0"
+                 iyy="${mass * radius**2 / 2.0}" iyz="0"
+                 izz="${mass * (3 * radius**2 + width**2) / 12.0}"/>
+      </inertial>
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="${mesh_file}"
+                scale="${2.0 * radius / mesh_d} ${width / mesh_w} ${2.0 * radius / mesh_d}"/>
+        </geometry>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="${pi / 2} 0 0"/>
+        <geometry>
+          <cylinder length="${width}" radius="${radius}"/>
+        </geometry>
+      </collision>
+    </link>
+
+    <!-- Parametri di contatto ripresi dalla macro noetic (usati solo da Gazebo) -->
+    <gazebo reference="${prefix}_wheel_link">
+      <mu1>${mu1}</mu1>
+      <mu2>${mu2}</mu2>
+      <kp>${kp}</kp>
+      <kd>${kd}</kd>
+      <fdir1>1 0 0</fdir1>
+    </gazebo>
+
+    <joint name="${prefix}_wheel_joint" type="continuous">
+      <parent link="base_link"/>
+      <child link="${prefix}_wheel_link"/>
+      <origin xyz="${x} ${y} 0" rpy="0 0 0"/>
+      <axis xyz="0 1 0"/>
+      <xacro:if value="${mimic != ''}">
+        <mimic joint="${mimic}" multiplier="1.0" offset="0.0"/>
+      </xacro:if>
+    </joint>
+  </xacro:macro>
+
+</robot>
