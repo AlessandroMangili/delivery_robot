@@ -88,6 +88,7 @@ controller_server:
         ttc_power: 1.0           # 1.0 = graduale · 2.0 = concentrato sull'imminente
         ttc_epsilon: 0.1         # [s] tetto: costo max = (1/0.1)^ttc_power
         diag_period_calls: 10    # 0 = diagnostica spenta · 10 = ~1 log/s
+        diag_csv_path: "/tmp/stc.csv"
         cost_power: 1
         collision_radius: 0.5
         vel_std_gain: 0.4

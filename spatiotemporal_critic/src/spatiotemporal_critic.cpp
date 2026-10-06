@@ -1,3 +1,18 @@
+// Critic spazio-temporale per MPPI (Nav2 Humble).
+//
+// TERMINE 1 - collisione futura: confronta dove sara' il pedone e dove sara' il
+//   robot allo STESSO istante t, e penalizza l'incontro. E' cio' che il cono
+//   statico non puo' fare, perche' non sa QUANDO il robot passera' di li'.
+//
+//   Il costo dell'incontro si misura in DUE modi, che guardano cose diverse:
+//     - OVERLAP (closeness): QUANTO a fondo il robot entra nella bolla del
+//       pedone. Si legge nell'istante di massimo avvicinamento.
+//     - INVERSE-TTC (1/tau): QUANDO la bolla tocca il robot la prima volta.
+//       Si legge nell'istante del primo contatto, e poi resta congelato.
+//   Sono indipendenti: due campioni possono toccare la bolla insieme e poi
+//   passare a distanze molto diverse, o passare alla stessa distanza dopo
+//   tempi molto diversi. Per questo il default e' "both".
+
 #include "spatiotemporal_critic/spatiotemporal_critic.hpp"
 
 #include "geometry_msgs/msg/point.hpp"
@@ -5,6 +20,7 @@
 #include <cmath>
 #include <algorithm>
 #include <limits>
+#include <fstream>
 #include <utility>
 
 #include <xtensor/xmath.hpp>
@@ -48,6 +64,19 @@ void SpatioTemporalCritic::initialize()
 
   // Diagnostica aggregata (0 = spenta).
   getParam(diag_period_calls_, "diag_period_calls", 0);
+  // Traccia CSV: una riga per OGNI ciclo di controllo (non ogni
+  // diag_period_calls_), cosi' i grafici hanno la risoluzione piena.
+  getParam(diag_csv_path_, "diag_csv_path", std::string(""));
+  if (!diag_csv_path_.empty()) {
+    diag_csv_.open(diag_csv_path_, std::ios::out | std::ios::trunc);
+    if (diag_csv_.is_open()) {
+      diag_csv_ << "t,tracce,contatti,coppie,liberi,batch,"
+                   "tau_min,tau_max,overlap,ttc,pen_max,cost_max\n";
+      RCLCPP_INFO(logger_, "Diagnostica CSV -> %s", diag_csv_path_.c_str());
+    } else {
+      RCLCPP_WARN(logger_, "Impossibile aprire il CSV %s", diag_csv_path_.c_str());
+    }
+  }
 
   // Parametri di visualizzazione.
   getParam(publish_predictions_, "publish_predictions", true);
@@ -171,6 +200,11 @@ void SpatioTemporalCritic::score(mppi::CriticData & data)
   double diag_sum_ovl = 0.0, diag_sum_ttc = 0.0;
   size_t diag_n_hit = 0, diag_n_tracks = 0;
   size_t diag_tau_min = kNoHit;
+  size_t diag_tau_max = 0;              // il contatto piu' LONTANO campionato
+  // Un campione e' "libero" se non collide con NESSUNA traccia: e' il numero
+  // che dice se MPPI ha ancora una via d'uscita. Se scende a zero, tutte le
+  // 2000 traiettorie sono in conflitto e l'ottimizzatore non ha scelta.
+  std::vector<char> diag_libero(batch, 1);
 
   for (const auto & tr : tracks) {
     const double speed = std::hypot(tr.vx, tr.vy);
@@ -239,8 +273,12 @@ void SpatioTemporalCritic::score(mppi::CriticData & data)
       }
       if (first_hit[i] != kNoHit) {
         ++diag_n_hit;
+        diag_libero[i] = 0;
         if (first_hit[i] < diag_tau_min) {
           diag_tau_min = first_hit[i];
+        }
+        if (first_hit[i] > diag_tau_max) {
+          diag_tau_max = first_hit[i];
         }
         if (use_ttc_) {
           const float tau = static_cast<float>(first_hit[i]) * dt;
@@ -264,11 +302,15 @@ void SpatioTemporalCritic::score(mppi::CriticData & data)
     data.costs(i) += p;
   }
 
-  // --- diagnostica aggregata (una riga ogni diag_period_calls_ chiamate) ---
+  // --- diagnostica aggregata ---
   // data.costs qui contiene GIA' il contributo degli altri critic (questo e'
   // l'ultimo della lista), quindi il confronto penalita'/costo dice davvero
   // quanto pesa questo critic sul totale.
-  if (diag_period_calls_ > 0 && (++score_calls_ % diag_period_calls_) == 0) {
+  const bool vuole_log =
+    (diag_period_calls_ > 0 && (++score_calls_ % diag_period_calls_) == 0);
+  const bool vuole_csv = diag_csv_.is_open();
+
+  if (vuole_log || vuole_csv) {
     float pen_max = 0.0f, cost_max = 0.0f;
     for (size_t i = 0; i < batch; ++i) {
       if (penalty[i] > pen_max) {
@@ -278,14 +320,41 @@ void SpatioTemporalCritic::score(mppi::CriticData & data)
         cost_max = data.costs(i);
       }
     }
+    size_t liberi = 0;
+    for (size_t i = 0; i < batch; ++i) {
+      if (diag_libero[i]) {
+        ++liberi;
+      }
+    }
+    // tau_min = contatto piu' IMMINENTE fra tutti i campioni (il caso peggiore)
+    // tau_max = contatto piu' LONTANO fra i campioni che collidono
+    // Se coincidono, tutti i campioni in conflitto toccano nello stesso istante.
     const double tau_min = (diag_tau_min == kNoHit)
       ? -1.0 : static_cast<double>(diag_tau_min) * dt;
-    RCLCPP_INFO(
-      logger_,
-      "[STC] mode=%s tracce=%zu contatti=%zu/%zu tau_min=%.2fs | "
-      "overlap=%.1f ttc=%.1f | mia penalita' max=%.1f su costo max=%.1f",
-      cost_mode_.c_str(), diag_n_tracks, diag_n_hit, batch * diag_n_tracks,
-      tau_min, diag_sum_ovl, diag_sum_ttc, pen_max, cost_max);
+    const double tau_max = (diag_tau_min == kNoHit)
+      ? -1.0 : static_cast<double>(diag_tau_max) * dt;
+
+    if (vuole_log) {
+      RCLCPP_INFO(
+        logger_,
+        "[STC] mode=%s tracce=%zu contatti=%zu/%zu liberi=%zu/%zu "
+        "tau=[%.2f..%.2f]s | overlap=%.1f ttc=%.1f | "
+        "mia penalita' max=%.1f su costo max=%.1f",
+        cost_mode_.c_str(), diag_n_tracks, diag_n_hit, batch * diag_n_tracks,
+        liberi, batch, tau_min, tau_max,
+        diag_sum_ovl, diag_sum_ttc, pen_max, cost_max);
+    }
+    if (vuole_csv) {
+      double t_ora = 0.0;
+      if (auto node = parent_.lock()) {
+        t_ora = node->now().seconds();
+      }
+      diag_csv_ << t_ora << ',' << diag_n_tracks << ',' << diag_n_hit << ','
+                << (batch * diag_n_tracks) << ',' << liberi << ',' << batch << ','
+                << tau_min << ',' << tau_max << ',' << diag_sum_ovl << ','
+                << diag_sum_ttc << ',' << pen_max << ',' << cost_max << '\n';
+      diag_csv_.flush();
+    }
   }
 
   // Viz scie dei PEDONI (solo con pedoni), sul loro topic separato.

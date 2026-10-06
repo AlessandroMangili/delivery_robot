@@ -1,6 +1,7 @@
 #ifndef SPATIOTEMPORAL_CRITIC__SPATIOTEMPORAL_CRITIC_HPP_
 #define SPATIOTEMPORAL_CRITIC__SPATIOTEMPORAL_CRITIC_HPP_
 
+#include <fstream>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -111,6 +112,9 @@ protected:
   // (a controller_frequency 10 Hz, N=10 -> circa un log al secondo).
   unsigned int diag_period_calls_{0};
   unsigned int score_calls_{0};    // contatore per il log diagnostico
+  // Traccia CSV per i grafici: vuoto = disattivata. Una riga per ciclo.
+  std::string diag_csv_path_;
+  std::ofstream diag_csv_;
 };
 
 }  // namespace mppi::critics
