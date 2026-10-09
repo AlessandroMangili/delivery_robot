@@ -14,7 +14,7 @@ semantic_costmap_node:
     initial_size_m: 10.0                   # [m] lato iniziale, poi auto-grow
     grow_margin_m: 3.0                     # [m] margine aggiunto a ogni espansione
 
-    lidar_topic: /scan/points   # Change with real topic
+    lidar_topic: /velodyne_points
     lidar_frame: base_scan      # Change with real robot frame
     lidar_max_age_s: 0.3                   # [s] nuvola piu' vecchia di cosi' = non usata in quel frame
     lidar_min_range: 0.4                   # [m] scarta i punti piu' vicini
@@ -78,7 +78,7 @@ elevation_costmap_node:
     grow_margin_m: 3.0
 
     # LiDAR (geometria)
-    lidar_topic: /scan/points   # Change with real topic
+    lidar_topic: /velodyne_points
     lidar_max_age_s: 0.3
     lidar_min_range: 0.4
     map_write_max_range: 5.0

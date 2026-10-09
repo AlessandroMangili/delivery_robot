@@ -12,6 +12,7 @@ def generate_launch_description():
     pkg = get_package_share_directory('localization')
 
     use_gps = LaunchConfiguration('use_gps')
+    use_fastlio = LaunchConfiguration('use_fastlio')
  
     declare_use_sim_time = DeclareLaunchArgument(
         'use_sim_time', default_value='False',
@@ -21,6 +22,11 @@ def generate_launch_description():
     declare_use_gps = DeclareLaunchArgument(
         'use_gps', default_value='True',
         description='false = non avvia navsat (per testare il fallback LiDAR senza GPS).'
+    )
+
+    declare_use_fastlio = DeclareLaunchArgument(
+        'use_fastlio', default_value='True',
+        description='false = non avvia FAST-LIO (/Odometry).'
     )
        
     ekf_params = PathJoinSubstitution([pkg, 'config', 'localization.yaml'])    
@@ -54,16 +60,28 @@ def generate_launch_description():
         condition=IfCondition(use_gps),
         parameters=[ekf_params, {'use_sim_time': LaunchConfiguration('use_sim_time')}],
         remappings=[
-            ('imu', '/imu'),                                # heading
-            ('gps/fix', '/navsat'),                         # NavSatFix's bridge
+            ('imu', '/mavros/imu/data'),                     # heading
+            ('gps/fix', '/mavros/global_position/raw/fix'),
             ('odometry/filtered', '/odometry/global'),       # Local EKF outcomes
             ('odometry/gps', '/odometry/gps'),              # EKF odo1 entrance
         ],
     )
 
+    fastlio_node = Node(
+        package='fast_lio',
+        executable='fastlio_mapping',
+        name='laser_mapping',
+        output='screen',
+        condition=IfCondition(use_fastlio),
+        parameters=[PathJoinSubstitution([pkg, 'config', 'fast_lio_vlp16.yaml']),
+                    {'use_sim_time': LaunchConfiguration('use_sim_time')}],
+    )
+
     launchDescriptionObject = LaunchDescription()
     launchDescriptionObject.add_action(declare_use_sim_time)
     launchDescriptionObject.add_action(declare_use_gps)
+    launchDescriptionObject.add_action(declare_use_fastlio)
+    launchDescriptionObject.add_action(fastlio_node)
     launchDescriptionObject.add_action(ekf_local_node)
     launchDescriptionObject.add_action(ekf_global_node)
     launchDescriptionObject.add_action(navsat_transform_node)

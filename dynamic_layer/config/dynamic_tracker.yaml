@@ -1,7 +1,7 @@
 pointcloud_detector:
   ros__parameters:
     use_sim_time: true
-    input_topic: /scan/points
+    input_topic: /velodyne_points
     detections_topic: /detections
     markers_topic: /detections/markers
 

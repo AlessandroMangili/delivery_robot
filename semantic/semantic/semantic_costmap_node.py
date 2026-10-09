@@ -157,7 +157,7 @@ class SemanticCostmapNode(Node):
         self.declare_parameter('dyn_dilate_px', 6)
 
         # --- LiDAR come sorgente di GEOMETRIA (LiDAR-primary) ---
-        self.declare_parameter('lidar_topic', '/scan/points')
+        self.declare_parameter('lidar_topic', '/velodyne_points')
         self.declare_parameter('lidar_frame', 'base_scan')
         self.declare_parameter('lidar_max_age_s', 0.3)
         self.declare_parameter('lidar_min_range', 0.4)

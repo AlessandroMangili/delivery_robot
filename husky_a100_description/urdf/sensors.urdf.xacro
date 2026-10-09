@@ -1,0 +1,71 @@
+<?xml version="1.0"?>
+<!--
+  Sensori montati sull'Husky A100: Velodyne VLP-16 + Logitech C920.
+  Passato come urdf_extras (default di display.launch.py).
+
+    top_chassis_link
+      └ velodyne                 VLP-16 (frame della nuvola /velodyne_points)
+          └ c920_link            camera, convenzione REP 103 (x avanti, y sinistra, z su)
+              └ c920_optical     frame ottico (z avanti, x destra, y giu'), frame_id di /c920/image_raw
+
+  Quote rispetto a top_chassis_link (centro del piano superiore), MISURATE sul robot:
+    LiDAR  x = 0,      y = 0, z = 0.1905
+    C920   x = 0.089,  y = 0, z = 0.140
+  La camera e' agganciata al velodyne perche' la calibrazione estrinseca
+  (calib/velo_c920/velo_cam_calib.py) stima proprio la posa di c920_link nel frame velodyne:
+  dopo la calibrazione basta copiare xyz/rpy di velo_c920_extrinsic.yaml in velo_c920_xyz/rpy.
+-->
+<robot xmlns:xacro="http://ros.org/wiki/xacro">
+
+  <xacro:property name="velodyne_xyz" value="0 0 0.1905"/>
+  <xacro:property name="imu_xyz" value="-0.10 0 0.01"/>
+  <!-- calibrazione PnP 2026-10-05 (velo_cam_calib.py, 10 coppie a 1.2-2.1 m): reproj media 2.6 px, max 4.7 px.
+       Stima iniziale da misure: xyz (0.089, 0, -0.0505), rpy 0 -> 5.5 px.
+       z poco vincolata dai dati (con z misurata e sola rotazione: 3.2 px): verificare col metro. -->
+  <xacro:property name="velo_c920_xyz" value="0.0905 0.0126 -0.0248"/>
+  <xacro:property name="velo_c920_rpy" value="-0.0048 0.0152 -0.0143"/>
+
+  <link name="velodyne">
+    <visual>
+      <!-- VLP-16 alto 71.7 mm, centro ottico (origine del frame) a 37.7 mm dalla base -->
+      <origin xyz="0 0 ${0.0717 / 2 - 0.0377}" rpy="0 0 0"/>
+      <geometry><cylinder radius="0.0516" length="0.0717"/></geometry>
+    </visual>
+  </link>
+  <joint name="velodyne_joint" type="fixed">
+    <parent link="top_chassis_link"/>
+    <child link="velodyne"/>
+    <origin xyz="${velodyne_xyz}" rpy="0 0 0"/>
+  </joint>
+
+  <link name="c920_link">
+    <visual>
+      <origin xyz="-0.0125 0 0" rpy="0 0 0"/>
+      <geometry><box size="0.025 0.094 0.029"/></geometry>
+    </visual>
+  </link>
+  <joint name="c920_joint" type="fixed">
+    <parent link="velodyne"/>
+    <child link="c920_link"/>
+    <origin xyz="${velo_c920_xyz}" rpy="${velo_c920_rpy}"/>
+  </joint>
+
+  <link name="c920_optical"/>
+  <joint name="c920_optical_joint" type="fixed">
+    <parent link="c920_link"/>
+    <child link="c920_optical"/>
+    <origin xyz="0 0 0" rpy="${-pi / 2} 0 ${-pi / 2}"/>
+  </joint>
+
+  <link name="imu_link">
+    <visual>
+      <geometry><box size="0.0815 0.050 0.0155"/></geometry>
+    </visual>
+  </link>
+  <joint name="imu_joint" type="fixed">
+    <parent link="top_chassis_link"/>
+    <child link="imu_link"/>
+    <origin xyz="${imu_xyz}" rpy="0 0 0"/>
+  </joint>
+
+</robot>

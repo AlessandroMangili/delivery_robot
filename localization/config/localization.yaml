@@ -11,10 +11,10 @@ ekf_local:
 
     map_frame: map
     odom_frame: odom
-    base_link_frame: base_footprint   # Change with real robot frame
+    base_link_frame: base_footprint
     world_frame: odom
 
-    odom0: /odom    # Change with real topic
+    odom0: /a200_0000/platform/odom
     odom0_config: [false, false, false,
                    false, false, false,
                    true,  true,  false,
@@ -33,7 +33,7 @@ ekf_local:
     odom1_differential: true
     odom1_queue_size: 10
 
-    imu0: /imu    # Change with real topic
+    imu0: /mavros/imu/data
     imu0_config: [false, false, false,
                   false, false, true,
                   false, false, false,
@@ -58,10 +58,10 @@ ekf_global:
 
     map_frame: map
     odom_frame: odom
-    base_link_frame: base_footprint   # Change with real robot frame
+    base_link_frame: base_footprint
     world_frame: map                
 
-    odom0: /odom    # Change with real topic
+    odom0: /a200_0000/platform/odom
     odom0_config: [false, false, false,
                    false, false, false,
                    true,  true,  false,
@@ -71,7 +71,7 @@ ekf_global:
     odom0_differential: false
     odom0_relative: false
 
-    imu0: /imu    # Change with real topic
+    imu0: /mavros/imu/data
     imu0_config: [false, false, false,
                   false, false, true,
                   false, false, false,

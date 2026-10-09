@@ -186,7 +186,7 @@ local_costmap:
         footprint_clearing_enabled: True
         observation_sources: pc_mark pc_clear
         pc_mark:                          # MARCA: solo cio' che sta sopra il terreno
-          topic: /scan/points
+          topic: /velodyne_points
           data_type: "PointCloud2"
           marking: True
           clearing: False
@@ -195,7 +195,7 @@ local_costmap:
           obstacle_max_range: 4.5
           obstacle_min_range: 0.35
         pc_clear:                         # PULISCE: include il terreno, servono i capolinea
-          topic: /scan/points
+          topic: /velodyne_points
           data_type: "PointCloud2"
           marking: False
           clearing: True

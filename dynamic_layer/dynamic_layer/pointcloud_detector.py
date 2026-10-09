@@ -139,7 +139,7 @@ class PointCloudDetector(Node):
 
         # --- parametri (dichiarati, poi letti) ---
         p = self.declare_parameter
-        p('input_topic', '/scan/points')
+        p('input_topic', '/velodyne_points')
         p('detections_topic', '/detections')
         p('markers_topic', '/detections/markers')
 

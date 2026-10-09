@@ -209,7 +209,7 @@ class ElevationCostmapNode(Node):
         self.declare_parameter('grow_margin_m', 3.0)
 
         # --- LiDAR ---
-        self.declare_parameter('lidar_topic', '/scan/points')
+        self.declare_parameter('lidar_topic', '/velodyne_points')
         self.declare_parameter('lidar_max_age_s', 0.3)
         self.declare_parameter('lidar_min_range', 0.4)
         self.declare_parameter('map_write_max_range', 5.0)
