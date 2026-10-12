@@ -13,6 +13,8 @@ from rclpy.duration import Duration
 from std_srvs.srv import Trigger
 import os
 
+from semantic.semantic_fusion import N_CLASSES, cost_vector, decay, expected_cost, fuse, majority_class
+
 CLASS_COST = {
     1: 0, 9: 70, 0: 90,
     8: 100, 2: 100, 3: 100, 4: 100, 5: 100, 7: 100,
@@ -140,13 +142,11 @@ class SemanticCostmapNode(Node):
         self.declare_parameter('occ_sector_deg', 2.0)
         self.declare_parameter('occ_margin', 0.15)
         self.declare_parameter('w_dist_min', 0.03)
-        self.declare_parameter('conf_decay', 0.99)
-        self.declare_parameter('conf_max', 8.0)
-        self.declare_parameter('conf_init', 2.0)
-        self.declare_parameter('confirm_gain', 1.0)
-        self.declare_parameter('deny_penalty', 2.0)
-        self.declare_parameter('new_hits', 2)
-        self.declare_parameter('change_hits', 2)
+        self.declare_parameter('alpha_min', 2.0)
+        self.declare_parameter('alpha_max', 10.0)
+        self.declare_parameter('fusion_decay', 1.0)
+        self.declare_parameter('p_lethal', 0.5)
+        self.declare_parameter('tf_timeout_s', 0.1)
         self.declare_parameter('max_obstacle_height', 0.20)
         self.declare_parameter('blocker_classes', DEFAULT_BLOCKERS)
         self.declare_parameter('dynamic_classes', DEFAULT_DYNAMIC)
@@ -173,16 +173,16 @@ class SemanticCostmapNode(Node):
         self.grow_margin = gp('grow_margin_m').value
         self.max_range = gp('max_range').value
         self.map_write_max_range = float(gp('map_write_max_range').value)
-        self.conf_decay = float(gp('conf_decay').value)
-        self.conf_max = float(gp('conf_max').value)
-        self.conf_init = float(gp('conf_init').value)
-        self.confirm_gain = float(gp('confirm_gain').value)
-        self.deny_penalty = float(gp('deny_penalty').value)
-        self.new_hits = int(gp('new_hits').value)
-        self.change_hits = int(gp('change_hits').value)
+        self.alpha_min = float(gp('alpha_min').value)
+        self.alpha_max = float(gp('alpha_max').value)
+        self.fusion_decay = float(gp('fusion_decay').value)
+        self.p_lethal = float(gp('p_lethal').value)
+        self.tf_timeout = float(gp('tf_timeout_s').value)
+        self.cost_vec = cost_vector(CLASS_COST)
+        self.valid_cls = np.isfinite(self.cost_vec)
         self.get_logger().info(
-            f'A cell enters the map after {self.new_hits} CONSECUTIVE observations '
-            f'(the counter that keeps noise out of the map)')
+            f'Fusione bayesiana: cella nota da alpha {self.alpha_min}, tetto {self.alpha_max}, '
+            f'letale da P(ostacolo) {self.p_lethal}, decadimento {self.fusion_decay}')
         self.occ_dth = np.deg2rad(gp('occ_sector_deg').value)
         self.occ_nsec = int(np.ceil(2 * np.pi / self.occ_dth))
         self.occ_margin = gp('occ_margin').value
@@ -213,6 +213,7 @@ class SemanticCostmapNode(Node):
         self.lidar_max_age = float(gp('lidar_max_age_s').value)
         self.lidar_min_range = float(gp('lidar_min_range').value)
         self.cloud = None            # Nx3 nel frame base_scan
+        self.cloud_stamp = None
         self.cloud_t = -1e9
         cloud_qos = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT,
                                history=HistoryPolicy.KEEP_LAST, depth=1)
@@ -222,6 +223,7 @@ class SemanticCostmapNode(Node):
         blockers = gp('blocker_classes').value
         dynamic = gp('dynamic_classes').value
 
+        self.lethal_classes = [int(c) for c in blockers]
         self.block_lut = np.zeros(256, dtype=bool)
         for c in blockers:
             self.block_lut[int(c)] = True
@@ -238,16 +240,14 @@ class SemanticCostmapNode(Node):
         self.gox = -self.initial_size_m / 2.0
         self.goy = -self.initial_size_m / 2.0
         self.grid = np.full((self.gny, self.gnx), -1.0, dtype=np.float32)
-        self.conf = np.zeros((self.gny, self.gnx), dtype=np.float32)
-        self.cls = np.full((self.gny, self.gnx), 255, dtype=np.uint8)
-        self.cand = np.full((self.gny, self.gnx), 255, dtype=np.uint8)
-        self.cand_n = np.zeros((self.gny, self.gnx), dtype=np.uint8)
+        self.alpha = np.zeros((self.gny, self.gnx, N_CLASSES), dtype=np.float32)
+        self.known = np.zeros((self.gny, self.gnx), dtype=bool)
 
         self.bridge = CvBridge()
         self.K = None
 
         self.tf_buffer = tf2_ros.Buffer()
-        self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
+        self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, None, spin_thread=True)
 
         self.create_subscription(CameraInfo, gp('camera_info_topic').value, self.info_cb, 1)
         seg_qos = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT,
@@ -343,19 +343,28 @@ class SemanticCostmapNode(Node):
                 self.get_logger().warn(
                     'Saved map has a different resolution: ignored.')
                 return
-            self.grid = d['grid'].astype(np.float32)
-            self.conf = d['conf'].astype(np.float32)
-            self.gny, self.gnx = self.grid.shape
-            self.gox = float(d['gox']); self.goy = float(d['goy'])
-
-            if 'cls' in d.files and d['cls'].shape == self.grid.shape:
-                self.cls = d['cls'].astype(np.uint8)
+            grid = d['grid'].astype(np.float32)
+            gny, gnx = grid.shape
+            if 'alpha' in d.files and d['alpha'].shape == (gny, gnx, N_CLASSES):
+                alpha = d['alpha'].astype(np.float32)
+                known = d['known'].astype(bool)
             else:
-                self.cls = np.full(self.grid.shape, 255, dtype=np.uint8)
-                for c, cost in CLASS_COST.items():
-                    self.cls[np.isclose(self.grid, cost)] = c
-            self.cand = np.full(self.grid.shape, 255, dtype=np.uint8)
-            self.cand_n = np.zeros(self.grid.shape, dtype=np.uint8)
+                alpha = np.zeros((gny, gnx, N_CLASSES), dtype=np.float32)
+                cls = d['cls'].astype(np.int64) if 'cls' in d.files else None
+                if cls is None:
+                    cls = np.full(grid.shape, 255, dtype=np.int64)
+                    for c, cost in CLASS_COST.items():
+                        cls[np.isclose(grid, cost)] = c
+                old = cls < N_CLASSES
+                alpha[old, cls[old]] = self.alpha_min
+                known = old
+            self.alpha = alpha
+            self.known = known
+            self.gny, self.gnx = gny, gnx
+            self.gox = float(d['gox']); self.goy = float(d['goy'])
+            self.grid = expected_cost(self.alpha.reshape(-1, N_CLASSES), self.cost_vec,
+                                      self.known.reshape(-1), self.lethal_classes,
+                                      self.p_lethal).reshape(gny, gnx)
             self.get_logger().info(
                 f'Semantic map loaded from {path} ({self.gnx}x{self.gny}).')
         except Exception as e:
@@ -366,8 +375,9 @@ class SemanticCostmapNode(Node):
             if not path.endswith('.npz'):
                 path = path + '.npz'
             os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-            np.savez_compressed(path, grid=self.grid, conf=self.conf,
-                                cls=self.cls,
+            np.savez_compressed(path, grid=self.grid, alpha=self.alpha, known=self.known,
+                                cls=majority_class(self.alpha.reshape(-1, N_CLASSES)).reshape(
+                                    self.gny, self.gnx),
                                 gnx=self.gnx, gny=self.gny, res=self.res,
                                 gox=self.gox, goy=self.goy)
             self.get_logger().info(f'Semantic map saved to {path}.')
@@ -386,8 +396,12 @@ class SemanticCostmapNode(Node):
     def info_cb(self, msg: CameraInfo):
         self.K = np.array(msg.k).reshape(3, 3)
 
-    def lookup(self, frame):
+    def lookup(self, frame, stamp=None):
         try:
+            if stamp is not None:
+                return self.tf_buffer.lookup_transform(
+                    self.target, frame, rclpy.time.Time.from_msg(stamp),
+                    timeout=Duration(seconds=self.tf_timeout))
             return self.tf_buffer.lookup_transform(
                 self.target, frame, rclpy.time.Time(), timeout=Duration(seconds=0.2))
         except Exception as e:
@@ -411,17 +425,14 @@ class SemanticCostmapNode(Node):
         new_gnx = self.gnx + pl + pr
         new_gny = self.gny + pb + pt
         new_grid = np.full((new_gny, new_gnx), -1.0, dtype=np.float32)
-        new_conf = np.zeros((new_gny, new_gnx), dtype=np.float32)
-        new_cls = np.full((new_gny, new_gnx), 255, dtype=np.uint8)
-        new_cand = np.full((new_gny, new_gnx), 255, dtype=np.uint8)
-        new_cand_n = np.zeros((new_gny, new_gnx), dtype=np.uint8)
+        new_alpha = np.zeros((new_gny, new_gnx, N_CLASSES), dtype=np.float32)
+        new_known = np.zeros((new_gny, new_gnx), dtype=bool)
         new_grid[pb:pb + self.gny, pl:pl + self.gnx] = self.grid
-        new_conf[pb:pb + self.gny, pl:pl + self.gnx] = self.conf
-        new_cls[pb:pb + self.gny, pl:pl + self.gnx] = self.cls
-        new_cand[pb:pb + self.gny, pl:pl + self.gnx] = self.cand
-        new_cand_n[pb:pb + self.gny, pl:pl + self.gnx] = self.cand_n
-        self.grid = new_grid; self.conf = new_conf
-        self.cls = new_cls; self.cand = new_cand; self.cand_n = new_cand_n
+        new_alpha[pb:pb + self.gny, pl:pl + self.gnx] = self.alpha
+        new_known[pb:pb + self.gny, pl:pl + self.gnx] = self.known
+        self.grid = new_grid
+        self.alpha = new_alpha
+        self.known = new_known
         self.gnx = new_gnx; self.gny = new_gny
         self.gox -= pl * self.res; self.goy -= pb * self.res
         self.get_logger().info(
@@ -468,8 +479,8 @@ class SemanticCostmapNode(Node):
         seg = self.bridge.imgmsg_to_cv2(msg, desired_encoding='mono8')
         h, w = seg.shape
 
-        T_cam = self.lookup(self.cam_frame)
-        T_base = self.lookup(self.base_frame)
+        T_cam = self.lookup(self.cam_frame, msg.header.stamp)
+        T_base = self.lookup(self.base_frame, msg.header.stamp)
         if T_cam is None or T_base is None:
             return
         M = transform_to_matrix(T_cam)
@@ -484,7 +495,7 @@ class SemanticCostmapNode(Node):
         # La posizione di ogni punto viene MISURATA dal LiDAR 3D (geometria accurata,
         # z reale, occlusioni native: il raggio non attraversa i muri). La classe
         # viene letta dal pixel di segmentazione su cui il punto si proietta.
-        T_scan = self.lookup(self.lidar_frame)          # map <- base_scan
+        T_scan = self.lookup(self.lidar_frame, self.cloud_stamp) if self.cloud_stamp is not None else None
         if self.cloud is None or T_scan is None:
             if self.cloud is None:
                 self.get_logger().warn(
@@ -581,7 +592,6 @@ class SemanticCostmapNode(Node):
                         float(bx), float(by), float(yaw_b))
 
         gi_u = gi[inside]; gj_u = gj[inside]
-        co_u = costs[inside].astype(np.float32)
         cl_u = classes[inside].astype(np.uint8)
         w_u = wpix[inside].astype(np.float32)
         if gi_u.size == 0:
@@ -592,73 +602,33 @@ class SemanticCostmapNode(Node):
         N = self.gnx * self.gny
         order = np.argsort(w_u)
         flat_s = flat[order]
-        frame_cost = np.full(N, -1.0, dtype=np.float32)
         frame_w = np.full(N, -1.0, dtype=np.float32)
-        frame_cost[flat_s] = co_u[order]
         frame_w[flat_s] = w_u[order]
-        seen = frame_w >= 0.0
-
         frame_cls = np.full(N, 255, dtype=np.uint8)
         frame_cls[flat_s] = cl_u[order]
+        cells = np.flatnonzero(frame_w >= 0.0)
 
-        V = self.grid.ravel(); C = self.conf.ravel()
-        CL = self.cls.ravel(); CD = self.cand.ravel(); CN = self.cand_n.ravel()
-        V_before = V.copy()
-        w = np.where(seen, frame_w, 0.0).astype(np.float32)
-
-        known = seen & (CL != 255)
-        agree = known & (frame_cls == CL)
-        deny = known & (frame_cls != CL)
-        fresh = seen & (CL == 255)
-
-        C[agree] = np.minimum(C[agree] + self.confirm_gain * w[agree], self.conf_max)
-        CD[agree] = 255
-        CN[agree] = 0
-
-        C[deny] = C[deny] - self.deny_penalty * w[deny]
-        same_cand = deny & (CD == frame_cls)
-        new_cand = deny & (CD != frame_cls)
-        CN[same_cand] = np.minimum(CN[same_cand] + 1, 255)
-        CD[new_cand] = frame_cls[new_cand]
-        CN[new_cand] = 1
-
-        cambio_candidata = fresh & (CD != frame_cls)
-        CD[cambio_candidata] = frame_cls[cambio_candidata]
-        CN[cambio_candidata] = 0
-        CN[fresh] = np.minimum(CN[fresh] + 1, 255)
-
-        commit = ((fresh & (CN >= self.new_hits)) |
-                  (deny & (C <= 0.0) & (CN >= self.change_hits)))
-        if commit.any():
-            CL[commit] = frame_cls[commit]
-            V[commit] = self.cost_lut[frame_cls[commit]].astype(np.float32)
-            C[commit] = self.conf_init
-            CD[commit] = 255
-            CN[commit] = 0
-
-        np.clip(C, 0.0, self.conf_max, out=C)
-        accept = commit
-
-        if accept.any():
+        A = self.alpha.reshape(-1, N_CLASSES)
+        KN = self.known.reshape(-1)
+        V = self.grid.reshape(-1)
+        if self.fusion_decay < 1.0:
+            if self._last_decay_t is not None and stamp_sec > self._last_decay_t:
+                unseen = np.ones(N, dtype=bool)
+                unseen[cells] = False
+                decay(A, unseen, self.fusion_decay ** (stamp_sec - self._last_decay_t))
+            self._last_decay_t = stamp_sec
+        fuse(A, cells, frame_cls[cells], frame_w[cells], self.alpha_max, self.valid_cls)
+        KN[cells] |= A[cells].sum(axis=1) >= self.alpha_min
+        old = V[cells].copy()
+        new = expected_cost(A[cells], self.cost_vec, KN[cells], self.lethal_classes, self.p_lethal)
+        V[cells] = new
+        changed = old != new
+        if np.any(changed):
             self._map_dirty = True
             self._dirty_since_save = True
-            old_vals = V_before[accept]; new_vals = V[accept]
-            crossed = ((old_vals < 50) & (new_vals >= 50)) | \
-                      ((old_vals >= 50) & (new_vals < 50)) | (old_vals < 0)
-            self._significant_change = int(np.count_nonzero(crossed))
-
-        if self.conf_decay < 1.0:
-            if self._last_decay_t is not None:
-                dt = stamp_sec - self._last_decay_t
-                if dt > 0.0:
-                    C[~seen] *= self.conf_decay ** dt
-            self._last_decay_t = stamp_sec
-
-        self.grid = V.reshape(self.gny, self.gnx)
-        self.conf = C.reshape(self.gny, self.gnx)
-        self.cls = CL.reshape(self.gny, self.gnx)
-        self.cand = CD.reshape(self.gny, self.gnx)
-        self.cand_n = CN.reshape(self.gny, self.gnx)
+            crossed = (((old < 50) & (new >= 50)) | ((old >= 50) & (new < 50))
+                       | ((old < 0) & (new >= 0)))
+            self._significant_change = int(np.count_nonzero(crossed & changed))
         self.publish_map(bx, by, msg.header.stamp)
 
     def _full_map_timer(self):
@@ -763,6 +733,7 @@ class SemanticCostmapNode(Node):
 
         self.cloud = pts
         self.cloud_t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        self.cloud_stamp = msg.header.stamp
 
 
 def main():

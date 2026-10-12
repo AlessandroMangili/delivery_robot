@@ -17,7 +17,7 @@ semantic_costmap_node:
 
     max_range: 10.0                        # [m] distanza max per peso-distanza e occlusioni (>= map_write_max_range)
     map_write_max_range: 8.0
-    max_obstacle_height: 0.20              # [m] CLEARANCE: sopra questa quota (sul robot) non scrivere -> il robot ci passa sotto (panchine, tavoli, tettoie)
+    max_obstacle_height: 0.64              # [m] CLEARANCE: sopra questa quota (da terra, base_footprint) non scrivere -> il robot ci passa sotto (panchine, tavoli, tettoie)
 
     # Full map publishing
     full_map_period_s: 1.0                 # [s] ripubblica la mappa piena ogni N secondi
@@ -44,15 +44,11 @@ semantic_costmap_node:
     map_static_dynamics: false             # false = una classe dinamica NON scrive MAI in mappa (anche se ferma)
     dyn_dilate_px: 6                       # [px] alone attorno ai dinamici dove non si scrive (bordi mal segmentati)
 
-    conf_max: 8.0          # TETTO di evidenza (nessuna cella e' immortale)
-    conf_init: 2.0         # difesa di una cella appena entrata (bassa: se la deve guadagnare)
-    confirm_gain: 1.0      # una conferma vale +1 * peso
-    deny_penalty: 2.0      # una smentita vale -2 * peso
-    conf_decay: 0.99       # l'evidenza delle celle non viste invecchia (-1%/s)
-
-    # INGRESSO in mappa: solo dopo N conferme CONSECUTIVE, poi scritta
-    new_hits: 4            # 2 = permissivo / 4 = severo
-    change_hits: 2         # conferme consecutive della classe OPPOSTA per ribaltare una cella (oltre a C che arriva a 0)
+    alpha_min: 2.0
+    alpha_max: 10.0
+    fusion_decay: 1.0
+    p_lethal: 0.5
+    tf_timeout_s: 0.1
 
     # Gate di localizzazione ROBUSTO (EMA + isteresi)
     use_loc_quality_gate: false             # abilita/disabilita il gate
@@ -79,7 +75,7 @@ elevation_costmap_node:
     lidar_min_range: 0.4
     map_write_max_range: 8.0
     elev_min_rel: -1.0                 # [m] sotto (rel. al robot) = buco profondo: scartato
-    elev_max_rel: 1.0                  # [m] sopra = overhead (chiome/insegne): scartato
+    elev_max_rel: 0.64                 # [m] sopra = overhead (chiome/insegne): scartato
 
     # Camera + segmentazione (SOLO per escludere i dinamici)
     seg_topic: /semantic/segmentation
@@ -93,7 +89,7 @@ elevation_costmap_node:
     sensor_var_dist: 0.0004            # coeff. * range^2 (piu' lontano = meno affidabile)
     var_init: 1.0                      # varianza cella mai vista
     var_max: 1.0                       # tetto varianza (inflazione)
-    process_var_rate: 0.05   #0.005    # [m^2/s] inflazione nel tempo (SIM: sostituto della prop. di posa)
+    process_var_rate: 0.005            # [m^2/s] inflazione nel tempo (SIM: sostituto della prop. di posa)
     maha_thresh: 5.0                   # gate outlier (rumore residuo)
     min_var_for_valid: 0.25            # var oltre = cella non affidabile -> ignoto
 
@@ -102,13 +98,23 @@ elevation_costmap_node:
     rough_min_known: 6                 # min vicini noti per validita'
     slope_crit: 0.35                   # [m/m] ~19 deg -> costo max
     rough_crit: 0.06                   # [m] std locale -> costo max
-    step_crit: 0.06                    # [m] salto (cordolo) -> costo max
+    step_crit: 0.10                    # [m] salto (cordolo) -> costo max
 
     # ADDED
     median_ksize: 5        # smoothing mediano (3=on; 0/1=off per confronto)
-    slope_dead: 0.04
+    slope_dead: 0.08
     rough_dead: 0.025
-    step_dead: 0.02
+    step_dead: 0.04
+    hybrid_k_sigma: 2.5
+
+    raycast_enable: true
+    raycast_every_n: 5
+    raycast_stride: 2
+    raycast_end_margin: 0.25
+    raycast_sigma_k: 3.0
+    raycast_protect_s: 1.0
+    write_outside_camera: false
+    tf_timeout_s: 0.1
 
     # Publishing
     publish_period_s: 1.0
