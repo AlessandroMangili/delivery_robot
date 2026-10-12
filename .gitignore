@@ -52,3 +52,5 @@ CATKIN_IGNORE
 
 # All maps
 */maps/
+
+semantic/models/*.pt

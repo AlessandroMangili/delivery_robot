@@ -22,7 +22,7 @@ class SemanticOverlayNode(Node):
     def __init__(self):
         super().__init__('semantic_overlay_node')
 
-        self.declare_parameter('rgb_topic', '/camera/image')
+        self.declare_parameter('rgb_topic', '/image_raw')
         self.declare_parameter('seg_topic', '/semantic/segmentation')
         self.declare_parameter('out_topic', '/semantic/overlay_rgb')
         rgb_topic = self.get_parameter('rgb_topic').value
