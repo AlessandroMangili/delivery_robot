@@ -17,13 +17,13 @@
 -->
 <robot xmlns:xacro="http://ros.org/wiki/xacro">
 
-  <xacro:property name="velodyne_xyz" value="0 0 0.1905"/>
-  <xacro:property name="imu_xyz" value="-0.10 0 0.01"/>
+  <xacro:property name="velodyne_xyz" value="0 0 0.195"/>
+  <xacro:property name="imu_xyz" value="-0.12 0 0.01"/>
   <!-- calibrazione PnP 2026-10-05 (velo_cam_calib.py, 10 coppie a 1.2-2.1 m): reproj media 2.6 px, max 4.7 px.
        Stima iniziale da misure: xyz (0.089, 0, -0.0505), rpy 0 -> 5.5 px.
        z poco vincolata dai dati (con z misurata e sola rotazione: 3.2 px): verificare col metro. -->
-  <xacro:property name="velo_c920_xyz" value="0.0905 0.0126 -0.0248"/>
-  <xacro:property name="velo_c920_rpy" value="-0.0048 0.0152 -0.0143"/>
+  <xacro:property name="velo_c920_xyz" value="0.08 0 -0.06"/>
+  <xacro:property name="velo_c920_rpy" value="-0.0048 0.0152 -0.0310"/>
 
   <link name="velodyne">
     <visual>

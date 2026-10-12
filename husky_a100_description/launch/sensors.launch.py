@@ -1,12 +1,12 @@
 import os
 import subprocess
 
+import yaml
 from ament_index_python.packages import PackageNotFoundError, get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import (DeclareLaunchArgument, ExecuteProcess, IncludeLaunchDescription,
                             LogInfo, OpaqueFunction, TimerAction)
-from launch.launch_description_sources import (AnyLaunchDescriptionSource,
-                                               PythonLaunchDescriptionSource)
+from launch.launch_description_sources import AnyLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
@@ -27,32 +27,40 @@ def lidar_actions(context):
         return []
     if is_running('^[^ ]*/lib/velodyne_driver/velodyne_driver_node( |$)'):
         return [LogInfo(msg='[sensors] driver Velodyne gia\' in esecuzione: non lo rilancio')]
-    launch_file = os.path.join(get_package_share_directory('velodyne'),
-                               'launch', 'velodyne-all-nodes-VLP16-launch.py')
-    return [IncludeLaunchDescription(PythonLaunchDescriptionSource(launch_file))]
-
-
-def camera_node(namespace, by_id, params):
-    if is_running(f'^[^ ]*/usb_cam_node_exe .*__ns:=/{namespace}( |$)'):
-        return LogInfo(msg=f'[sensors] camera /{namespace} gia\' in esecuzione: non la rilancio')
-    if not os.path.exists(by_id):
-        return LogInfo(msg=f'[sensors] camera /{namespace} non collegata ({by_id})')
-    params = dict(params, video_device=os.path.realpath(by_id), io_method='mmap')
-    return Node(package='usb_cam', executable='usb_cam_node_exe', name='usb_cam',
-                namespace=namespace, parameters=[params], output='screen')
+    driver_params = os.path.join(get_package_share_directory('velodyne_driver'),
+                                 'config', 'VLP16-velodyne_driver_node-params.yaml')
+    convert_share = get_package_share_directory('velodyne_pointcloud')
+    with open(os.path.join(convert_share, 'config', 'VLP16-velodyne_transform_node-params.yaml')) as f:
+        convert_params = yaml.safe_load(f)['velodyne_transform_node']['ros__parameters']
+    convert_params['calibration'] = os.path.join(convert_share, 'params', 'VLP16db.yaml')
+    laserscan_params = os.path.join(get_package_share_directory('velodyne_laserscan'),
+                                    'config', 'default-velodyne_laserscan_node-params.yaml')
+    return [
+        Node(package='velodyne_driver', executable='velodyne_driver_node', output='both',
+             parameters=[driver_params, {'timestamp_first_packet': True}]),
+        Node(package='velodyne_pointcloud', executable='velodyne_transform_node', output='both',
+             parameters=[convert_params]),
+        Node(package='velodyne_laserscan', executable='velodyne_laserscan_node', output='both',
+             parameters=[laserscan_params]),
+    ]
 
 
 def camera_actions(context):
-    actions = []
-    if is_true(context, 'c920'):
-        actions.append(camera_node('c920', C920_DEVICE, {
-            'image_width': 640, 'image_height': 480, 'framerate': 30.0,
-            'pixel_format': 'mjpeg2rgb',          
-            'frame_id': 'c920_optical',
-            'camera_name': 'camera2',             
-            'camera_info_url': 'file://' + C920_CALIBRATION,
-        }))
-    return actions
+    if not is_true(context, 'c920'):
+        return []
+    if is_running('^[^ ]*/v4l2_camera_node .*__ns:=/c920( |$)'):
+        return [LogInfo(msg='[sensors] camera /c920 gia\' in esecuzione: non la rilancio')]
+    if not os.path.exists(C920_DEVICE):
+        return [LogInfo(msg=f'[sensors] camera /c920 non collegata ({C920_DEVICE})')]
+    device = os.path.realpath(C920_DEVICE)
+    camera = Node(package='v4l2_camera', executable='v4l2_camera_node', namespace='c920', output='screen',
+                  parameters=[{'video_device': device, 'pixel_format': 'YUYV', 'output_encoding': 'rgb8',
+                               'image_size': [640, 480], 'time_per_frame': [1, 30],
+                               'camera_frame_id': 'c920_optical',
+                               'camera_info_url': 'file://' + C920_CALIBRATION}])
+    focus = ExecuteProcess(cmd=['sh', '-c', f'v4l2-ctl -d {device} -c focus_automatic_continuous=0 && '
+                                            f'v4l2-ctl -d {device} -c focus_absolute=0'], output='log')
+    return [camera, TimerAction(period=3.0, actions=[focus])]
 
 
 def imu_actions(context):
@@ -90,7 +98,7 @@ def imu_actions(context):
 def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument('lidar', default_value='true', description='driver VLP-16'),
-        DeclareLaunchArgument('c920', default_value='true', description='camera C920 (usb_cam)'),
+        DeclareLaunchArgument('c920', default_value='true', description='camera C920 (v4l2_camera)'),
         DeclareLaunchArgument('imu', default_value='true', description='MAVROS: IMU, GPS, bussola della Pixhawk'),
         DeclareLaunchArgument('fcu_url', default_value='/dev/ttyACM0:57600',
                               description='porta della Pixhawk (USB: il baud e\' ignorato)'),

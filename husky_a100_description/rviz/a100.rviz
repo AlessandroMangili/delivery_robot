@@ -1,20 +1,23 @@
 Panels:
   - Class: rviz_common/Displays
-    Help Height: 0
+    Help Height: 70
     Name: Displays
     Property Tree Widget:
-      Expanded: ~
+      Expanded:
+        - /Global Options1
+        - /overlay1
       Splitter Ratio: 0.5
+    Tree Height: 246
 Visualization Manager:
   Class: ""
   Displays:
     - Alpha: 0.5
-      Cell Size: 0.1
+      Cell Size: 1
       Class: rviz_default_plugins/Grid
       Color: 160; 160; 164
       Enabled: true
       Line Style:
-        Line Width: 0.03
+        Line Width: 0.029999999329447746
         Value: Lines
       Name: Grid
       Normal Cell Count: 0
@@ -23,7 +26,7 @@ Visualization Manager:
         Y: 0
         Z: 0
       Plane: XY
-      Plane Cell Count: 30
+      Plane Cell Count: 40
       Reference Frame: <Fixed Frame>
       Value: true
     - Alpha: 1
@@ -38,6 +41,97 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /robot_description
       Enabled: true
+      Links:
+        All Links Enabled: true
+        Expand Joint Details: false
+        Expand Link Details: false
+        Expand Tree: false
+        Link Tree Style: Links in Alphabetic Order
+        base_footprint:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        base_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        c920_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        c920_optical:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        front_bumper_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        front_left_wheel_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        front_right_wheel_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        imu_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        left_rail_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        middle_left_wheel_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        middle_right_wheel_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        rear_bumper_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        rear_left_wheel_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        rear_right_wheel_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        right_rail_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        top_chassis_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        velodyne:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+      Mass Properties:
+        Inertia: false
+        Mass: false
       Name: RobotModel
       TF Prefix: ""
       Update Interval: 0
@@ -46,53 +140,244 @@ Visualization Manager:
     - Class: rviz_default_plugins/TF
       Enabled: true
       Frame Timeout: 15
-      Marker Scale: 0.25
+      Frames:
+        All Enabled: false
+        base_footprint:
+          Value: true
+        base_link:
+          Value: true
+        base_link_frd:
+          Value: false
+        c920_link:
+          Value: true
+        c920_optical:
+          Value: true
+        front_bumper_link:
+          Value: true
+        front_left_wheel_link:
+          Value: true
+        front_right_wheel_link:
+          Value: true
+        imu_link:
+          Value: true
+        left_rail_link:
+          Value: true
+        map:
+          Value: true
+        map_ned:
+          Value: false
+        middle_left_wheel_link:
+          Value: true
+        middle_right_wheel_link:
+          Value: true
+        odom:
+          Value: true
+        odom_ned:
+          Value: false
+        rear_bumper_link:
+          Value: true
+        rear_left_wheel_link:
+          Value: true
+        rear_right_wheel_link:
+          Value: true
+        right_rail_link:
+          Value: true
+        top_chassis_link:
+          Value: true
+        velodyne:
+          Value: true
+      Marker Scale: 0.30000001192092896
       Name: TF
-      Show Arrows: true
+      Show Arrows: false
       Show Axes: true
       Show Names: true
+      Tree:
+        map:
+          map_ned:
+            {}
+          odom:
+            base_footprint:
+              base_link:
+                base_link_frd:
+                  {}
+                front_bumper_link:
+                  {}
+                front_left_wheel_link:
+                  {}
+                front_right_wheel_link:
+                  {}
+                left_rail_link:
+                  {}
+                middle_left_wheel_link:
+                  {}
+                middle_right_wheel_link:
+                  {}
+                rear_bumper_link:
+                  {}
+                rear_left_wheel_link:
+                  {}
+                rear_right_wheel_link:
+                  {}
+                right_rail_link:
+                  {}
+                top_chassis_link:
+                  imu_link:
+                    {}
+                  velodyne:
+                    c920_link:
+                      c920_optical:
+                        {}
+            odom_ned:
+              {}
       Update Interval: 0
       Value: true
     - Alpha: 1
       Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 10
+        Min Value: -10
+        Value: true
+      Axis: Z
+      Channel Name: intensity
       Class: rviz_default_plugins/PointCloud2
+      Color: 255; 255; 255
       Color Transformer: Intensity
       Decay Time: 0
       Enabled: true
       Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Max Intensity: 101
+      Min Color: 0; 0; 0
+      Min Intensity: 1
       Name: VLP-16
       Position Transformer: XYZ
       Selectable: false
       Size (Pixels): 2
-      Size (m): 0.02
+      Size (m): 0.019999999552965164
       Style: Points
       Topic:
         Depth: 5
         Durability Policy: Volatile
+        Filter size: 10
         History Policy: Keep Last
         Reliability Policy: Best Effort
         Value: /velodyne_points
       Use Fixed Frame: true
       Use rainbow: true
       Value: true
+    - Angle Tolerance: 0.10000000149011612
+      Class: rviz_default_plugins/Odometry
+      Covariance:
+        Orientation:
+          Alpha: 0.5
+          Color: 255; 255; 127
+          Color Style: Unique
+          Frame: Local
+          Offset: 1
+          Scale: 1
+          Value: false
+        Position:
+          Alpha: 0.30000001192092896
+          Color: 204; 51; 204
+          Scale: 1
+          Value: false
+        Value: false
+      Enabled: true
+      Keep: 200
+      Name: Odometria (EKF locale)
+      Position Tolerance: 0.10000000149011612
+      Shape:
+        Alpha: 1
+        Axes Length: 1
+        Axes Radius: 0.10000000149011612
+        Color: 0; 200; 255
+        Head Length: 0.15000000596046448
+        Head Radius: 0.07999999821186066
+        Shaft Length: 0.30000001192092896
+        Shaft Radius: 0.029999999329447746
+        Value: Arrow
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /odometry/local
+      Value: true
     - Class: rviz_default_plugins/Image
       Enabled: true
       Max Value: 1
       Median window: 5
       Min Value: 0
-      Name: C920
+      Name: Camera C920
       Normalize Range: true
       Topic:
         Depth: 5
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Best Effort
-        Value: /c920/image_raw
+        Value: /c920/image_raw/compressed
+      Value: true
+    - Alpha: 0.699999988079071
+      Class: rviz_default_plugins/Map
+      Color Scheme: map
+      Draw Behind: false
+      Enabled: true
+      Name: Elevation
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /elevation_cost
+      Update Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /elevation_cost_updates
+      Use Timestamp: false
+      Value: true
+    - Alpha: 0.699999988079071
+      Class: rviz_default_plugins/Map
+      Color Scheme: map
+      Draw Behind: false
+      Enabled: true
+      Name: Semantic
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /semantic_costmap
+      Update Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /semantic_costmap_updates
+      Use Timestamp: false
+      Value: true
+    - Class: rviz_default_plugins/Image
+      Enabled: true
+      Max Value: 1
+      Median window: 5
+      Min Value: 0
+      Name: overlay
+      Normalize Range: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /semantic/overlay_rgb
       Value: true
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
-    Fixed Frame: base_footprint
+    Fixed Frame: odom
     Frame Rate: 30
   Name: root
   Tools:
@@ -101,36 +386,44 @@ Visualization Manager:
     - Class: rviz_default_plugins/MoveCamera
     - Class: rviz_default_plugins/Measure
       Line color: 128; 128; 0
+  Transformation:
+    Current:
+      Class: rviz_default_plugins/TF
   Value: true
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 2.2
+      Distance: 32.84139633178711
       Enable Stereo Rendering:
-        Stereo Eye Separation: 0.06
+        Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
         X: 0
         Y: 0
-        Z: 0.15
+        Z: 0.30000001192092896
       Focal Shape Fixed Size: true
-      Focal Shape Size: 0.05
+      Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
-      Near Clip Distance: 0.01
-      Pitch: 0.45
-      Target Frame: <Fixed Frame>
+      Near Clip Distance: 0.009999999776482582
+      Pitch: 0.9200000166893005
+      Target Frame: base_footprint
       Value: Orbit (rviz)
-      Yaw: 0.8
+      Yaw: 3.4600002765655518
     Saved: ~
 Window Geometry:
+  Camera C920:
+    collapsed: false
   Displays:
     collapsed: false
-  Height: 800
+  Height: 925
   Hide Left Dock: false
   Hide Right Dock: true
-  Width: 1200
-  X: 60
-  Y: 60
+  QMainWindow State: 000000ff00000000fd00000001000000000000015600000347fc0200000005fb000000100044006900730070006c006100790073010000003b00000177000000c700fffffffb0000001600430061006d0065007200610020004300390032003001000001b8000000fe0000002800fffffffb0000000a0049006d0061006700650100000247000000be0000000000000000fb0000000a0049006d00610067006501000002bc000000c60000000000000000fb0000000e006f007600650072006c0061007901000002bc000000c60000002800ffffff000005f40000034700000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  Width: 1872
+  X: 0
+  Y: 27
+  overlay:
+    collapsed: false

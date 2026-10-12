@@ -4,7 +4,7 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.conditions import IfCondition
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, PythonExpression
 from launch_ros.actions import Node
 
 
@@ -13,6 +13,7 @@ def generate_launch_description():
 
     use_gps = LaunchConfiguration('use_gps')
     use_fastlio = LaunchConfiguration('use_fastlio')
+    use_global = LaunchConfiguration('use_global')
  
     declare_use_sim_time = DeclareLaunchArgument(
         'use_sim_time', default_value='False',
@@ -29,6 +30,11 @@ def generate_launch_description():
         description='false = non avvia FAST-LIO (/Odometry).'
     )
        
+    declare_use_global = DeclareLaunchArgument(
+        'use_global', default_value='True',
+        description='false = solo ekf_local, senza ekf_global e navsat (mappe in odom, prove su bag).'
+    )
+
     ekf_params = PathJoinSubstitution([pkg, 'config', 'localization.yaml'])    
     ekf_local_node = Node(
         package='robot_localization',
@@ -46,6 +52,7 @@ def generate_launch_description():
         executable='ekf_node',
         name='ekf_global',
         output='screen',
+        condition=IfCondition(use_global),
         parameters=[ekf_params, {'use_sim_time': LaunchConfiguration('use_sim_time')}],
         remappings=[
             ('/odometry/filtered', '/odometry/global')
@@ -57,7 +64,7 @@ def generate_launch_description():
         executable='navsat_transform_node',
         name='navsat_transform_node',
         output='screen',
-        condition=IfCondition(use_gps),
+        condition=IfCondition(PythonExpression(["'", use_gps, "'.lower() == 'true' and '", use_global, "'.lower() == 'true'"])),
         parameters=[ekf_params, {'use_sim_time': LaunchConfiguration('use_sim_time')}],
         remappings=[
             ('imu', '/mavros/imu/data'),                     # heading
@@ -81,6 +88,7 @@ def generate_launch_description():
     launchDescriptionObject.add_action(declare_use_sim_time)
     launchDescriptionObject.add_action(declare_use_gps)
     launchDescriptionObject.add_action(declare_use_fastlio)
+    launchDescriptionObject.add_action(declare_use_global)
     launchDescriptionObject.add_action(fastlio_node)
     launchDescriptionObject.add_action(ekf_local_node)
     launchDescriptionObject.add_action(ekf_global_node)

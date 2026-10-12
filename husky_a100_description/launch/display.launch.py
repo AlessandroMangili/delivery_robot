@@ -3,9 +3,9 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
-from launch.conditions import IfCondition, UnlessCondition
+from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import Command, LaunchConfiguration
+from launch.substitutions import Command, LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
@@ -20,6 +20,11 @@ def generate_launch_description():
     rviz_config = LaunchConfiguration('rviz_config')
     rviz = LaunchConfiguration('rviz')
     sensors = LaunchConfiguration('sensors')
+    replay = LaunchConfiguration('replay')
+    sim_time = ParameterValue(replay, value_type=bool)
+
+    def live(cond):
+        return IfCondition(PythonExpression(["'", cond, "' == 'true' and '", replay, "' != 'true'"]))
 
     robot_description = ParameterValue(
         Command(['xacro ', model,
@@ -44,19 +49,22 @@ def generate_launch_description():
             'rviz_config', default_value=os.path.join(pkg, 'rviz', 'a100.rviz'),
             description='Configurazione di RViz2'),
         DeclareLaunchArgument(
+            'replay', default_value='false',
+            description='true = rivedere una registrazione (ros2 bag play --clock): tempo simulato, niente sensori ne joint_state_publisher'),
+        DeclareLaunchArgument(
             'sensors', default_value='true',
             description='true = avvia anche i driver di LiDAR, camera e Pixhawk (sensors.launch.py)'),
 
         Node(package='robot_state_publisher', executable='robot_state_publisher',
-             parameters=[{'robot_description': robot_description}], output='screen'),
+             parameters=[{'robot_description': robot_description, 'use_sim_time': sim_time}], output='screen'),
         Node(package='joint_state_publisher_gui', executable='joint_state_publisher_gui',
-             condition=IfCondition(gui), output='screen'),
+             condition=live(gui), output='screen'),
         Node(package='joint_state_publisher', executable='joint_state_publisher',
-             condition=UnlessCondition(gui), output='screen'),
+             condition=IfCondition(PythonExpression(["'", gui, "' != 'true' and '", replay, "' != 'true'"])), output='screen'),
         DeclareLaunchArgument('rviz', default_value='true'),
         Node(package='rviz2', executable='rviz2', arguments=['-d', rviz_config], output='screen',
-             condition=IfCondition(rviz)),
+             parameters=[{'use_sim_time': sim_time}], condition=IfCondition(rviz)),
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(os.path.join(pkg, 'launch', 'sensors.launch.py')),
-            condition=IfCondition(sensors)),
+            condition=live(sensors)),
     ])
