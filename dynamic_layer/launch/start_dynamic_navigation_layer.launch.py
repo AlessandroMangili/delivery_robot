@@ -11,8 +11,8 @@ def generate_launch_description():
     pkg_dynamic = get_package_share_directory('dynamic_layer')
 
     use_sim_time_arg = DeclareLaunchArgument(
-        'use_sim_time', default_value='true',
-        description='Usa il clock di simulazione (Gazebo)'
+        'use_sim_time', default_value='false',
+        description='true solo per rivedere una rosbag con --clock'
     )
     enable_arg = DeclareLaunchArgument(
         'dynamic_layer', default_value='true',
