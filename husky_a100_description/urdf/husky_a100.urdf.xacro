@@ -18,7 +18,6 @@
   Argomenti:
     dimensions_file  file YAML delle dimensioni
     urdf_extras      file xacro aggiuntivo (sensori)
-    use_gazebo       true per includere i plugin di Gazebo Fortress
 -->
 <robot name="husky_a100" xmlns:xacro="http://ros.org/wiki/xacro">
 
@@ -26,7 +25,6 @@
        rispetto a questo file (sia in include che in load_yaml), quindi niente $(find) obbligatorio. -->
   <xacro:arg name="dimensions_file" default=""/>
   <xacro:arg name="urdf_extras" default=""/>
-  <xacro:arg name="use_gazebo" default="false"/>
 
   <xacro:property name="_dims_arg" value="$(arg dimensions_file)"/>
   <xacro:property name="_extras_arg" value="$(arg urdf_extras)"/>
@@ -66,7 +64,6 @@
   <xacro:property name="wheel_mesh" value="${dims['mesh']['wheel_file']}"/>
   <xacro:property name="mesh_d" value="${dims['mesh']['wheel_native_diameter']}"/>
   <xacro:property name="mesh_w" value="${dims['mesh']['wheel_native_width']}"/>
-  <xacro:property name="gz" value="${dims['gazebo']}"/>
 
   <xacro:include filename="materials.urdf.xacro"/>
   <xacro:include filename="wheel.urdf.xacro"/>
@@ -89,9 +86,7 @@
   <!-- Ruote: le centrali copiano le anteriori dello stesso lato (accoppiamento meccanico) -->
   <xacro:macro name="wheel_at" params="prefix x y mimic:=''">
     <xacro:a100_wheel prefix="${prefix}" x="${x}" y="${y}" radius="${r}" width="${w}" mass="${m_wheel}"
-                      mesh_file="${wheel_mesh}" mesh_d="${mesh_d}" mesh_w="${mesh_w}"
-                      mu1="${gz['wheel_mu1']}" mu2="${gz['wheel_mu2']}"
-                      kp="${gz['wheel_kp']}" kd="${gz['wheel_kd']}" mimic="${mimic}"/>
+                      mesh_file="${wheel_mesh}" mesh_d="${mesh_d}" mesh_w="${mesh_w}" mimic="${mimic}"/>
   </xacro:macro>
   <xacro:wheel_at prefix="front_left" x="${s}" y="${T / 2.0}"/>
   <xacro:wheel_at prefix="middle_left" x="0" y="${T / 2.0}" mimic="front_left_wheel_joint"/>
@@ -99,11 +94,6 @@
   <xacro:wheel_at prefix="front_right" x="${s}" y="${-T / 2.0}"/>
   <xacro:wheel_at prefix="middle_right" x="0" y="${-T / 2.0}" mimic="front_right_wheel_joint"/>
   <xacro:wheel_at prefix="rear_right" x="${-s}" y="${-T / 2.0}"/>
-
-  <xacro:if value="$(arg use_gazebo)">
-    <xacro:include filename="gazebo.urdf.xacro"/>
-    <xacro:a100_gazebo/>
-  </xacro:if>
 
   <xacro:include filename="${extras_file}"/>
 </robot>

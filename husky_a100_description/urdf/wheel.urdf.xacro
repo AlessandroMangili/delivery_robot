@@ -19,7 +19,7 @@
 -->
 <robot xmlns:xacro="http://ros.org/wiki/xacro">
 
-  <xacro:macro name="a100_wheel" params="prefix x y radius width mass mesh_file mesh_d mesh_w mu1 mu2 kp kd mimic:=''">
+  <xacro:macro name="a100_wheel" params="prefix x y radius width mass mesh_file mesh_d mesh_w mimic:=''">
     <link name="${prefix}_wheel_link">
       <inertial>
         <mass value="${mass}"/>
@@ -42,15 +42,6 @@
         </geometry>
       </collision>
     </link>
-
-    <!-- Parametri di contatto ripresi dalla macro noetic (usati solo da Gazebo) -->
-    <gazebo reference="${prefix}_wheel_link">
-      <mu1>${mu1}</mu1>
-      <mu2>${mu2}</mu2>
-      <kp>${kp}</kp>
-      <kd>${kd}</kd>
-      <fdir1>1 0 0</fdir1>
-    </gazebo>
 
     <joint name="${prefix}_wheel_joint" type="continuous">
       <parent link="base_link"/>

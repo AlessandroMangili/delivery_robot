@@ -16,7 +16,6 @@ def generate_launch_description():
     model = LaunchConfiguration('model')
     dimensions_file = LaunchConfiguration('dimensions_file')
     urdf_extras = LaunchConfiguration('urdf_extras')
-    gui = LaunchConfiguration('gui')
     rviz_config = LaunchConfiguration('rviz_config')
     rviz = LaunchConfiguration('rviz')
     sensors = LaunchConfiguration('sensors')
@@ -43,24 +42,18 @@ def generate_launch_description():
             'urdf_extras', default_value=os.path.join(pkg, 'urdf', 'sensors.urdf.xacro'),
             description='File xacro aggiuntivo con i sensori (vuoto = nessuno)'),
         DeclareLaunchArgument(
-            'gui', default_value='true',
-            description='true = cursori per muovere le ruote (joint_state_publisher_gui)'),
-        DeclareLaunchArgument(
             'rviz_config', default_value=os.path.join(pkg, 'rviz', 'a100.rviz'),
             description='Configurazione di RViz2'),
         DeclareLaunchArgument(
             'replay', default_value='false',
-            description='true = rivedere una registrazione (ros2 bag play --clock): tempo simulato, niente sensori ne joint_state_publisher'),
+            description='true = rivedere una registrazione (ros2 bag play --clock): tempo simulato, niente sensori'),
         DeclareLaunchArgument(
             'sensors', default_value='true',
             description='true = avvia anche i driver di LiDAR, camera e Pixhawk (sensors.launch.py)'),
 
         Node(package='robot_state_publisher', executable='robot_state_publisher',
-             parameters=[{'robot_description': robot_description, 'use_sim_time': sim_time}], output='screen'),
-        Node(package='joint_state_publisher_gui', executable='joint_state_publisher_gui',
-             condition=live(gui), output='screen'),
-        Node(package='joint_state_publisher', executable='joint_state_publisher',
-             condition=IfCondition(PythonExpression(["'", gui, "' != 'true' and '", replay, "' != 'true'"])), output='screen'),
+             parameters=[{'robot_description': robot_description, 'use_sim_time': sim_time}],
+             remappings=[('joint_states', '/a200_0000/platform/joint_states')], output='screen'),
         DeclareLaunchArgument('rviz', default_value='true'),
         Node(package='rviz2', executable='rviz2', arguments=['-d', rviz_config], output='screen',
              parameters=[{'use_sim_time': sim_time}], condition=IfCondition(rviz)),

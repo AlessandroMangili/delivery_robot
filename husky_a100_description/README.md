@@ -63,8 +63,7 @@ base_footprint (a terra, sotto il centro del robot)        <- radice
 Dipendenze:
 
 ```bash
-sudo apt install ros-humble-xacro ros-humble-robot-state-publisher ros-humble-joint-state-publisher \
-                 ros-humble-joint-state-publisher-gui ros-humble-rviz2 ros-humble-ros-gz \
+sudo apt install ros-humble-xacro ros-humble-robot-state-publisher ros-humble-rviz2 \
                  ros-humble-teleop-twist-keyboard
 ```
 
@@ -74,17 +73,11 @@ Build (copia la cartella in `~/ros2_ws/src/`):
 cd ~/ros2_ws && colcon build --packages-select husky_a100_description && source install/setup.bash
 ```
 
-Visualizzazione in RViz2, con i cursori per far girare le ruote:
+Robot reale, con driver dei sensori e RViz2; le ruote del modello girano con gli encoder pubblicati dal Pi
+su `/a200_0000/platform/joint_states`:
 
 ```bash
 ros2 launch husky_a100_description display.launch.py
-```
-
-Simulazione in Gazebo Fortress:
-
-```bash
-ros2 launch husky_a100_description gazebo.launch.py
-ros2 run teleop_twist_keyboard teleop_twist_keyboard     # in un altro terminale
 ```
 
 Solo l'URDF espanso:
@@ -93,7 +86,7 @@ Solo l'URDF espanso:
 xacro urdf/husky_a100.urdf.xacro > /tmp/husky_a100.urdf && check_urdf /tmp/husky_a100.urdf
 ```
 
-Argomenti comuni a entrambi i launch: `dimensions_file:=` (YAML alternativo, per esempio con le tue misure
+Argomenti utili: `dimensions_file:=` (YAML alternativo, per esempio con le tue misure
 reali) e `urdf_extras:=` (file xacro con i sensori).
 
 ## Aggiungere sensori
@@ -117,7 +110,7 @@ I test espandono l'xacro e controllano:
 - nessuna compenetrazione tra le ruote né tra ruote e corpo;
 - nomi dei giunti e `mimic`;
 - scala della mesh e validità delle inerzie;
-- plugin Gazebo e `urdf_extras`.
+- meccanismo `urdf_extras`.
 
 Ci sono anche casi di errore sintetici (ruote sovrapposte, dentro il corpo, fuori ingombro, chiave YAML
 mancante, paraurti impossibile), per verificare che i controlli scattino davvero.

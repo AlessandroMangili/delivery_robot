@@ -50,12 +50,3 @@ mesh:
   wheel_file: package://husky_a100_description/meshes/wheel.dae  # da husky_description (noetic-devel)
   wheel_native_diameter: 0.3556  # MESH
   wheel_native_width: 0.1143     # MESH
-
-gazebo:                    # solo per la simulazione (Gazebo Fortress)
-  wheel_mu1: 1.0           # attrito ruote, valori della macro ruota noetic
-  wheel_mu2: 1.0
-  wheel_kp: 10000000.0
-  wheel_kd: 1.0
-  odom_publish_frequency: 50.0
-  max_linear_velocity: 1.5      # manuale §2.1: velocità massima 1.5 m/s
-  max_linear_acceleration: 0.5  # manuale §2.1: accelerazione ruota raccomandata 0.5 m/s^2
