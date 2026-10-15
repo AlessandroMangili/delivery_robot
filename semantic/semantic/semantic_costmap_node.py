@@ -13,7 +13,7 @@ from rclpy.duration import Duration
 from std_srvs.srv import Trigger
 import os
 
-from semantic.semantic_fusion import N_CLASSES, cost_vector, decay, expected_cost, fuse, majority_class
+from semantic.map_jump_gate import MapJumpGate, lookup_via_odom
 
 CLASS_COST = {
     1: 0, 9: 70, 0: 90,
@@ -22,6 +22,66 @@ CLASS_COST = {
 }
 DEFAULT_BLOCKERS = [2, 3, 4, 5, 7, 8, 11, 12, 13, 14, 15, 16, 17, 18]
 DEFAULT_DYNAMIC = [11, 12, 13, 14, 15, 16, 17, 18]
+
+
+N_CLASSES = 19
+
+
+def cost_vector(class_cost, n_classes=N_CLASSES):
+    c = np.full(n_classes, np.nan, dtype=np.float32)
+    for k, v in class_cost.items():
+        if 0 <= int(k) < n_classes:
+            c[int(k)] = float(v)
+    return c
+
+
+def fuse(alpha, flat, cls, w, alpha_max, valid):
+    cls = np.asarray(cls)
+    ok = (cls >= 0) & (cls < alpha.shape[1]) & (w > 0)
+    ok[ok] = valid[cls[ok]]
+    flat = flat[ok]
+    cls = cls[ok].astype(np.int64)
+    w = w[ok].astype(np.float32)
+    if flat.size == 0:
+        return np.empty(0, dtype=np.int64)
+    np.add.at(alpha, (flat, cls), w)
+    cells = np.unique(flat)
+    s = alpha[cells].sum(axis=1)
+    over = s > alpha_max
+    if np.any(over):
+        alpha[cells[over]] *= (alpha_max / s[over])[:, None]
+    return cells
+
+
+def decay(alpha, unseen, factor):
+    if factor < 1.0 and np.any(unseen):
+        alpha[unseen] *= np.float32(factor)
+
+
+def expected_cost(alpha, costs, known, lethal_classes, p_lethal):
+    usable = np.isfinite(costs)
+    a = alpha[:, usable]
+    s = a.sum(axis=1)
+    safe = np.where(s > 0, s, 1.0)
+    exp_cost = (a @ costs[usable]) / safe
+    lethal_mask = np.isin(np.flatnonzero(usable), lethal_classes)
+    p_obst = a[:, lethal_mask].sum(axis=1) / safe
+    out = np.where(p_obst >= p_lethal, 100.0, np.minimum(exp_cost, 99.0))
+    return np.where(known & (s > 0), np.round(out), -1.0).astype(np.float32)
+
+
+def update_known(known, alpha, alpha_min):
+    known |= alpha.sum(axis=1) >= alpha_min
+    return known
+
+
+def majority_class(alpha):
+    s = alpha.sum(axis=1)
+    return np.where(s > 0, np.argmax(alpha, axis=1), 255).astype(np.uint8)
+
+
+def grid_to_i8(v):
+    return np.where(v < 0, -1, np.clip(np.round(v), 0, 100)).astype(np.int8)
 
 
 def transform_to_matrix(t):
@@ -147,6 +207,10 @@ class SemanticCostmapNode(Node):
         self.declare_parameter('fusion_decay', 1.0)
         self.declare_parameter('p_lethal', 0.5)
         self.declare_parameter('tf_timeout_s', 0.1)
+        self.declare_parameter('odom_frame', 'odom')
+        self.declare_parameter('map_jump_gate_m', 0.25)
+        self.declare_parameter('map_jump_gate_deg', 2.0)
+        self.declare_parameter('map_jump_hold_s', 1.0)
         self.declare_parameter('max_obstacle_height', 0.20)
         self.declare_parameter('blocker_classes', DEFAULT_BLOCKERS)
         self.declare_parameter('dynamic_classes', DEFAULT_DYNAMIC)
@@ -178,6 +242,10 @@ class SemanticCostmapNode(Node):
         self.fusion_decay = float(gp('fusion_decay').value)
         self.p_lethal = float(gp('p_lethal').value)
         self.tf_timeout = float(gp('tf_timeout_s').value)
+        self.odom_frame = gp('odom_frame').value
+        self.jump_gate = (MapJumpGate(gp('map_jump_gate_m').value, gp('map_jump_gate_deg').value,
+                                      gp('map_jump_hold_s').value)
+                          if self.target != self.odom_frame else None)
         self.cost_vec = cost_vector(CLASS_COST)
         self.valid_cls = np.isfinite(self.cost_vec)
         self.get_logger().info(
@@ -240,6 +308,7 @@ class SemanticCostmapNode(Node):
         self.gox = -self.initial_size_m / 2.0
         self.goy = -self.initial_size_m / 2.0
         self.grid = np.full((self.gny, self.gnx), -1.0, dtype=np.float32)
+        self.grid_i8 = np.full((self.gny, self.gnx), -1, dtype=np.int8)
         self.alpha = np.zeros((self.gny, self.gnx, N_CLASSES), dtype=np.float32)
         self.known = np.zeros((self.gny, self.gnx), dtype=bool)
 
@@ -273,12 +342,10 @@ class SemanticCostmapNode(Node):
         for cls, c in CLASS_COST.items():
             self.cost_lut[cls] = c
 
-        self.declare_parameter('map_load_name', '')
-        self.declare_parameter('map_save_name', '')
-        self.declare_parameter('autosave', False)
+        self.declare_parameter('map_name', '')
         self.maps_dir = self.resolve_maps_dir()
-        load_name = self.get_parameter('map_load_name').value
-        save_name = self.get_parameter('map_save_name').value
+        map_name = self.get_parameter('map_name').value
+        load_name = save_name = f'semantica_{map_name}' if map_name else ''
         self.map_save_path = os.path.join(self.maps_dir, save_name) if save_name else ''
         load_path = os.path.join(self.maps_dir, load_name) if load_name else ''
         if load_path:
@@ -292,12 +359,7 @@ class SemanticCostmapNode(Node):
 
         self.create_timer(self.full_map_period, self._full_map_timer)
 
-        self.autosave = bool(self.get_parameter('autosave').value)
-        if self.autosave and not save_name:
-            self.get_logger().warn(
-                'autosave: true but map_save_name is EMPTY -> autosave DISABLED. '
-                'Set a name in map_save_name.')
-            self.autosave = False
+        self.autosave = bool(map_name)
 
         self.get_logger().info(f'Maps folder: {self.maps_dir}')
         save_hint = self.map_save_path if self.map_save_path else f'{self.maps_dir}/semantic_map.npz'
@@ -365,6 +427,7 @@ class SemanticCostmapNode(Node):
             self.grid = expected_cost(self.alpha.reshape(-1, N_CLASSES), self.cost_vec,
                                       self.known.reshape(-1), self.lethal_classes,
                                       self.p_lethal).reshape(gny, gnx)
+            self.grid_i8 = grid_to_i8(self.grid)
             self.get_logger().info(
                 f'Semantic map loaded from {path} ({self.gnx}x{self.gny}).')
         except Exception as e:
@@ -398,6 +461,8 @@ class SemanticCostmapNode(Node):
 
     def lookup(self, frame, stamp=None):
         try:
+            if self.target != self.odom_frame:
+                return lookup_via_odom(self.tf_buffer, self.target, self.odom_frame, frame, stamp, self.tf_timeout)
             if stamp is not None:
                 return self.tf_buffer.lookup_transform(
                     self.target, frame, rclpy.time.Time.from_msg(stamp),
@@ -430,6 +495,9 @@ class SemanticCostmapNode(Node):
         new_grid[pb:pb + self.gny, pl:pl + self.gnx] = self.grid
         new_alpha[pb:pb + self.gny, pl:pl + self.gnx] = self.alpha
         new_known[pb:pb + self.gny, pl:pl + self.gnx] = self.known
+        new_i8 = np.full((new_gny, new_gnx), -1, dtype=np.int8)
+        new_i8[pb:pb + self.gny, pl:pl + self.gnx] = self.grid_i8
+        self.grid_i8 = new_i8
         self.grid = new_grid
         self.alpha = new_alpha
         self.known = new_known
@@ -487,6 +555,9 @@ class SemanticCostmapNode(Node):
         origin = M[:3, 3]                      # posizione camera in map (serve alle occlusioni)
         bx, by = T_base.transform.translation.x, T_base.transform.translation.y
         bz = T_base.transform.translation.z
+        if not self.map_jump_ok(msg.header.stamp, stamp_sec, bx, by, bz):
+            self.publish_map(bx, by, msg.header.stamp)
+            return
         qb = T_base.transform.rotation
         yaw_b = np.arctan2(2.0 * (qb.w * qb.z + qb.x * qb.y),
                            1.0 - 2.0 * (qb.y * qb.y + qb.z * qb.z))
@@ -600,13 +671,14 @@ class SemanticCostmapNode(Node):
 
         flat = gj_u * self.gnx + gi_u
         N = self.gnx * self.gny
-        order = np.argsort(w_u)
+        rank = np.empty(w_u.size, dtype=np.int64)
+        rank[np.argsort(w_u)] = np.arange(w_u.size)
+        order = np.lexsort((rank, flat))
         flat_s = flat[order]
-        frame_w = np.full(N, -1.0, dtype=np.float32)
-        frame_w[flat_s] = w_u[order]
-        frame_cls = np.full(N, 255, dtype=np.uint8)
-        frame_cls[flat_s] = cl_u[order]
-        cells = np.flatnonzero(frame_w >= 0.0)
+        last = np.r_[flat_s[1:] != flat_s[:-1], True]
+        cells = flat_s[last]
+        cell_cls = cl_u[order][last]
+        cell_w = w_u[order][last]
 
         A = self.alpha.reshape(-1, N_CLASSES)
         KN = self.known.reshape(-1)
@@ -617,11 +689,12 @@ class SemanticCostmapNode(Node):
                 unseen[cells] = False
                 decay(A, unseen, self.fusion_decay ** (stamp_sec - self._last_decay_t))
             self._last_decay_t = stamp_sec
-        fuse(A, cells, frame_cls[cells], frame_w[cells], self.alpha_max, self.valid_cls)
+        fuse(A, cells, cell_cls, cell_w, self.alpha_max, self.valid_cls)
         KN[cells] |= A[cells].sum(axis=1) >= self.alpha_min
         old = V[cells].copy()
         new = expected_cost(A[cells], self.cost_vec, KN[cells], self.lethal_classes, self.p_lethal)
         V[cells] = new
+        self.grid_i8.reshape(-1)[cells] = grid_to_i8(new)
         changed = old != new
         if np.any(changed):
             self._map_dirty = True
@@ -631,16 +704,42 @@ class SemanticCostmapNode(Node):
             self._significant_change = int(np.count_nonzero(crossed & changed))
         self.publish_map(bx, by, msg.header.stamp)
 
+    def map_jump_ok(self, stamp, t, bx, by, bz):
+        if self.jump_gate is None:
+            return True
+        T_mo = self.lookup(self.odom_frame, stamp)
+        if T_mo is None:
+            return False
+        ok = self.jump_gate.update(transform_to_matrix(T_mo), (bx, by, bz), t)
+        if not ok:
+            self.get_logger().warn(
+                f'Salto della localizzazione ({self.jump_gate.last_jump_m:.2f} m, '
+                f'{self.jump_gate.last_jump_deg:.1f} gradi): scrittura in mappa sospesa '
+                f'per {self.jump_gate.hold_s:.1f} s ({self.jump_gate.n_jumps} salti finora).',
+                throttle_duration_sec=1.0)
+        return ok
+
     def _full_map_timer(self):
         """Republish the full map periodically, INDEPENDENTLY of camera and TF."""
         if self.grid is None:
             return
         stamp = self.get_clock().now().to_msg()
-        full = self._grid_to_msg(self.grid, self.gox, self.goy,
-                                 self.gnx, self.gny, stamp)
-        self.pub.publish(full)
+        self.pub.publish(self._full_msg(stamp))
         self._last_full_pub = self.get_clock().now().nanoseconds * 1e-9
         self._map_dirty = False
+
+    def _full_msg(self, stamp):
+        msg = OccupancyGrid()
+        msg.header.stamp = stamp
+        msg.header.frame_id = self.target
+        msg.info.resolution = self.res
+        msg.info.width = self.gnx; msg.info.height = self.gny
+        msg.info.origin.position.x = float(self.gox)
+        msg.info.origin.position.y = float(self.goy)
+        msg.info.origin.orientation.w = 1.0
+        import array
+        msg.data = array.array('b', np.ascontiguousarray(self.grid_i8).tobytes())
+        return msg
 
     def _grid_to_msg(self, sub, ox, oy, width, height, stamp):
         """Convert a grid slice into an OccupancyGrid."""
@@ -663,9 +762,7 @@ class SemanticCostmapNode(Node):
         periodic_due = (now_s - self._last_full_pub) >= self.full_map_period
         urgent = self._significant_change >= self.significant_thresh
         if urgent:
-            full = self._grid_to_msg(self.grid, self.gox, self.goy,
-                                     self.gnx, self.gny, stamp)
-            self.pub.publish(full)
+            self.pub.publish(self._full_msg(stamp))
             self.get_logger().info(
                 f'Significant change ({self._significant_change} cells) '
                 f'-> full map published IMMEDIATELY', throttle_duration_sec=1.0)

@@ -30,9 +30,7 @@ semantic_costmap_node:
 
     blocker_classes: [2,3,4,5,7,8,11,12,13,14,15,16,17,18]
 
-    map_save_name: ''
-    map_load_name: ''
-    autosave: false                         # true = salva alla CHIUSURA del nodo
+    map_name: ''
 
     # Dynamic objects exclusion (per classe; il tracker serve sul reale -> map_static_dynamics:true)
     dynamic_classes: [11,12,13,14,15,16,17,18]
@@ -89,7 +87,6 @@ elevation_costmap_node:
     sensor_var_dist: 0.0004            # coeff. * range^2 (piu' lontano = meno affidabile)
     var_init: 1.0                      # varianza cella mai vista
     var_max: 1.0                       # tetto varianza (inflazione)
-    process_var_rate: 0.005            # [m^2/s] inflazione nel tempo (SIM: sostituto della prop. di posa)
     maha_thresh: 5.0                   # gate outlier (rumore residuo)
     min_var_for_valid: 0.25            # var oltre = cella non affidabile -> ignoto
 
@@ -108,12 +105,29 @@ elevation_costmap_node:
     hybrid_k_sigma: 2.5
 
     raycast_enable: true
-    raycast_every_n: 5
-    raycast_stride: 2
     raycast_end_margin: 0.25
     raycast_sigma_k: 3.0
     raycast_protect_s: 1.0
-    write_outside_camera: false
+    attitude_topic: /pcl_pose
+    elevazione_360: true
+    modo_360:
+      write_outside_camera: true
+      use_segmentation: false
+      confirm_s: 2.5
+      process_var_rate: 0.0
+      tilt_compensation: true
+      raycast_every_n: 10
+      raycast_stride: 4
+    modo_camera:
+      write_outside_camera: false
+      use_segmentation: true
+      confirm_s: 0.0
+      process_var_rate: 0.005
+      tilt_compensation: false
+      raycast_every_n: 5
+      raycast_stride: 2
+    tilt_max_offset_m: 0.0
+    tilt_max_deg: 1.5
     tf_timeout_s: 0.1
 
     # Publishing
@@ -127,9 +141,7 @@ elevation_costmap_node:
     loc_std_resume_m: 0.5
     loc_cov_ema: 0.4
 
-    map_save_name: ''
-    map_load_name: ''
-    autosave: false
+    map_name: ''
 
 ssrl_combiner:
   ros__parameters:
@@ -178,7 +190,7 @@ semantic_overlay_node:
   ros__parameters:
     rgb_topic: /c920/image_raw
     seg_topic: /semantic/segmentation
-    out_topic: /semantic/overlay_rgb       # da guardare in RViz / rqt_image_view
+    out_topic: /semantic/overlay_rgb
 
 image_brighten_node:
   ros__parameters:
