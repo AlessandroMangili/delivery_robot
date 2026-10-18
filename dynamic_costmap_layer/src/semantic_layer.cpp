@@ -11,6 +11,7 @@
 
 using nav2_costmap_2d::NO_INFORMATION;
 using nav2_costmap_2d::LETHAL_OBSTACLE;
+using nav2_costmap_2d::INSCRIBED_INFLATED_OBSTACLE;
 
 namespace dynamic_costmap_layer
 {
@@ -27,6 +28,10 @@ void SemanticLayer::onInitialize()
 
   node->get_parameter(name_ + "." + "enabled", enabled_layer_);
   node->get_parameter(name_ + "." + "map_topic", topic_);
+  declareParameter("libera_impronta", rclcpp::ParameterValue(false));
+  declareParameter("margine_impronta", rclcpp::ParameterValue(0.05));
+  node->get_parameter(name_ + "." + "libera_impronta", libera_impronta_);
+  node->get_parameter(name_ + "." + "margine_impronta", margine_impronta_);
 
   enabled_ = enabled_layer_;
   current_ = true;
@@ -52,12 +57,15 @@ void SemanticLayer::gridCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr m
 }
 
 void SemanticLayer::updateBounds(
-  double /*robot_x*/, double /*robot_y*/, double /*robot_yaw*/,
+  double robot_x, double robot_y, double robot_yaw,
   double * min_x, double * min_y, double * max_x, double * max_y)
 {
   if (!enabled_) {
     return;
   }
+  robot_x_ = robot_x;
+  robot_y_ = robot_y;
+  robot_yaw_ = robot_yaw;
   // La semantica sta ovunque nel raggio -> aggiorna l'INTERA finestra rolling.
   auto * master = layered_costmap_->getCostmap();
   const double ox = master->getOriginX();
@@ -114,6 +122,22 @@ void SemanticLayer::updateCosts(
   const int swidth = static_cast<int>(info.width);
   const int sheight = static_cast<int>(info.height);
 
+  const auto & impronta = layered_costmap_->getFootprint();
+  double ip_x0 = 0.0, ip_x1 = 0.0, ip_y0 = 0.0, ip_y1 = 0.0;
+  for (const auto & q : impronta) {
+    ip_x0 = std::min(ip_x0, q.x);
+    ip_x1 = std::max(ip_x1, q.x);
+    ip_y0 = std::min(ip_y0, q.y);
+    ip_y1 = std::max(ip_y1, q.y);
+  }
+  ip_x0 -= margine_impronta_;
+  ip_x1 += margine_impronta_;
+  ip_y0 -= margine_impronta_;
+  ip_y1 += margine_impronta_;
+  const bool usa_impronta = libera_impronta_ && !impronta.empty();
+  const double rc = std::cos(robot_yaw_);
+  const double rs = std::sin(robot_yaw_);
+
   // Itero le celle della FINESTRA LOCALE (piccola), non la mappa semantica (enorme).
   for (int j = min_j; j < max_j; ++j) {
     for (int i = min_i; i < max_i; ++i) {
@@ -139,9 +163,18 @@ void SemanticLayer::updateCosts(
       }
 
       // 0..100 -> 0..254 conservando il gradiente (confinement + costi classe); 100 -> letale
-      const unsigned char cost = (v >= 100) ?
+      unsigned char cost = (v >= 100) ?
         LETHAL_OBSTACLE :
         static_cast<unsigned char>((static_cast<int>(v) * 254) / 100);
+      if (usa_impronta && cost == LETHAL_OBSTACLE) {
+        const double dx = wx - robot_x_;
+        const double dy = wy - robot_y_;
+        const double u = rc * dx + rs * dy;
+        const double w = -rs * dx + rc * dy;
+        if (u >= ip_x0 && u <= ip_x1 && w >= ip_y0 && w <= ip_y1) {
+          cost = INSCRIBED_INFLATED_OBSTACLE;
+        }
+      }
 
       // updateWithMax: non cancella scan/cono, prende il massimo
       const unsigned char old_cost = master_grid.getCost(
