@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import os
+import signal
 import time
 import array
 import numpy as np
@@ -11,10 +12,12 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
 from rclpy.duration import Duration
 
-from sensor_msgs.msg import PointCloud2, Image, CameraInfo
+from sensor_msgs.msg import PointCloud2, Image, CameraInfo, Imu
+from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs_py import point_cloud2 as pc2
 from nav_msgs.msg import OccupancyGrid, Odometry
-from geometry_msgs.msg import PoseWithCovarianceStamped
+from geometry_msgs.msg import PoseWithCovarianceStamped, Point
+from visualization_msgs.msg import Marker
 import collections
 import math
 from cv_bridge import CvBridge
@@ -193,7 +196,7 @@ def derive_slope_roughness(h, known, res, rough_win, min_known):
 
 def elevation_cost(slope, roughness, step, valid,
                    slope_crit, rough_crit, step_crit,
-                   slope_dead=0.0, rough_dead=0.0, step_dead=0.0):
+                   slope_dead=0.0, rough_dead=0.0, step_dead=0.0, step_lethal=0.0, step_for_lethal=None):
     """f(M): combina i pericoli geometrici in un costo 0..100.
       - scoscese : slope alto        -> cost_slope
       - accidentato: roughness alta  -> cost_rough
@@ -212,6 +215,9 @@ def elevation_cost(slope, roughness, step, valid,
     cr = _band(roughness, rough_dead, rough_crit)
     ck = _band(step, step_dead, step_crit)
     c = np.maximum(np.maximum(cs, cr), ck) * 100.0
+    if step_lethal > 0.0:
+        sl = step if step_for_lethal is None else step_for_lethal
+        c = np.where(sl >= step_lethal, 100.0, np.minimum(c, 99.0))
     cost = np.where(valid, np.clip(np.round(c), 0, 100), -1).astype(np.int16)
     return cost
 
@@ -252,13 +258,35 @@ def neighbor_step(h, known):
     return step
 
 
+def gap_step(h, known, res, drop_r, rise_r, allow):
+    hi = np.where(known, h, -1e3).astype(np.float32)
+    lo = np.where(known, h, 1e3).astype(np.float32)
+    best = np.zeros(h.shape, np.float32)
+    for rr in np.arange(0.10, max(drop_r, rise_r) + 1e-6, 0.10):
+        k = int(round(rr / res))
+        ker = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * k + 1, 2 * k + 1))
+        if rr <= rise_r + 1e-6:
+            best = np.maximum(best, cv2.dilate(hi, ker) - h - allow * rr)
+        if rr <= drop_r + 1e-6:
+            best = np.maximum(best, h - cv2.erode(lo, ker) - allow * rr)
+    return np.where(known, np.clip(best, 0.0, 1.0), 0.0).astype(np.float32)
+
+
 def derive_cost(h, known, res, median_ksize, rough_win, rough_min_known,
-                slope_crit, rough_crit, step_crit, slope_dead, rough_dead, step_dead):
+                slope_crit, rough_crit, step_crit, slope_dead, rough_dead, step_dead,
+                step_drop_r=0.0, step_rise_r=0.0, step_allow=0.05, step_lethal=0.0, step_lethal_r=0.0):
     h_sm = median_smooth_masked(h, known, median_ksize)
     slope, rough, valid = derive_slope_roughness(h_sm, known, res, rough_win, rough_min_known)
     step = neighbor_step(h_sm, known)
+    step_l = None
+    if step_drop_r > 0.0 or step_rise_r > 0.0:
+        sn = step
+        step = np.maximum(sn, gap_step(h_sm, known, res, step_drop_r, step_rise_r, step_allow))
+        if step_lethal > 0.0 and step_lethal_r > 0.0:
+            step_l = np.maximum(sn, gap_step(h_sm, known, res, min(step_drop_r, step_lethal_r),
+                                             min(step_rise_r, step_lethal_r), step_allow))
     return elevation_cost(slope, rough, step, valid & known,
-                          slope_crit, rough_crit, step_crit, slope_dead, rough_dead, step_dead)
+                          slope_crit, rough_crit, step_crit, slope_dead, rough_dead, step_dead, step_lethal, step_l)
 
 
 class ElevationGrid:
@@ -297,7 +325,8 @@ class ElevationGrid:
         self.cost_params = dict(cost_params)
         mk = int(self.cost_params['median_ksize'])
         med = (2 + mk // 2) if mk >= 3 else 0
-        self.radius = med + int(self.cost_params['rough_win']) // 2 + 2
+        gap = max(float(self.cost_params.get('step_drop_r', 0.0)), float(self.cost_params.get('step_rise_r', 0.0)))
+        self.radius = med + int(self.cost_params['rough_win']) // 2 + 2 + int(math.ceil(gap / res))
         self.ray_start = ray_start
         self.ray_end_margin = ray_end_margin
         self.ray_max_range = ray_max_range
@@ -343,6 +372,21 @@ class ElevationGrid:
 
     def known(self):
         return (self.n > 0) & (self.var_min < self.min_var_for_valid)
+
+    def vertical_offset(self, X, Y, Z, t_rel, min_age, max_diff, min_pts):
+        gi = ((X - self.gox) / self.res).astype(np.int64)
+        gj = ((Y - self.goy) / self.res).astype(np.int64)
+        inside = (gi >= 0) & (gi < self.gnx) & (gj >= 0) & (gj < self.gny)
+        if np.count_nonzero(inside) < min_pts:
+            return None
+        flat = gj[inside] * self.gnx + gi[inside]
+        ok = ((self.n.reshape(-1)[flat] > 0) & (self.var_min.reshape(-1)[flat] < self.min_var_for_valid)
+              & (t_rel - self.t_upd.reshape(-1)[flat] > min_age))
+        d = Z[inside][ok] - self.h.reshape(-1)[flat[ok]]
+        d = d[np.abs(d) < max_diff]
+        if d.size < min_pts:
+            return None
+        return float(np.median(d))
 
     def mark_dirty(self, flat):
         if flat.size == 0:
@@ -685,6 +729,11 @@ class ElevationCostmapNode(Node):
         self.declare_parameter('slope_dead', 0.08)          # [m/m] sotto = piatto
         self.declare_parameter('rough_dead', 0.025)         # [m] sotto = liscio (rumore)
         self.declare_parameter('step_dead', 0.02)           # [m] step_min: sotto = rumore
+        self.declare_parameter('step_drop_radius_m', 0.0)
+        self.declare_parameter('step_rise_radius_m', 0.0)
+        self.declare_parameter('step_slope_allow', 0.05)
+        self.declare_parameter('step_lethal_m', 0.0)
+        self.declare_parameter('step_lethal_radius_m', 0.0)
 
         self.declare_parameter('raycast_enable', True)
         self.declare_parameter('raycast_end_margin', 0.25)
@@ -693,6 +742,24 @@ class ElevationCostmapNode(Node):
         self.declare_parameter('attitude_topic', '')
         self.declare_parameter('attitude_fallback_topic', '')
         self.declare_parameter('attitude_max_age_s', 0.3)
+        self.declare_parameter('attitude_imu_topic', '')
+        self.declare_parameter('imu_roll_offset_deg', 0.0)
+        self.declare_parameter('imu_pitch_offset_deg', 0.0)
+        self.declare_parameter('z_from_imu', False)
+        self.declare_parameter('z_align_tau_s', 3.0)
+        self.declare_parameter('z_align_min_age_s', 10.0)
+        self.declare_parameter('z_align_max_diff_m', 1.5)
+        self.declare_parameter('z_align_min_points', 200)
+        self.declare_parameter('z_align_max_rel_m', 0.3)
+        self.declare_parameter('z_max_step_m', 1.0)
+        self.declare_parameter('fermo_min_spostamento_m', 0.0)
+        self.declare_parameter('fermo_min_rotazione_deg', 0.0)
+        self.declare_parameter('fermo_periodo_s', 0.0)
+        self.declare_parameter('z_start_anchor', True)
+        self.declare_parameter('z_start_range_m', 6.0)
+        self.declare_parameter('z_start_max_diff_m', 6.0)
+        self.declare_parameter('z_start_min_points', 300)
+        self.declare_parameter('z_start_max_wait_s', 10.0)
         self.declare_parameter('change_min_m', 0.08)
         self.declare_parameter('change_k', 2.0)
         self.declare_parameter('change_max_m', 0.25)
@@ -806,7 +873,10 @@ class ElevationCostmapNode(Node):
             dict(median_ksize=self.median_ksize, rough_win=self.rough_win,
                  rough_min_known=self.rough_min_known, slope_crit=self.slope_crit,
                  rough_crit=self.rough_crit, step_crit=self.step_crit,
-                 slope_dead=self.slope_dead, rough_dead=self.rough_dead, step_dead=self.step_dead),
+                 slope_dead=self.slope_dead, rough_dead=self.rough_dead, step_dead=self.step_dead,
+                 step_drop_r=float(gp('step_drop_radius_m').value), step_rise_r=float(gp('step_rise_radius_m').value),
+                 step_allow=float(gp('step_slope_allow').value), step_lethal=float(gp('step_lethal_m').value),
+                 step_lethal_r=float(gp('step_lethal_radius_m').value)),
             self.lidar_min_range, self.raycast_end_margin, self.map_write_max_range,
             self.raycast_sigma_k, self.raycast_protect_s,
             confirm_s=gm('confirm_s').value, change_min_m=gp('change_min_m').value,
@@ -840,22 +910,52 @@ class ElevationCostmapNode(Node):
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, None, spin_thread=True)
 
-        cloud_qos = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT,
-                               history=HistoryPolicy.KEEP_LAST, depth=1)
-        self.create_subscription(PointCloud2, gp('lidar_topic').value,
-                                 self.cloud_cb, cloud_qos)
-
-        self.create_subscription(CameraInfo, gp('camera_info_topic').value,
-                                 self.info_cb, 1)
-        seg_qos = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT,
-                             history=HistoryPolicy.KEEP_LAST, depth=1)
-        self.create_subscription(Image, gp('seg_topic').value, self.seg_cb, seg_qos)
+        self.declare_parameter('aggiorna', True)
+        self.declare_parameter('publish_period_ferma_s', 5.0)
+        self.aggiorna = bool(self.get_parameter('aggiorna').value)
+        if self.aggiorna:
+            cloud_qos = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT,
+                                   history=HistoryPolicy.KEEP_LAST, depth=1)
+            self.create_subscription(PointCloud2, gp('lidar_topic').value,
+                                     self.cloud_cb, cloud_qos)
+            self.create_subscription(CameraInfo, gp('camera_info_topic').value,
+                                     self.info_cb, 1)
+            seg_qos = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT,
+                                 history=HistoryPolicy.KEEP_LAST, depth=1)
+            self.create_subscription(Image, gp('seg_topic').value, self.seg_cb, seg_qos)
 
         self.att = collections.deque(maxlen=200)
         self.att_fb = collections.deque(maxlen=200)
         self.att_max_age = float(gp('attitude_max_age_s').value)
         self.n_att = [0, 0, 0]
-        if gp('attitude_topic').value:
+        self.imu_off = (math.radians(float(gp('imu_roll_offset_deg').value)),
+                        math.radians(float(gp('imu_pitch_offset_deg').value)))
+        self.z_from_imu = bool(gp('z_from_imu').value)
+        self.z_align_tau = float(gp('z_align_tau_s').value)
+        self.z_align_min_age = float(gp('z_align_min_age_s').value)
+        self.z_align_max_diff = float(gp('z_align_max_diff_m').value)
+        self.z_align_min_points = int(gp('z_align_min_points').value)
+        self.z_align_max_rel = float(gp('z_align_max_rel_m').value)
+        self.z_corr_sum = 0.0
+        self.z_max_step = float(gp('z_max_step_m').value)
+        self.zi = None
+        self.n_anchor = 0
+        self.z_start_anchor = bool(gp('z_start_anchor').value)
+        self.z_start_range = float(gp('z_start_range_m').value)
+        self.z_start_max_diff = float(gp('z_start_max_diff_m').value)
+        self.z_start_min_points = int(gp('z_start_min_points').value)
+        self.z_start_max_wait = float(gp('z_start_max_wait_s').value)
+        self.z_anchored = True
+        self.z_anchor_t0 = None
+        self.fermo_min_m = float(gp('fermo_min_spostamento_m').value)
+        self.fermo_min_deg = float(gp('fermo_min_rotazione_deg').value)
+        self.fermo_periodo = float(gp('fermo_periodo_s').value)
+        self.ultima_integrata = None
+        self.n_fermo = 0
+        if gp('attitude_imu_topic').value:
+            self.create_subscription(Imu, gp('attitude_imu_topic').value, self.imu_cb,
+                                     qos_profile_sensor_data)
+        elif gp('attitude_topic').value:
             self.create_subscription(PoseWithCovarianceStamped, gp('attitude_topic').value,
                                      lambda m: self.att_cb(self.att, m.header, m.pose.pose.orientation), 10)
         if gp('attitude_fallback_topic').value:
@@ -869,6 +969,8 @@ class ElevationCostmapNode(Node):
                                  durability=DurabilityPolicy.TRANSIENT_LOCAL,
                                  history=HistoryPolicy.KEEP_LAST, depth=1)
         self.pub = self.create_publisher(OccupancyGrid, gp('out_topic').value, latched_qos)
+        self.pub_range = self.create_publisher(Marker, '/elevation_map_range', 1)
+        self.range_pose = None
 
         self._last_pred_t = None
 
@@ -883,13 +985,17 @@ class ElevationCostmapNode(Node):
                 p += '.npz'
             if os.path.isfile(p):
                 self.load_map(p)
+                self.z_anchored = not (self.z_from_imu and self.z_start_anchor and bool(self.grid.n.any()))
             else:
                 self.get_logger().warn(f'Elevation map to load not found: {p}')
-        self.autosave = bool(map_name)
+        self.autosave = bool(map_name) and self.aggiorna
         self.create_service(Trigger, '~/save_map', self.save_map_cb)
 
         # timer di pubblicazione (deriva costo e pubblica, indipendente dal LiDAR)
-        self.create_timer(self.publish_period, self.publish_timer)
+        self.create_timer(self.publish_period if self.aggiorna
+                          else float(self.get_parameter('publish_period_ferma_s').value), self.publish_timer)
+        if not self.aggiorna:
+            self.get_logger().info('Mappa di elevazione FERMA: pubblico solo la mappa caricata, nessun aggiornamento.')
 
         self.get_logger().info(
             f'Elevation 2.5D (Kalman-per-cella, LiDAR-primary) pronto. frame={self.target}. '
@@ -940,7 +1046,12 @@ class ElevationCostmapNode(Node):
             if not path.endswith('.npz'):
                 path += '.npz'
             os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-            np.savez_compressed(path, **self.grid.arrays_to_save())
+            tmp = path[:-4] + '.tmp.npz'
+            with open(tmp, 'wb') as f:
+                np.savez_compressed(f, **self.grid.arrays_to_save())
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, path)
             self.get_logger().info(f'Elevation map salvata in {path}.')
             return path
         except Exception as e:
@@ -959,6 +1070,70 @@ class ElevationCostmapNode(Node):
         t = header.stamp.sec + header.stamp.nanosec * 1e-9
         if t > 0:
             buf.append((t, *quat_roll_pitch(q)))
+
+    def imu_cb(self, m):
+        t = m.header.stamp.sec + m.header.stamp.nanosec * 1e-9
+        if t > 0:
+            r, p = quat_roll_pitch(m.orientation)
+            self.att.append((t, r - self.imu_off[0], p - self.imu_off[1]))
+
+    def robot_z(self, bx, by, yaw, rp, z_tf, t):
+        if self.zi is None:
+            self.zi = (z_tf, bx, by, t, t)
+            return z_tf
+        z, px, py, pt, ta = self.zi
+        dx, dy = bx - px, by - py
+        if math.hypot(dx, dy) < self.z_max_step:
+            c, s = math.cos(yaw), math.sin(yaw)
+            d = roll_pitch_matrix(*rp)[:3, :3] @ np.array([c * dx + s * dy, -s * dx + c * dy, 0.0])
+            z += float(d[2])
+        self.zi = (z, bx, by, t, ta)
+        return z
+
+    def anchor_start_z(self, Pm, bx, by, bz):
+        if self.z_anchor_t0 is None:
+            self.z_anchor_t0 = self.cloud_t
+        X, Y, Z = Pm[:, 0], Pm[:, 1], Pm[:, 2]
+        g = (np.hypot(X - bx, Y - by) < self.z_start_range) & ((Z - bz) < self.z_align_max_rel) & np.isfinite(Z)
+        off = self.grid.vertical_offset(X[g], Y[g], Z[g], 0.0, 0.0, self.z_start_max_diff, self.z_start_min_points)
+        if off is not None:
+            fine = self.grid.vertical_offset(X[g], Y[g], Z[g] - off, 0.0, 0.0, self.z_align_max_rel, self.z_start_min_points)
+            if fine is not None:
+                off += fine
+            z, px, py, pt, ta = self.zi
+            self.zi = (z - off, px, py, pt, ta)
+            self.z_anchored = True
+            self.get_logger().info(f'Quota iniziale agganciata alla mappa caricata: correzione {-off:+.3f} m '
+                                   f'({int(g.sum())} punti a terra entro {self.z_start_range:.0f} m).')
+            return off
+        if self.cloud_t - self.z_anchor_t0 > self.z_start_max_wait:
+            self.z_anchored = True
+            self.get_logger().warn(f'Quota iniziale NON agganciata: dopo {self.z_start_max_wait:.0f} s il robot non vede '
+                                   'celle della mappa caricata. Scrivo con la quota del localizzatore: '
+                                   'parti da un punto già mappato.')
+            return 0.0
+        self.get_logger().info('Aspetto di vedere la mappa caricata per agganciare la quota iniziale...',
+                               throttle_duration_sec=2.0)
+        return None
+
+    def align_z(self, X, Y, Z, bz, t, t_rel):
+        z, px, py, pt, ta = self.zi
+        g = (Z - bz) < self.z_align_max_rel
+        off = self.grid.vertical_offset(X[g], Y[g], Z[g], t_rel, self.z_align_min_age,
+                                        self.z_align_max_diff, self.z_align_min_points)
+        if off is not None:
+            fine = self.grid.vertical_offset(X[g], Y[g], Z[g] - off, t_rel, self.z_align_min_age,
+                                             0.10, self.z_align_min_points)
+            if fine is not None:
+                off += fine
+        if off is None or self.z_align_tau <= 0.0 or t <= ta:
+            self.zi = (z, px, py, pt, t)
+            return 0.0
+        corr = (1.0 - math.exp(-(t - ta) / self.z_align_tau)) * off
+        self.zi = (z - corr, px, py, pt, t)
+        self.n_anchor += 1
+        self.z_corr_sum += abs(corr)
+        return corr
 
     def attitude_at(self, t):
         for k, buf in enumerate((self.att, self.att_fb)):
@@ -1026,6 +1201,30 @@ class ElevationCostmapNode(Node):
     def info_cb(self, msg: CameraInfo):
         self.K = np.array(msg.k).reshape(3, 3)
 
+    def publish_range_marker(self, stamp):
+        if self.range_pose is None:
+            return
+        bx, by, yaw = self.range_pose
+        R = self.map_write_max_range
+        if self.write_outside_camera or self.K is None:
+            ang = np.linspace(-math.pi, math.pi, 73)
+            pts = [Point(x=float(bx + R * math.cos(a)), y=float(by + R * math.sin(a)), z=0.05) for a in ang]
+        else:
+            half = float(np.arctan2(self.K[0, 2], self.K[0, 0]))
+            pts = [Point(x=bx, y=by, z=0.05)]
+            pts += [Point(x=float(bx + R * math.cos(yaw + a)), y=float(by + R * math.sin(yaw + a)), z=0.05)
+                    for a in np.linspace(-half, half, 25)]
+            pts.append(Point(x=bx, y=by, z=0.05))
+        m = Marker()
+        m.header.frame_id = self.target
+        m.header.stamp = stamp
+        m.ns = 'elevation_range'; m.id = 0
+        m.type = Marker.LINE_STRIP; m.action = Marker.ADD
+        m.scale.x = 0.05
+        m.color.r = 0.1; m.color.g = 0.8; m.color.b = 1.0; m.color.a = 0.9
+        m.points = pts
+        self.pub_range.publish(m)
+
     def seg_cb(self, msg: Image):
         """Immagine di segmentazione (Cityscapes ID, mono8): messa in cache.
         Serve solo a sapere quali pixel sono DINAMICI, per escludere i punti
@@ -1062,19 +1261,50 @@ class ElevationCostmapNode(Node):
             return False
 
         M_scan2map = transform_to_matrix(T_scan)
+        rp = None
         if self.att or self.att_fb:
             rp = self.attitude_at(self.cloud_t)
             if rp is not None:
                 M_tb = transform_to_matrix(T_base)
                 M_scan2map = M_tb @ roll_pitch_matrix(*rp) @ np.linalg.inv(M_tb) @ M_scan2map
-        Pm = transform_points(self.cloud, M_scan2map)
-        X = Pm[:, 0]; Y = Pm[:, 1]; Z = Pm[:, 2]
 
         bx = T_base.transform.translation.x
         by = T_base.transform.translation.y
-        bz = T_base.transform.translation.z
-        if not self.map_jump_ok(self.cloud_stamp, self.cloud_t, bx, by, bz):
+        bz_tf = T_base.transform.translation.z
+        qr = T_base.transform.rotation
+        self.range_pose = (bx, by, math.atan2(2 * (qr.w * qr.z + qr.x * qr.y), 1 - 2 * (qr.y * qr.y + qr.z * qr.z)))
+        if self.fermo_periodo > 0.0 and self.ultima_integrata is not None:
+            lx, ly, lyaw, lt = self.ultima_integrata
+            dyaw = abs(math.atan2(math.sin(self.range_pose[2] - lyaw), math.cos(self.range_pose[2] - lyaw)))
+            if (math.hypot(bx - lx, by - ly) < self.fermo_min_m and math.degrees(dyaw) < self.fermo_min_deg
+                    and self.cloud_t - lt < self.fermo_periodo):
+                self.n_fermo += 1
+                return False
+        self.ultima_integrata = (bx, by, self.range_pose[2], self.cloud_t)
+        if not self.map_jump_ok(self.cloud_stamp, self.cloud_t, bx, by, bz_tf):
             return False
+        bz = bz_tf
+        if self.z_from_imu and rp is not None:
+            q = T_base.transform.rotation
+            yaw = math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z))
+            bz = self.robot_z(bx, by, yaw, rp, bz_tf, self.cloud_t)
+            M_scan2map[2, 3] += bz - bz_tf
+        Pm = transform_points(self.cloud, M_scan2map)
+        if self.z_from_imu and rp is not None and not self.z_anchored:
+            off = self.anchor_start_z(Pm, bx, by, bz)
+            if off is None:
+                return False
+            Pm[:, 2] -= off
+            M_scan2map[2, 3] -= off
+            bz -= off
+        if self.z_from_imu and rp is not None:
+            t_ref = self.grid.t_ref if self.grid.t_ref is not None else self.cloud_t
+            corr = self.align_z(Pm[:, 0], Pm[:, 1], Pm[:, 2], bz, self.cloud_t, self.cloud_t - t_ref)
+            if corr != 0.0:
+                Pm[:, 2] -= corr
+                M_scan2map[2, 3] -= corr
+                bz -= corr
+        X = Pm[:, 0]; Y = Pm[:, 1]; Z = Pm[:, 2]
 
         rng = np.sqrt(self.cloud[:, 0]**2 + self.cloud[:, 1]**2 + self.cloud[:, 2]**2)
 
@@ -1161,15 +1391,16 @@ class ElevationCostmapNode(Node):
             f'(max {1000.0 * self._t_integrate_max:.1f}) | raycast {1000.0 * self._ray_time / nr:.1f} ms, '
             f'{self._ray_cleared} celle ripulite | costo e pubblicazione '
             f'{1000.0 * self._t_publish / npub:.1f} ms | griglia {self.grid.gnx}x{self.grid.gny}'
-            # Agg 
             f' | assetto trovato {self.n_att[0]}, mancante {self.n_att[2]}'
-            f' | inclinazione corretta {self.grid.tilt_stats[1]}/{self.grid.tilt_stats[0]}')
+            f' | inclinazione corretta {self.grid.tilt_stats[1]}/{self.grid.tilt_stats[0]}'
+            + (f' | quota IMU {self.zi[0]:+.3f} m, allineamenti {self.n_anchor}, correzione totale {self.z_corr_sum:.2f} m' if self.zi is not None else '')
+            + f' | scansioni saltate da fermo {self.n_fermo}')
 
     # ---------------- pubblicazione (deriva costo) ----------------
     def publish_timer(self):
         t0 = time.perf_counter()
         self.grid.update_cost()
-        if self.grid.t_ref is None:
+        if self.grid.t_ref is None and self.aggiorna:
             return
         g = self.grid
         msg = OccupancyGrid()
@@ -1182,13 +1413,19 @@ class ElevationCostmapNode(Node):
         msg.info.origin.orientation.w = 1.0
         msg.data = array.array('b', np.ascontiguousarray(g.cost).tobytes())
         self.pub.publish(msg)
+        self.publish_range_marker(msg.header.stamp)
         self._t_publish += time.perf_counter() - t0
         self._n_publish += 1
+
+
+def _interrompi(signum, frame):
+    raise KeyboardInterrupt
 
 
 def main():
     rclpy.init()
     node = ElevationCostmapNode()
+    signal.signal(signal.SIGHUP, _interrompi)
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

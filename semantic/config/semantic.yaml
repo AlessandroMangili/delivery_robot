@@ -15,9 +15,19 @@ semantic_costmap_node:
     lidar_max_age_s: 0.3                   # [s] nuvola piu' vecchia di cosi' = non usata in quel frame
     lidar_min_range: 0.4                   # [m] scarta i punti piu' vicini
 
-    max_range: 10.0                        # [m] distanza max per peso-distanza e occlusioni (>= map_write_max_range)
+    max_range: 15.0                        # [m] distanza max per peso-distanza e occlusioni (>= map_write_max_range)
     map_write_max_range: 8.0
     max_obstacle_height: 0.64              # [m] CLEARANCE: sopra questa quota (da terra, base_footprint) non scrivere -> il robot ci passa sotto (panchine, tavoli, tettoie)
+    stacked_vote: true
+    stacked_low_min: 0.15
+    stacked_high_max: 2.0
+    stacked_tol_cells: 1
+    stacked_min_votes: 3
+    ost_write_range_m: 15.0
+    ost_classes: [2,3,4,5]
+    ray_clear_mode: suolo
+    ray_clear_low_h: 0.12
+    ray_clear_ground_tol: 0.25
 
     # Full map publishing
     full_map_period_s: 1.0                 # [s] ripubblica la mappa piena ogni N secondi
@@ -102,6 +112,10 @@ elevation_costmap_node:
     slope_dead: 0.08
     rough_dead: 0.025
     step_dead: 0.04
+    step_drop_radius_m: 0.6
+    step_rise_radius_m: 0.2
+    step_slope_allow: 0.05
+    step_lethal_m: 0.10
     hybrid_k_sigma: 2.5
 
     raycast_enable: true
@@ -109,13 +123,24 @@ elevation_costmap_node:
     raycast_sigma_k: 3.0
     raycast_protect_s: 1.0
     attitude_topic: /pcl_pose
+    attitude_imu_topic: /mavros/imu/data
+    imu_roll_offset_deg: 0.12
+    imu_pitch_offset_deg: -0.28
+    z_from_imu: true
+    z_align_tau_s: 2.0
+    z_align_min_age_s: 60.0
+    z_align_max_diff_m: 1.5
+    z_start_anchor: true
+    fermo_min_spostamento_m: 0.02
+    fermo_min_rotazione_deg: 1.0
+    fermo_periodo_s: 2.0
     elevazione_360: true
     modo_360:
       write_outside_camera: true
       use_segmentation: false
       confirm_s: 2.5
       process_var_rate: 0.0
-      tilt_compensation: true
+      tilt_compensation: false
       raycast_every_n: 10
       raycast_stride: 4
     modo_camera:
@@ -160,8 +185,9 @@ ssrl_combiner:
     use_elevation: true
     w_elev: 0.6
     soft_ceiling: 97
-    elev_can_be_lethal: false
-    elev_lethal_thr: 92
+    elev_can_be_lethal: true
+    elev_lethal_thr: 100
+    elev_where_sem_unknown: false
     grid_tol_cells: 0.01
 
 seg_infer_node:
