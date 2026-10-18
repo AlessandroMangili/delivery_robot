@@ -12,6 +12,8 @@ import tf2_ros
 from rclpy.duration import Duration
 from std_srvs.srv import Trigger
 import os
+import signal
+import time
 
 from semantic.map_jump_gate import MapJumpGate, lookup_via_odom
 
@@ -51,6 +53,145 @@ def fuse(alpha, flat, cls, w, alpha_max, valid):
     if np.any(over):
         alpha[cells[over]] *= (alpha_max / s[over])[:, None]
     return cells
+
+
+def stacked_classes(gi, gj, Z, cls, gnx, gny, targets, low_min, low_max, high_max, tol, min_votes, n_classes=N_CLASSES):
+    empty = (np.empty(0, dtype=np.int64), np.empty(0, dtype=np.int64))
+    if gi.size == 0 or targets.size == 0:
+        return empty
+    flat = gj.astype(np.int64) * gnx + gi
+    order = np.argsort(flat, kind='stable')
+    fs = flat[order]
+    first = np.r_[True, fs[1:] != fs[:-1]]
+    ucell = fs[first]
+    zmin = np.minimum.reduceat(Z[order], np.nonzero(first)[0])
+    ucy, ucx = ucell // gnx, ucell % gnx
+    ground = zmin.copy()
+    for dy in range(-tol, tol + 1):
+        for dx in range(-tol, tol + 1):
+            if dy == 0 and dx == 0:
+                continue
+            ny, nx = ucy + dy, ucx + dx
+            okn = (ny >= 0) & (ny < gny) & (nx >= 0) & (nx < gnx)
+            key = ny * gnx + nx
+            pos = np.searchsorted(ucell, key)
+            pos = np.clip(pos, 0, ucell.size - 1)
+            hit = okn & (ucell[pos] == key)
+            ground[hit] = np.minimum(ground[hit], zmin[pos[hit]])
+    hrel = Z - ground[np.searchsorted(ucell, flat)]
+    low = (hrel >= low_min) & (hrel <= low_max)
+    struct = (hrel >= low_min) & (hrel <= high_max)
+    if not np.any(low):
+        return empty
+    tgt = np.unique(targets)
+    flagged = np.zeros(tgt.size, dtype=bool)
+    lcell = np.unique(flat[low])
+    ly, lx = lcell // gnx, lcell % gnx
+    sflat = flat[struct]; sy, sx = sflat // gnx, sflat % gnx; scls = cls[struct].astype(np.int64)
+    keys, kcls = [], []
+    for dy in range(-tol, tol + 1):
+        for dx in range(-tol, tol + 1):
+            ny, nx = ly + dy, lx + dx
+            okn = (ny >= 0) & (ny < gny) & (nx >= 0) & (nx < gnx)
+            key = ny[okn] * gnx + nx[okn]
+            pos = np.clip(np.searchsorted(tgt, key), 0, tgt.size - 1)
+            flagged[pos[tgt[pos] == key]] = True
+            ny, nx = sy + dy, sx + dx
+            okn = (ny >= 0) & (ny < gny) & (nx >= 0) & (nx < gnx)
+            keys.append(ny[okn] * gnx + nx[okn]); kcls.append(scls[okn])
+    ftgt = tgt[flagged]
+    if ftgt.size == 0:
+        return empty
+    keys = np.concatenate(keys); kcls = np.concatenate(kcls)
+    pos = np.clip(np.searchsorted(ftgt, keys), 0, ftgt.size - 1)
+    m = ftgt[pos] == keys
+    if not np.any(m):
+        return empty
+    pair = pos[m].astype(np.int64) * n_classes + kcls[m]
+    up, cnt = np.unique(pair, return_counts=True)
+    cell_i, cl = up // n_classes, up % n_classes
+    o = np.lexsort((cnt, cell_i))
+    cell_i, cl, cnt = cell_i[o], cl[o], cnt[o]
+    lastm = np.r_[cell_i[1:] != cell_i[:-1], True]
+    tot = np.bincount(cell_i, weights=cnt.astype(np.float64), minlength=ftgt.size)
+    best_cell, best_cl = cell_i[lastm], cl[lastm]
+    keep = tot[best_cell] >= min_votes
+    return ftgt[best_cell[keep]], best_cl[keep]
+
+
+def free_ray_cells(O, P, gox, goy, res, gnx, gny, bz, min_h, max_h, end_margin, max_range, stride, target=None, step=None):
+    P = P[::max(int(stride), 1)]
+    P = P[np.all(np.isfinite(P), axis=1)]
+    if P.shape[0] == 0:
+        return np.empty(0, np.int64), np.empty(0, np.int64)
+    D = P - O
+    L = np.hypot(D[:, 0], D[:, 1])
+    dz = D[:, 2]
+    lo_h, hi_h = bz + min_h - O[2], bz + max_h - O[2]
+    with np.errstate(divide='ignore', invalid='ignore'):
+        t1 = np.where(dz != 0, lo_h / dz, np.where(lo_h <= 0, -np.inf, np.inf))
+        t2 = np.where(dz != 0, hi_h / dz, np.where(hi_h >= 0, np.inf, -np.inf))
+    ta = np.clip(np.minimum(t1, t2), 0.0, None)
+    tb = np.maximum(t1, t2)
+    tb = np.minimum(tb, np.minimum((L - end_margin) / np.maximum(L, 1e-6), max_range / np.maximum(L, 1e-6)))
+    a = ta * L
+    b = tb * L
+    keep = (b - a) > res
+    if not np.any(keep):
+        return np.empty(0, np.int64), np.empty(0, np.int64)
+    a, b, D, L = a[keep], b[keep], D[keep], L[keep]
+    st = res if step is None else step
+    n = np.floor((b - a) / st).astype(np.int64) + 1
+    ray = np.repeat(np.arange(n.size), n)
+    start = np.repeat(np.cumsum(n) - n, n)
+    dist = a[ray] + (np.arange(ray.size) - start) * st
+    f = dist / L[ray]
+    x = O[0] + f * D[ray, 0]
+    y = O[1] + f * D[ray, 1]
+    gi = np.floor((x - gox) / res).astype(np.int64)
+    gj = np.floor((y - goy) / res).astype(np.int64)
+    ok = (gi >= 0) & (gi < gnx) & (gj >= 0) & (gj < gny)
+    flat = gj[ok] * gnx + gi[ok]
+    ray = ray[ok]
+    if target is not None:
+        sel = target[flat]
+        flat, ray = flat[sel], ray[sel]
+    key = np.unique(flat * n.size + ray)
+    cells, counts = np.unique(key // n.size, return_counts=True)
+    return cells, counts
+
+
+def free_ground_cells(O, P, gox, goy, res, gnx, gny, bz, low_h, ground_tol, end_margin, max_range, stride, target):
+    P = P[::max(int(stride), 1)]
+    P = P[np.all(np.isfinite(P), axis=1)]
+    P = P[np.abs(P[:, 2] - bz) < ground_tol]
+    D = P - O
+    L = np.hypot(D[:, 0], D[:, 1])
+    dz = D[:, 2]
+    keep = (L > 0.5) & (L < max_range) & (dz < -0.05)
+    D, L, dz = D[keep], L[keep], dz[keep]
+    if L.size == 0:
+        return np.empty(0, np.int64), np.empty(0, np.int64)
+    a = np.maximum(L * (1.0 - low_h / (-dz)), 0.0)
+    b = L - end_margin
+    ok = (b - a) > res
+    a, b, D, L = a[ok], b[ok], D[ok], L[ok]
+    if L.size == 0:
+        return np.empty(0, np.int64), np.empty(0, np.int64)
+    n = np.floor((b - a) / res).astype(np.int64) + 1
+    ray = np.repeat(np.arange(n.size), n)
+    start = np.repeat(np.cumsum(n) - n, n)
+    dist = a[ray] + (np.arange(ray.size) - start) * res
+    f = dist / L[ray]
+    gi = np.floor((O[0] + f * D[ray, 0] - gox) / res).astype(np.int64)
+    gj = np.floor((O[1] + f * D[ray, 1] - goy) / res).astype(np.int64)
+    okc = (gi >= 0) & (gi < gnx) & (gj >= 0) & (gj < gny)
+    flat = gj[okc] * gnx + gi[okc]
+    ray = ray[okc]
+    sel = target[flat]
+    flat, ray = flat[sel], ray[sel]
+    key = np.unique(flat * n.size + ray)
+    return np.unique(key // n.size, return_counts=True)
 
 
 def decay(alpha, unseen, factor):
@@ -135,10 +276,11 @@ def position_points(cloud_scan, M_scan2map, M_scan2cam, K, width, height,
     overhead = (Zm - bz) > max_obs_h
     dist = np.hypot(X - bx, Y - by)
     ok = in_img & (~overhead) & (dist < map_write_max_range)
+    alto = in_img & overhead & (dist < map_write_max_range) & np.isfinite(Zm)
 
     Xz = np.where(np.isfinite(X), X, 0.0)
     Yz = np.where(np.isfinite(Y), Y, 0.0)
-    return uu, vv, X, Y, Xz, Yz, ok, dist
+    return uu, vv, X, Y, Xz, Yz, ok, dist, Zm, alto, in_img
 
 
 class Tracker:
@@ -212,6 +354,25 @@ class SemanticCostmapNode(Node):
         self.declare_parameter('map_jump_gate_deg', 2.0)
         self.declare_parameter('map_jump_hold_s', 1.0)
         self.declare_parameter('max_obstacle_height', 0.20)
+        self.declare_parameter('stacked_vote', False)
+        self.declare_parameter('ray_clear_enable', False)
+        self.declare_parameter('ray_clear_every_n', 5)
+        self.declare_parameter('ray_clear_stride', 4)
+        self.declare_parameter('ray_clear_min_h', 0.15)
+        self.declare_parameter('ray_clear_end_margin', 0.3)
+        self.declare_parameter('ray_clear_min_rays', 3)
+        self.declare_parameter('ray_clear_step', 1.0)
+        self.declare_parameter('ray_clear_protect_s', 10.0)
+        self.declare_parameter('ray_clear_protect_cells', 1)
+        self.declare_parameter('ray_clear_mode', 'banda')
+        self.declare_parameter('ost_write_range_m', 0.0)
+        self.declare_parameter('ost_classes', [2, 3, 4, 5])
+        self.declare_parameter('ray_clear_low_h', 0.12)
+        self.declare_parameter('ray_clear_ground_tol', 0.25)
+        self.declare_parameter('stacked_low_min', 0.15)
+        self.declare_parameter('stacked_high_max', 2.0)
+        self.declare_parameter('stacked_tol_cells', 1)
+        self.declare_parameter('stacked_min_votes', 3)
         self.declare_parameter('blocker_classes', DEFAULT_BLOCKERS)
         self.declare_parameter('dynamic_classes', DEFAULT_DYNAMIC)
         self.declare_parameter('dyn_v_thresh', 0.3)
@@ -275,6 +436,33 @@ class SemanticCostmapNode(Node):
                 self.create_subscription(PoseWithCovarianceStamped, self.loc_pose_topic,
                                          self.loc_cb_pwc, 10)
         self.max_obs_h = float(gp('max_obstacle_height').value)
+        self.rc_on = bool(gp('ray_clear_enable').value)
+        self.rc_every = max(int(gp('ray_clear_every_n').value), 1)
+        self.rc_stride = int(gp('ray_clear_stride').value)
+        self.rc_min_h = float(gp('ray_clear_min_h').value)
+        self.rc_margin = float(gp('ray_clear_end_margin').value)
+        self.rc_min_rays = int(gp('ray_clear_min_rays').value)
+        self.rc_step = float(gp('ray_clear_step').value)
+        self.rc_protect = float(gp('ray_clear_protect_s').value)
+        self.rc_dil = int(gp('ray_clear_protect_cells').value)
+        self.rc_mode = str(gp('ray_clear_mode').value)
+        self.ost_range = float(gp('ost_write_range_m').value)
+        self.ost_classes = [int(c) for c in gp('ost_classes').value]
+        self.rc_low_h = float(gp('ray_clear_low_h').value)
+        self.rc_ground_tol = float(gp('ray_clear_ground_tol').value)
+        self.rc_n = 0
+        self.rc_stats = [0, 0, 0, 0.0]
+        self.rc_last = time.monotonic()
+        self.stacked_on = bool(gp('stacked_vote').value)
+        self.stacked_low_min = float(gp('stacked_low_min').value)
+        self.stacked_high_max = float(gp('stacked_high_max').value)
+        self.stacked_tol = int(gp('stacked_tol_cells').value)
+        self.stacked_min_votes = int(gp('stacked_min_votes').value)
+        self._st_frames = 0
+        self._st_cells = 0
+        self._st_changed = 0
+        self._st_time = 0.0
+        self._st_last = time.monotonic()
 
         # --- LiDAR: cache della nuvola (sorgente di geometria) ---
         self.lidar_frame = gp('lidar_frame').value
@@ -283,10 +471,14 @@ class SemanticCostmapNode(Node):
         self.cloud = None            # Nx3 nel frame base_scan
         self.cloud_stamp = None
         self.cloud_t = -1e9
-        cloud_qos = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT,
-                               history=HistoryPolicy.KEEP_LAST, depth=1)
-        self.create_subscription(PointCloud2, gp('lidar_topic').value,
-                                 self.cloud_cb, cloud_qos)
+        self.declare_parameter('aggiorna', True)
+        self.declare_parameter('full_map_period_ferma_s', 5.0)
+        self.aggiorna = bool(self.get_parameter('aggiorna').value)
+        if self.aggiorna:
+            cloud_qos = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT,
+                                   history=HistoryPolicy.KEEP_LAST, depth=1)
+            self.create_subscription(PointCloud2, gp('lidar_topic').value,
+                                     self.cloud_cb, cloud_qos)
 
         blockers = gp('blocker_classes').value
         dynamic = gp('dynamic_classes').value
@@ -311,6 +503,7 @@ class SemanticCostmapNode(Node):
         self.grid_i8 = np.full((self.gny, self.gnx), -1, dtype=np.int8)
         self.alpha = np.zeros((self.gny, self.gnx, N_CLASSES), dtype=np.float32)
         self.known = np.zeros((self.gny, self.gnx), dtype=bool)
+        self.t_hit = np.full((self.gny, self.gnx), -np.inf, dtype=np.float64)
 
         self.bridge = CvBridge()
         self.K = None
@@ -318,10 +511,11 @@ class SemanticCostmapNode(Node):
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, None, spin_thread=True)
 
-        self.create_subscription(CameraInfo, gp('camera_info_topic').value, self.info_cb, 1)
-        seg_qos = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT,
-                             history=HistoryPolicy.KEEP_LAST, depth=1)
-        self.create_subscription(Image, gp('seg_topic').value, self.seg_cb, seg_qos)
+        if self.aggiorna:
+            self.create_subscription(CameraInfo, gp('camera_info_topic').value, self.info_cb, 1)
+            seg_qos = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT,
+                                 history=HistoryPolicy.KEEP_LAST, depth=1)
+            self.create_subscription(Image, gp('seg_topic').value, self.seg_cb, seg_qos)
 
         latched_qos = QoSProfile(reliability=ReliabilityPolicy.RELIABLE,
                                  durability=DurabilityPolicy.TRANSIENT_LOCAL,
@@ -357,9 +551,12 @@ class SemanticCostmapNode(Node):
                 self.get_logger().warn(f'Map to load not found: {load_path}')
         self.create_service(Trigger, '~/save_map', self.save_map_cb)
 
-        self.create_timer(self.full_map_period, self._full_map_timer)
+        self.create_timer(self.full_map_period if self.aggiorna
+                          else float(self.get_parameter('full_map_period_ferma_s').value), self._full_map_timer)
+        if not self.aggiorna:
+            self.get_logger().info('Mappa semantica FERMA: pubblico solo la mappa caricata, nessun aggiornamento.')
 
-        self.autosave = bool(map_name)
+        self.autosave = bool(map_name) and self.aggiorna
 
         self.get_logger().info(f'Maps folder: {self.maps_dir}')
         save_hint = self.map_save_path if self.map_save_path else f'{self.maps_dir}/semantic_map.npz'
@@ -428,6 +625,7 @@ class SemanticCostmapNode(Node):
                                       self.known.reshape(-1), self.lethal_classes,
                                       self.p_lethal).reshape(gny, gnx)
             self.grid_i8 = grid_to_i8(self.grid)
+            self.t_hit = np.full((gny, gnx), -np.inf, dtype=np.float64)
             self.get_logger().info(
                 f'Semantic map loaded from {path} ({self.gnx}x{self.gny}).')
         except Exception as e:
@@ -438,11 +636,16 @@ class SemanticCostmapNode(Node):
             if not path.endswith('.npz'):
                 path = path + '.npz'
             os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-            np.savez_compressed(path, grid=self.grid, alpha=self.alpha, known=self.known,
-                                cls=majority_class(self.alpha.reshape(-1, N_CLASSES)).reshape(
-                                    self.gny, self.gnx),
-                                gnx=self.gnx, gny=self.gny, res=self.res,
-                                gox=self.gox, goy=self.goy)
+            tmp = path[:-4] + '.tmp.npz'
+            with open(tmp, 'wb') as f:
+                np.savez_compressed(f, grid=self.grid, alpha=self.alpha, known=self.known,
+                                    cls=majority_class(self.alpha.reshape(-1, N_CLASSES)).reshape(
+                                        self.gny, self.gnx),
+                                    gnx=self.gnx, gny=self.gny, res=self.res,
+                                    gox=self.gox, goy=self.goy)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, path)
             self.get_logger().info(f'Semantic map saved to {path}.')
             return path
         except Exception as e:
@@ -498,6 +701,9 @@ class SemanticCostmapNode(Node):
         new_i8 = np.full((new_gny, new_gnx), -1, dtype=np.int8)
         new_i8[pb:pb + self.gny, pl:pl + self.gnx] = self.grid_i8
         self.grid_i8 = new_i8
+        new_th = np.full((new_gny, new_gnx), -np.inf, dtype=np.float64)
+        new_th[pb:pb + self.gny, pl:pl + self.gnx] = self.t_hit
+        self.t_hit = new_th
         self.grid = new_grid
         self.alpha = new_alpha
         self.known = new_known
@@ -561,6 +767,7 @@ class SemanticCostmapNode(Node):
         qb = T_base.transform.rotation
         yaw_b = np.arctan2(2.0 * (qb.w * qb.z + qb.x * qb.y),
                            1.0 - 2.0 * (qb.y * qb.y + qb.z * qb.z))
+        self._fov_pose = (float(origin[0]), float(origin[1]), float(yaw_b), float(bx), float(by))
 
         # ===== POSIZIONAMENTO LiDAR-PRIMARY =====
         # La posizione di ogni punto viene MISURATA dal LiDAR 3D (geometria accurata,
@@ -582,13 +789,19 @@ class SemanticCostmapNode(Node):
 
         M_scan2map = transform_to_matrix(T_scan)
         M_scan2cam = np.linalg.inv(M) @ M_scan2map      # base_scan -> camera ottica
-        uu, vv, X, Y, Xz, Yz, ok, dist = position_points(
+        uu, vv, X, Y, Xz, Yz, ok, dist, Zm, alto, in_img = position_points(
             self.cloud, M_scan2map, M_scan2cam, self.K, w, h,
             bz, self.max_obs_h, bx, by, self.map_write_max_range)
 
         classes = seg[vv, uu]
         costs = self.cost_lut[classes]
         ok = ok & (costs >= 0)
+        alto = alto & (costs >= 0)
+        if self.ost_range > self.map_write_max_range:
+            far = (in_img & np.isin(classes, self.ost_classes) & (dist < self.ost_range)
+                   & ((Zm - bz) <= self.stacked_high_max) & np.isfinite(Zm))
+            ok = ok | far
+            alto = alto & ~far
 
         # --- esclusione dinamici (per classe) + occlusioni + pesi ---
         full_dyn = self.dyn_lut[seg].astype(np.uint8)
@@ -603,6 +816,7 @@ class SemanticCostmapNode(Node):
 
             if not self.map_static_dynamics:
                 ok = ok & (~in_dyn)
+                alto = alto & (~in_dyn)
             else:
                 _, lbl = cv2.connectedComponents(full_dyn)
                 comp_s = lbl[vv, uu]
@@ -623,6 +837,7 @@ class SemanticCostmapNode(Node):
                     if self.tracker.confirmed_static(tr):
                         keep |= (comp_s == cid)
                 ok = ok & (~(in_dyn & ~keep))
+                alto = alto & (~(in_dyn & ~keep))
 
         camx, camy = origin[0], origin[1]
         ang = np.arctan2(Yz - camy, Xz - camx)
@@ -635,6 +850,7 @@ class SemanticCostmapNode(Node):
         occluded = rad > (occ_r[sec] + self.occ_margin)
 
         ok = ok & (~occluded)
+        alto = alto & (~occluded)
         w_dist = np.clip(1.0 - dist / self.max_range, self.w_dist_min, 1.0)
         wpix = w_dist
 
@@ -679,6 +895,26 @@ class SemanticCostmapNode(Node):
         cells = flat_s[last]
         cell_cls = cl_u[order][last]
         cell_w = w_u[order][last]
+        if self.stacked_on:
+            t_st = time.perf_counter()
+            cand = (ok | alto) & (gi >= 0) & (gi < self.gnx) & (gj >= 0) & (gj < self.gny)
+            sc_cells, sc_cls = stacked_classes(
+                gi[cand], gj[cand], Zm[cand], classes[cand], self.gnx, self.gny, cells,
+                self.stacked_low_min, self.max_obs_h, self.stacked_high_max,
+                self.stacked_tol, self.stacked_min_votes)
+            if sc_cells.size:
+                pos = np.searchsorted(cells, sc_cells)
+                self._st_changed += int(np.count_nonzero(cell_cls[pos] != sc_cls))
+                cell_cls[pos] = sc_cls.astype(cell_cls.dtype)
+            self._st_frames += 1
+            self._st_cells += int(sc_cells.size)
+            self._st_time += time.perf_counter() - t_st
+            if time.monotonic() - self._st_last > 30.0:
+                nf = max(self._st_frames, 1)
+                self.get_logger().info(
+                    f'voto impilato: fotogrammi {self._st_frames}, celle votate {self._st_cells}, '
+                    f'classe cambiata {self._st_changed}, {1000.0 * self._st_time / nf:.1f} ms per fotogramma')
+                self._st_last = time.monotonic()
 
         A = self.alpha.reshape(-1, N_CLASSES)
         KN = self.known.reshape(-1)
@@ -702,7 +938,67 @@ class SemanticCostmapNode(Node):
             crossed = (((old < 50) & (new >= 50)) | ((old >= 50) & (new < 50))
                        | ((old < 0) & (new >= 0)))
             self._significant_change = int(np.count_nonzero(crossed & changed))
+        if self.rc_on:
+            self.ray_clear(M_scan2map, X, Y, Zm, bz, stamp_sec)
         self.publish_map(bx, by, msg.header.stamp)
+
+    def ray_clear(self, M_scan2map, X, Y, Zm, bz, stamp_sec):
+        fin = np.isfinite(X) & np.isfinite(Y) & np.isfinite(Zm)
+        hit = fin & ((Zm - bz) >= self.rc_min_h) & ((Zm - bz) <= self.stacked_high_max)
+        if np.any(hit):
+            hi = np.floor((X[hit] - self.gox) / self.res).astype(np.int64)
+            hj = np.floor((Y[hit] - self.goy) / self.res).astype(np.int64)
+            hk = (hi >= 0) & (hi < self.gnx) & (hj >= 0) & (hj < self.gny)
+            hi, hj = hi[hk], hj[hk]
+            d = self.rc_dil
+            for di in range(-d, d + 1):
+                for dj in range(-d, d + 1):
+                    ii, jj = hi + di, hj + dj
+                    kk = (ii >= 0) & (ii < self.gnx) & (jj >= 0) & (jj < self.gny)
+                    self.t_hit.reshape(-1)[jj[kk] * self.gnx + ii[kk]] = stamp_sec
+        self.rc_n += 1
+        if self.rc_n % self.rc_every:
+            return
+        t0 = time.perf_counter()
+        O = M_scan2map[:3, 3]
+        V = self.grid.reshape(-1)
+        target = (V >= 100.0) & (self.t_hit.reshape(-1) < stamp_sec - self.rc_protect)
+        self.rc_stats[0] += 1
+        if not np.any(target):
+            self.rc_stats[3] += time.perf_counter() - t0
+            return
+        P = np.stack([X, Y, Zm], axis=1)
+        if self.rc_mode == 'suolo':
+            cells, counts = free_ground_cells(O, P, self.gox, self.goy, self.res, self.gnx, self.gny, bz,
+                                              self.rc_low_h, self.rc_ground_tol, self.rc_margin,
+                                              self.map_write_max_range, self.rc_stride, target)
+        else:
+            cells, counts = free_ray_cells(O, P, self.gox, self.goy, self.res, self.gnx, self.gny, bz,
+                                           self.rc_min_h, self.max_obs_h, self.rc_margin,
+                                           self.map_write_max_range, self.rc_stride, target, 2.0 * self.res)
+        c = cells[counts >= self.rc_min_rays]
+        if c.size:
+            A = self.alpha.reshape(-1, N_CLASSES)
+            KN = self.known.reshape(-1)
+            sub = A[c]
+            sub[:, self.lethal_classes] = np.maximum(sub[:, self.lethal_classes] - self.rc_step, 0.0)
+            A[c] = sub
+            gone = A[c].sum(axis=1) < self.alpha_min
+            KN[c[gone]] = False
+            new = expected_cost(A[c], self.cost_vec, KN[c], self.lethal_classes, self.p_lethal)
+            V[c] = new
+            self.grid_i8.reshape(-1)[c] = grid_to_i8(new)
+            self._map_dirty = True
+            self._dirty_since_save = True
+            self.rc_stats[1] += int(c.size)
+            self.rc_stats[2] += int(np.count_nonzero(new < 100.0))
+        self.rc_stats[3] += time.perf_counter() - t0
+        if time.monotonic() - self.rc_last > 30.0:
+            n = max(self.rc_stats[0], 1)
+            self.get_logger().info(
+                f'pulizia raggi: passate {self.rc_stats[0]}, celle letali toccate {self.rc_stats[1]}, '
+                f'tornate non letali {self.rc_stats[2]}, {1000.0 * self.rc_stats[3] / n:.1f} ms per passata')
+            self.rc_last = time.monotonic()
 
     def map_jump_ok(self, stamp, t, bx, by, bz):
         if self.jump_gate is None:
@@ -773,19 +1069,21 @@ class SemanticCostmapNode(Node):
         self.publish_range_marker(bx, by, stamp)
 
     def publish_range_marker(self, bx, by, stamp):
-        """Outline of the area actually written to the map."""
-        h = getattr(self, '_hull', None)
-        if h is None or len(h) != 9:
+        fp = getattr(self, '_fov_pose', None)
+        if fp is None or self.K is None:
             return
-        f_lo, ln_min, ln_max, f_hi, lf_min, lf_max, hx, hy, hyaw = h
-
         from geometry_msgs.msg import Point
-        c, sn = np.cos(hyaw), np.sin(hyaw)
-
-        def P(f, l):
-            return Point(x=float(hx + f * c - l * sn),
-                         y=float(hy + f * sn + l * c), z=0.05)
-
+        cx, cy, yaw, px, py = fp
+        half = float(np.arctan2(self.K[0, 2], self.K[0, 0]))
+        R = self.map_write_max_range
+        pts = [Point(x=cx, y=cy, z=0.05)]
+        for a in np.linspace(-half, half, 25):
+            dx, dy = np.cos(yaw + a), np.sin(yaw + a)
+            ox, oy = cx - px, cy - py
+            b = dx * ox + dy * oy
+            t = -b + np.sqrt(max(b * b - (ox * ox + oy * oy - R * R), 0.0))
+            pts.append(Point(x=float(cx + t * dx), y=float(cy + t * dy), z=0.05))
+        pts.append(Point(x=cx, y=cy, z=0.05))
         m = Marker()
         m.header.frame_id = self.target
         m.header.stamp = stamp
@@ -793,8 +1091,7 @@ class SemanticCostmapNode(Node):
         m.type = Marker.LINE_STRIP; m.action = Marker.ADD
         m.scale.x = 0.05
         m.color.r = 1.0; m.color.g = 0.9; m.color.b = 0.0; m.color.a = 0.9
-        m.points = [P(f_lo, ln_max), P(f_hi, lf_max),
-                    P(f_hi, lf_min), P(f_lo, ln_min), P(f_lo, ln_max)]
+        m.points = pts
         self.pub_range.publish(m)
 
     def cloud_cb(self, msg: PointCloud2):
@@ -833,9 +1130,14 @@ class SemanticCostmapNode(Node):
         self.cloud_stamp = msg.header.stamp
 
 
+def _interrompi(signum, frame):
+    raise KeyboardInterrupt
+
+
 def main():
     rclpy.init()
     node = SemanticCostmapNode()
+    signal.signal(signal.SIGHUP, _interrompi)
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

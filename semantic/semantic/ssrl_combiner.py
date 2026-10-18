@@ -206,6 +206,7 @@ class SSRLCombiner(Node):
 
         # --- fusione elevation ---
         self.declare_parameter('use_elevation', True)
+        self.declare_parameter('elev_where_sem_unknown', False)
         self.declare_parameter('w_elev', 0.6)
         self.declare_parameter('soft_ceiling', 97)
         self.declare_parameter('elev_can_be_lethal', False)
@@ -232,6 +233,7 @@ class SSRLCombiner(Node):
         self.soft_ceiling = float(gp('soft_ceiling').value)
         self.elev_can_be_lethal = bool(gp('elev_can_be_lethal').value)
         self.elev_lethal_thr = float(gp('elev_lethal_thr').value)
+        self.elev_where_sem_unknown = bool(gp('elev_where_sem_unknown').value)
         self.grid_tol_cells = float(gp('grid_tol_cells').value)
 
         qos_latched = QoSProfile(reliability=ReliabilityPolicy.RELIABLE,
@@ -357,12 +359,14 @@ class SSRLCombiner(Node):
         # --- ELEVATION: costruita dal LiDAR con un ciclo proprio, quindi NON
         # derivata dalla semantica e non soggetta al problema delle istantanee.
         elev = None
+        elev_known = None
         if self.use_elevation and self.elev is not None:
             einfo, earr = self.elev
             if self._compatible(self.elevation_topic, einfo, info):
                 elev = align_to_ref(earr, einfo.origin.position.x,
                                     einfo.origin.position.y,
-                                    ref_ox, ref_oy, res, ref_h, ref_w, fill=0)
+                                    ref_ox, ref_oy, res, ref_h, ref_w, fill=-1)
+                elev_known = elev >= 0
                 elev = np.clip(elev, 0, 100).astype(np.float32)
 
         total = fuse_elevation(base, elev, self.w_elev, self.soft_ceiling,
@@ -370,6 +374,11 @@ class SSRLCombiner(Node):
 
         total = np.clip(np.round(total), 0, 100)
         total[~known] = -1
+        if self.elev_where_sem_unknown and elev is not None:
+            solo = ~known & elev_known
+            solo_cost = fuse_elevation(np.zeros_like(elev), elev, self.w_elev, self.soft_ceiling,
+                                       self.elev_lethal_thr, self.elev_can_be_lethal)
+            total[solo] = np.clip(np.round(solo_cost[solo]), 0, 100)
         self.pub.publish(self._grid_msg(total, header, info))
 
 
