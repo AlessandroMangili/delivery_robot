@@ -18,7 +18,8 @@
     initial_pose_qy: 0.0
     use_odom: false
     use_twist_prediction: false
-    use_odom_tf_prediction: false
+    use_odom_tf_prediction: true
+    constrain_odom_tf_prediction_to_planar: true
     use_imu: false
     use_continuous_time_deskew: false
     enable_reinitialization_request_output: true
@@ -39,6 +40,7 @@
     borderline_seed_gate_score_threshold: 5.25
     borderline_seed_gate_min_seed_translation_m: 1.0
     enable_map_odom_tf: true
+    map_odom_tf_future_s: 0.5
     level_map_to_odom: true
     global_frame_id: map
     odom_frame_id: odom
