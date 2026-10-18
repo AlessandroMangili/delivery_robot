@@ -18,6 +18,7 @@ install(DIRECTORY
 
 install(PROGRAMS
   scripts/cmd_vel_ponte.py
+  scripts/goal_foxglove.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

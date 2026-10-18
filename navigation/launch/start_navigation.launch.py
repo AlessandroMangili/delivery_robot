@@ -5,7 +5,7 @@ from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
-from launch_ros.actions import Node
+from launch_ros.actions import Node, SetParameter
 from ament_index_python.packages import get_package_share_directory
 from nav2_common.launch import RewrittenYaml
 
@@ -34,6 +34,16 @@ def generate_launch_description():
         description='false = non inoltra i comandi al Pi (prove sulle bag)'
     )
 
+    libera_impronta_arg = DeclareLaunchArgument(
+        'libera_impronta', default_value='false',
+        description='true = le celle letali della mappa ferma sotto l impronta attuale del robot non bloccano MPPI'
+    )
+
+    compensa_rotazione_arg = DeclareLaunchArgument(
+        'compensa_rotazione', default_value='false',
+        description='true = il ponte usa il giroscopio per sbloccare le rotazioni ferme e frenare gli scatti'
+    )
+
     nav2_navigation_launch_path = os.path.join(
         get_package_share_directory('nav2_bringup'),
         'launch',
@@ -43,7 +53,9 @@ def generate_launch_description():
     navigation_params = RewrittenYaml(
         source_file=os.path.join(get_package_share_directory('navigation'), 'config', 'navigation.yaml'),
         param_rewrites={'use_sim_time': LaunchConfiguration('use_sim_time'),
-                        'footprint': robot_footprint()},
+                        'footprint': robot_footprint(),
+                        'libera_impronta': LaunchConfiguration('libera_impronta'),
+                        'compensa_rotazione': LaunchConfiguration('compensa_rotazione')},
         convert_types=True
     )
 
@@ -82,13 +94,25 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration('muovi_robot'))
     )
 
+    goal_foxglove_node = Node(
+        package='navigation',
+        executable='goal_foxglove.py',
+        name='goal_foxglove',
+        output='screen',
+        parameters=[navigation_params]
+    )
+
     launchDescriptionObject = LaunchDescription()
 
     launchDescriptionObject.add_action(sim_time_arg)
     launchDescriptionObject.add_action(muovi_robot_arg)
+    launchDescriptionObject.add_action(libera_impronta_arg)
+    launchDescriptionObject.add_action(compensa_rotazione_arg)
+    launchDescriptionObject.add_action(SetParameter(name='bond_timeout', value=20.0))
     launchDescriptionObject.add_action(navigation_launch)
     launchDescriptionObject.add_action(collision_monitor_node)
     launchDescriptionObject.add_action(collision_monitor_lifecycle)
     launchDescriptionObject.add_action(cmd_vel_ponte_node)
+    launchDescriptionObject.add_action(goal_foxglove_node)
 
     return launchDescriptionObject

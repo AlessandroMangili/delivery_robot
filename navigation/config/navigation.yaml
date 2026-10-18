@@ -5,7 +5,7 @@ bt_navigator:
     robot_base_frame: base_footprint
     odom_topic: /odometry/local
     bt_loop_duration: 10
-    default_server_timeout: 20
+    default_server_timeout: 1000
     wait_for_service_timeout: 1000
     plugin_lib_names:
       - nav2_compute_path_to_pose_action_bt_node
@@ -197,10 +197,12 @@ local_costmap:
         plugin: "dynamic_costmap_layer/SemanticLayer"
         enabled: true
         map_topic: /ssrl_costmap
+        libera_impronta: false
+        margine_impronta: 0.05
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        inflation_radius: 0.7
-        cost_scaling_factor: 3.0
+        inflation_radius: 0.6
+        cost_scaling_factor: 6.0
       always_send_full_costmap: true
 
 global_costmap:
@@ -225,8 +227,8 @@ global_costmap:
         subscribe_to_updates: false
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        inflation_radius: 0.8
-        cost_scaling_factor: 2.5
+        inflation_radius: 0.6
+        cost_scaling_factor: 6.0
       always_send_full_costmap: true
 
 planner_server:
@@ -323,7 +325,7 @@ collision_monitor:
     source_timeout: 1.0
     base_shift_correction: true
     stop_pub_timeout: 2.0
-    polygons: ["PolygonStop", "PolygonSlow"]
+    polygons: ["PolygonStop"]
     PolygonStop:
       type: "polygon"
       points: [0.75, 0.38, 0.75, -0.38, 0.45, -0.38, 0.45, 0.38]
@@ -357,3 +359,22 @@ cmd_vel_ponte:
     frame_id: base_link
     max_lineare: 0.35
     max_angolare: 0.35
+    compensa_rotazione: false
+    imu_topic: /mavros/imu/data
+    comp_w_minima: 0.03
+    comp_soglia_ferma: 0.3
+    comp_soglia_gira: 0.6
+    comp_salita: 0.6
+    comp_discesa: 2.0
+    comp_spinta_max: 0.15
+    comp_scatto: 2.0
+    comp_max_angolare: 0.45
+    comp_imu_eta_max: 0.2
+
+goal_foxglove:
+  ros__parameters:
+    use_sim_time: false
+    in_topic: /goal_foxglove
+    out_topic: /goal_pose
+    frame: map
+    distanza_max_m: 150.0
