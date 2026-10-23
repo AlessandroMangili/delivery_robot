@@ -32,6 +32,8 @@ void SemanticLayer::onInitialize()
   declareParameter("margine_impronta", rclcpp::ParameterValue(0.05));
   node->get_parameter(name_ + "." + "libera_impronta", libera_impronta_);
   node->get_parameter(name_ + "." + "margine_impronta", margine_impronta_);
+  declareParameter("libera_impronta_ostacoli", rclcpp::ParameterValue(false));
+  node->get_parameter(name_ + "." + "libera_impronta_ostacoli", libera_impronta_ostacoli_);
 
   enabled_ = enabled_layer_;
   current_ = true;
@@ -182,6 +184,32 @@ void SemanticLayer::updateCosts(
       if (old_cost == NO_INFORMATION || old_cost < cost) {
         master_grid.setCost(
           static_cast<unsigned int>(i), static_cast<unsigned int>(j), cost);
+      }
+    }
+  }
+
+  if (libera_impronta_ostacoli_ && !impronta.empty()) {
+    const double raggio = std::hypot(
+      std::max(-ip_x0, ip_x1), std::max(-ip_y0, ip_y1));
+    int ci0, cj0, ci1, cj1;
+    master_grid.worldToMapEnforceBounds(robot_x_ - raggio, robot_y_ - raggio, ci0, cj0);
+    master_grid.worldToMapEnforceBounds(robot_x_ + raggio, robot_y_ + raggio, ci1, cj1);
+    for (int j = std::max(cj0, min_j); j <= std::min(cj1, max_j - 1); ++j) {
+      for (int i = std::max(ci0, min_i); i <= std::min(ci1, max_i - 1); ++i) {
+        const auto ui = static_cast<unsigned int>(i);
+        const auto uj = static_cast<unsigned int>(j);
+        if (master_grid.getCost(ui, uj) != LETHAL_OBSTACLE) {
+          continue;
+        }
+        double wx, wy;
+        master_grid.mapToWorld(ui, uj, wx, wy);
+        const double dx = wx - robot_x_;
+        const double dy = wy - robot_y_;
+        const double u = rc * dx + rs * dy;
+        const double w = -rs * dx + rc * dy;
+        if (u >= ip_x0 && u <= ip_x1 && w >= ip_y0 && w <= ip_y1) {
+          master_grid.setCost(ui, uj, INSCRIBED_INFLATED_OBSTACLE);
+        }
       }
     }
   }

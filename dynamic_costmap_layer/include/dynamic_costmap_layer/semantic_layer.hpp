@@ -41,6 +41,7 @@ private:
   std::string topic_;
   bool enabled_layer_{true};
   bool libera_impronta_{false};
+  bool libera_impronta_ostacoli_{false};
   double margine_impronta_{0.05};
   double robot_x_{0.0};
   double robot_y_{0.0};
