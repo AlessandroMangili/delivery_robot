@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
 import math
+from collections import deque
+from collections import deque
 import numpy as np
 
 import rclpy
@@ -15,6 +17,7 @@ from visualization_msgs.msg import Marker, MarkerArray
 from std_msgs.msg import ColorRGBA
 from nav_msgs.msg import OccupancyGrid
 from sensor_msgs.msg import Image, CameraInfo
+from vision_msgs.msg import Detection2DArray
 
 # Messaggi delle tracce consumati dal critic spazio-temporale MPPI.
 # (pacchetto confermato dall'header del critic: dynamic_tracker_msgs)
@@ -101,6 +104,10 @@ class Track:
         self.sem_class = -1              # classe Cityscapes dinamica (-1 = ignota)
         self.sem_static_count = 0        # letture consecutive su classe statica
         self.sem_dynamic_count = 0       # letture consecutive su classe dinamica
+        self.yolo_class = ''
+        self.yolo_count = 0
+        self.yolo_miss = 0
+        self.storia = deque(maxlen=64)
 
 
 class MultiObjectTracker:
@@ -125,10 +132,12 @@ class MultiObjectTracker:
         matches, un_tracks, un_dets = self._associate(dets)
 
         # 3. correzione delle tracce associate
+        self.now = getattr(self, 'now', 0.0) + dt
         for ti, di in matches:
             self.tracks[ti].kf.update(dets[di])
             self.tracks[ti].hits += 1
             self.tracks[ti].time_since_update = 0
+            self.tracks[ti].storia.append((self.now, float(dets[di][0]), float(dets[di][1])))
             if self.tracks[ti].hits >= self.p['min_hits']:
                 self.tracks[ti].confirmed = True
 
@@ -140,6 +149,22 @@ class MultiObjectTracker:
         # 5. morte: rimuovi le tracce senza update da troppo tempo
         self.tracks = [t for t in self.tracks
                        if t.time_since_update <= self.p['max_age']]
+        dd = self.p.get('dup_dist', 0.0)
+        if dd > 0.0:
+            conf = sorted([t for t in self.tracks if t.confirmed], key=lambda t: t.id)
+            doppie = set()
+            for a in range(len(conf)):
+                if conf[a].id in doppie:
+                    continue
+                for b in range(a + 1, len(conf)):
+                    ta, tb = conf[a], conf[b]
+                    if tb.id in doppie:
+                        continue
+                    if (math.hypot(*(ta.kf.pos - tb.kf.pos)) < dd and
+                            math.hypot(*(ta.kf.vel - tb.kf.vel)) < self.p['dup_vel']):
+                        doppie.add(tb.id)
+            if doppie:
+                self.tracks = [t for t in self.tracks if t.id not in doppie]
 
         # 6. conferma dinamico (life-cycle): moto COERENTE per promote_frames frame
         #    consecutivi + gate SNR (velocità significativa vs la sua incertezza).
@@ -151,6 +176,11 @@ class MultiObjectTracker:
             sv = t.kf.vel_std()
             moving = ((speed >= self.p['min_speed']) and
                       (self.p['snr_min'] <= 0.0 or speed >= self.p['snr_min'] * sv))
+            win = self.p.get('disp_window', 0.0)
+            if moving and win > 0.0:
+                h = [q for q in t.storia if self.now - q[0] <= win]
+                if len(h) < 3 or math.hypot(h[-1][1] - h[0][1], h[-1][2] - h[0][2]) < self.p['disp_min']:
+                    moving = False
             if moving:
                 t.mov_count += 1
                 t.still_count = 0
@@ -339,6 +369,10 @@ class Lidar3DTracker(Node):
         d('snr_min', 1.0)            # velocità >= snr_min * incertezza -> direzione affidabile
         d('promote_frames', 4)       # frame di moto coerente consecutivi per promuovere
         d('demote_frames', 8)        # frame lenti consecutivi per retrocedere
+        d('disp_window', 0.0)
+        d('disp_min', 0.3)
+        d('dup_dist', 0.0)
+        d('dup_vel', 0.8)
 
         # cross-check con la mappa semantica statica (/semantic_costmap)
         # una traccia su una cella occupata (struttura mappata) è un falso
@@ -360,6 +394,17 @@ class Lidar3DTracker(Node):
         d('sem_static_hits', 2)              # letture statiche consecutive per scartare
         d('static_seg_classes', [2, 3, 4, 5, 7, 8])          # building/wall/fence/pole/sign/veg
         d('dynamic_seg_classes', [11, 12, 13, 14, 15, 16, 17, 18])
+
+        d('use_yolo_gate', True)
+        d('yolo_topic', '/camera_detections')
+        d('yolo_max_age', 0.5)
+        d('yolo_probe_heights', [0.4, 0.9, 1.4])
+        d('yolo_box_margin', 0.10)
+        d('yolo_hits', 2)
+        d('yolo_forget', 10)
+        d('publish_yolo_static', True)
+        d('yolo_static_classes', ['person'])
+        d('lidar_publish_range', 0.0)
 
         # visualizzazione
         d('marker_z', 0.6)
@@ -390,6 +435,17 @@ class Lidar3DTracker(Node):
         self.static_set = set(int(c) for c in g('static_seg_classes'))
         self.dynamic_set = set(int(c) for c in g('dynamic_seg_classes'))
 
+        self.use_yolo_gate = bool(g('use_yolo_gate'))
+        self.yolo_max_age = float(g('yolo_max_age'))
+        self.yolo_heights = [float(z) for z in g('yolo_probe_heights')]
+        self.yolo_margin = float(g('yolo_box_margin'))
+        self.yolo_hits = int(g('yolo_hits'))
+        self.yolo_forget = int(g('yolo_forget'))
+        self.publish_yolo_static = bool(g('publish_yolo_static'))
+        self.yolo_static = set(str(c) for c in g('yolo_static_classes'))
+        self.lidar_publish_range = float(g('lidar_publish_range'))
+        self._robot_xy = None
+
         self.params = dict(
             accel_std=float(g('accel_std')),
             meas_std=float(g('meas_std')),
@@ -404,6 +460,10 @@ class Lidar3DTracker(Node):
             snr_min=float(g('snr_min')),
             promote_frames=int(g('promote_frames')),
             demote_frames=int(g('demote_frames')),
+            disp_window=float(g('disp_window')),
+            disp_min=float(g('disp_min')),
+            dup_dist=float(g('dup_dist')),
+            dup_vel=float(g('dup_vel')),
         )
         self.mot = MultiObjectTracker(self.params)
 
@@ -447,6 +507,8 @@ class Lidar3DTracker(Node):
         self.seg = None
         self.seg_stamp = None
         self.K = None
+        self.cam_wh = None
+        self.yolo = deque(maxlen=40)
         if self.use_semantic_gate:
             seg_qos = QoSProfile(depth=1,
                                  reliability=ReliabilityPolicy.BEST_EFFORT,
@@ -454,14 +516,20 @@ class Lidar3DTracker(Node):
             self.sub_seg = self.create_subscription(
                 Image, g('seg_topic'), self.on_seg, seg_qos,
                 callback_group=self.cb_side)
+        if self.use_semantic_gate or self.use_yolo_gate:
             self.sub_cam = self.create_subscription(
                 CameraInfo, g('camera_info_topic'), self.on_caminfo, 1,
+                callback_group=self.cb_side)
+        if self.use_yolo_gate:
+            self.sub_yolo = self.create_subscription(
+                Detection2DArray, g('yolo_topic'), self.on_yolo, 10,
                 callback_group=self.cb_side)
 
         self._frame = 0
         self.last_t = None
         self._n_suppressed = 0
         self._n_sem_suppressed = 0
+        self._yolo_diag = {'ok': 0, 'senza_dati': 0, 'vecchie': 0, 'senza_tf': 0}
         self.get_logger().info(
             f"lidar3d_tracker avviato: {self.input_topic} -> tracce in "
             f"'{self.tracking_frame}' | critic:'{self.tracks_topic}'")
@@ -479,13 +547,76 @@ class Lidar3DTracker(Node):
 
     def on_caminfo(self, msg):
         self.K = np.array(msg.k, dtype=float).reshape(3, 3)
+        self.cam_wh = (int(msg.width), int(msg.height))
 
-    def _lookup_cam(self):
+    def on_yolo(self, msg):
+        box = []
+        cls = []
+        for det in msg.detections:
+            if not det.results:
+                continue
+            cx, cy = det.bbox.center.position.x, det.bbox.center.position.y
+            mw = det.bbox.size_x * (0.5 + self.yolo_margin)
+            mh = det.bbox.size_y * (0.5 + self.yolo_margin)
+            box.append((cx - mw, cy - mh, cx + mw, cy + mh))
+            cls.append(det.results[0].hypothesis.class_id)
+        self.yolo.append((msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9,
+                          np.array(box, dtype=float).reshape(-1, 4), cls, msg.header.stamp))
+
+    def _update_yolo(self, tracks, t_now):
+        if not self.use_yolo_gate:
+            return
+        if not self.yolo or self.K is None or self.cam_wh is None:
+            self._yolo_diag['senza_dati'] += 1
+            return
+        t_yolo, box, cls, stamp_yolo = min(list(self.yolo), key=lambda y: abs(y[0] - t_now))
+        if abs(t_now - t_yolo) > self.yolo_max_age:
+            self._yolo_diag['vecchie'] += 1
+            self._yolo_diag['ultimo_scarto'] = round(t_now - t_yolo, 2)
+            return
+        tf_cam = self._lookup_cam(stamp_yolo)
+        if tf_cam is None:
+            self._yolo_diag['senza_tf'] += 1
+            return
+        self._yolo_diag['ok'] += 1
+        w, h = self.cam_wh
+        for t in tracks:
+            if not t.confirmed:
+                continue
+            pts = np.array([[t.kf.pos[0], t.kf.pos[1], z] for z in self.yolo_heights])
+            pix = [project_to_pixel(self.K, p, w, h) for p in self._apply_tf(tf_cam, pts)]
+            pix = [p for p in pix if p is not None]
+            if not pix:
+                continue
+            trovata = ''
+            for (x0, y0, x1, y1), c in zip(box, cls):
+                if any(x0 <= u <= x1 and y0 <= v <= y1 for u, v in pix):
+                    trovata = c
+                    break
+            if trovata:
+                t.yolo_count += 1
+                t.yolo_miss = 0
+                if t.yolo_count >= self.yolo_hits:
+                    t.yolo_class = trovata
+            else:
+                t.yolo_count = 0
+                t.yolo_miss += 1
+                if t.yolo_miss >= self.yolo_forget:
+                    t.yolo_class = ''
+
+    def _lookup_cam(self, stamp=None):
         """TF tracking_frame -> camera_frame, NON bloccante (timeout 0, ultima TF).
         Il gate camera legge solo la classe a un pixel, non stima velocità: un
         piccolo sfasamento temporale lo assorbe il patch di maggioranza. Timeout 0
         = ritorna subito se la TF non c'è, così NON blocca on_dets né affama il
         thread del listener TF (era questo a far slittare la lookup delle detection)."""
+        if stamp is not None:
+            try:
+                return self.tf_buffer.lookup_transform(
+                    self.camera_frame, self.tracking_frame,
+                    rclpy.time.Time.from_msg(stamp), timeout=Duration(seconds=0.0))
+            except TransformException:
+                pass
         try:
             return self.tf_buffer.lookup_transform(
                 self.camera_frame, self.tracking_frame,
@@ -606,6 +737,7 @@ class Lidar3DTracker(Node):
         tf = self._lookup(msg.header.frame_id, stamp)
         if tf is None:
             return
+        self._robot_xy = (tf.transform.translation.x, tf.transform.translation.y)
 
         if len(msg.poses) == 0:
             dets = np.zeros((0, 2))
@@ -616,6 +748,7 @@ class Lidar3DTracker(Node):
 
         tracks = self.mot.step(dets, dt)
         self._update_semantics(tracks)
+        self._update_yolo(tracks, t_now)
         self.publish(stamp, tracks)
 
         if self.diag_period_frames > 0 and self._frame % self.diag_period_frames == 0:
@@ -626,6 +759,7 @@ class Lidar3DTracker(Node):
                 f"confermate={n_conf} dinamiche={n_dyn} "
                 f"soppresse_mappa={self._n_suppressed} "
                 f"soppresse_sem={self._n_sem_suppressed} "
+                f"yolo={sum(1 for t in tracks if t.yolo_class)} {self._yolo_diag} "
                 f"recuperi={getattr(self.mot, '_n_recovered', 0)}")
 
     # -----------------------------------------------------------------------
@@ -637,7 +771,13 @@ class Lidar3DTracker(Node):
         aggiorna i contatori diagnostici senza duplicare la logica."""
         if not t.confirmed:
             return False, False, False
+        if self.publish_yolo_static and t.yolo_class in self.yolo_static:
+            return t.time_since_update <= self.coast_publish_frames, False, False
         dynamic = t.published_dynamic
+        if (dynamic and self.lidar_publish_range > 0.0 and self._robot_xy is not None and
+                math.hypot(t.kf.pos[0] - self._robot_xy[0],
+                           t.kf.pos[1] - self._robot_xy[1]) > self.lidar_publish_range):
+            dynamic = False
         sup_map = False
         sup_sem = False
         # gate mappa statica: traccia dinamica su struttura mappata = falso positivo
@@ -697,7 +837,7 @@ class Lidar3DTracker(Node):
                 ]
                 ma.markers.append(arr)
 
-            label = CITYSCAPES_NAMES.get(t.sem_class, '?')
+            label = t.yolo_class or CITYSCAPES_NAMES.get(t.sem_class, '?')
             txt = self._mk(stamp, 'tracks', base + 2, Marker.TEXT_VIEW_FACING,
                            px, py, self.marker_z + 1.0,
                            ColorRGBA(r=1.0, g=1.0, b=1.0, a=0.9))

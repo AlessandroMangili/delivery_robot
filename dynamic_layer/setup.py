@@ -14,6 +14,7 @@ setup(
         ('share/' + package_name, ['package.xml']),
         (os.path.join('share', package_name, 'launch'), glob('launch/*.launch.py')),
         (os.path.join('share', package_name, 'config'), glob('config/*.yaml')),
+        (os.path.join('share', package_name, 'models'), glob('models/*.pt')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -30,6 +31,7 @@ setup(
         'console_scripts': [
             'pointcloud_detector = dynamic_layer.pointcloud_detector:main',
             'lidar3d_tracker = dynamic_layer.lidar3d_tracker:main',
+            'camera_detector = dynamic_layer.camera_detector:main',
         ],
     },
 )

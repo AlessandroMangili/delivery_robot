@@ -18,6 +18,9 @@
   <test_depend>python3-pytest</test_depend>
 
   <exec_depend>dynamic_tracker_msgs</exec_depend>
+  <exec_depend>vision_msgs</exec_depend>
+  <exec_depend>cv_bridge</exec_depend>
+  <exec_depend>localization</exec_depend>
 
   <export>
     <build_type>ament_python</build_type>

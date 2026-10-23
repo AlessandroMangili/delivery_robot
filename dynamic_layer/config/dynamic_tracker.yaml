@@ -1,7 +1,8 @@
 pointcloud_detector:
   ros__parameters:
-    use_sim_time: true
+    use_sim_time: false
     input_topic: /velodyne_points
+    coda_nuvole: 1
     detections_topic: /detections
     markers_topic: /detections/markers
 
@@ -16,7 +17,8 @@ pointcloud_detector:
 
     # rimozione piano di terra (RANSAC)
     ground_dist_thresh: 0.08
-    ground_max_iter: 60
+    ground_max_iter: 150
+    ground_fit_range: 6.0
     ground_normal_z_min: 0.85   # |n_z| min: piano ~orizzontale = terra, non muro
     remove_below_ground: true
 
@@ -35,12 +37,25 @@ pointcloud_detector:
 
     # diagnostica / debug
     debug_show_rejected: true   # cluster scartati in rosso in RViz (per tarare)
+    map_filter: true
+    map_filter_dist: 0.20
+    map_filter_frac: 0.50
+    map_filter_min_dist: 3.0
+    camera_rescue: true
+    yolo_topic: /camera_detections
+    camera_info_topic: /c920/camera_info
+    camera_frame: c920_optical
+    rescue_classes: [person, bicycle, motorcycle]
+    rescue_max_footprint: 2.0
+    rescue_box_margin: 0.10
+    rescue_max_age: 0.25
+    rescue_depth_band: 0.40
     diag_period_frames: 20
 
 
 lidar3d_tracker:
   ros__parameters:
-    use_sim_time: true
+    use_sim_time: false
     input_topic: /detections
     tracking_frame: odom          # frame fisso: NON base_scan (ruota col robot)
     markers_topic: /tracks/markers
@@ -68,7 +83,11 @@ lidar3d_tracker:
     min_speed: 0.30              # [m/s] soglia di "in movimento"
     snr_min: 1.0                 # velocità >= snr_min * incertezza -> direzione affidabile
     promote_frames: 4            # frame di moto coerente consecutivi per promuovere
-    demote_frames: 8             # frame lenti consecutivi per retrocedere (anti-lampeggio)
+    demote_frames: 15
+    disp_window: 1.5
+    disp_min: 0.3
+    dup_dist: 1.5
+    dup_vel: 0.8
 
     # cross-check con la mappa semantica statica
     use_static_map_gate: true
@@ -78,16 +97,41 @@ lidar3d_tracker:
     # gate semantico camera sulle tracce (/semantic/segmentation, ID Cityscapes)
     use_semantic_gate: true
     seg_topic: /semantic/segmentation
-    camera_info_topic: /camera/camera_info
-    camera_frame: camera_rgb_optical_frame
+    camera_info_topic: /c920/camera_info
+    camera_frame: c920_optical
     probe_height: 0.9              # [m] quota a cui proiettare la traccia (mezzo busto)
     probe_patch: 2                # semi-finestra pixel per il voto di maggioranza
     sem_static_hits: 2            # letture statiche consecutive per scartare la traccia
     static_seg_classes: [2, 3, 4, 5, 7, 8]              # building/wall/fence/pole/sign/vegetation
     dynamic_seg_classes: [11, 12, 13, 14, 15, 16, 17, 18]  # person/rider/car/.../bike
 
+    use_yolo_gate: true
+    yolo_topic: /camera_detections
+    yolo_max_age: 0.5
+    yolo_probe_heights: [0.4, 0.9, 1.4]
+    yolo_box_margin: 0.10
+    yolo_hits: 2
+    yolo_forget: 10
+    publish_yolo_static: true
+    yolo_static_classes: [person]
+    lidar_publish_range: 6.0
+
     # visualizzazione
     marker_z: 0.6
     arrow_time_scale: 1.0        # lunghezza freccia = velocità * questo [s]
     publish_static: false        # true = mostra in grigio anche le tracce ferme (debug)
     diag_period_frames: 20
+
+
+camera_detector:
+  ros__parameters:
+    use_sim_time: false
+    image_topic: /c920/image_raw
+    detections_topic: /camera_detections
+    model_path: yolo26n.pt
+    device: cuda:0
+    imgsz: 640
+    conf: 0.35
+    classes: [0, 1, 3]
+    max_hz: 10.0
+    log_period_s: 10.0
