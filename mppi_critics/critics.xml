@@ -1,0 +1,23 @@
+<library path="mppi_critics">
+  <class type="mppi::critics::SpatioTemporalCritic" base_class_type="mppi::critics::CriticFunction">
+    <description>Scores trajectories against the predicted future positions of tracked pedestrians, with a closeness term and an inverse time-to-collision term.</description>
+  </class>
+  <class type="mppi::critics::DetourCritic" base_class_type="mppi::critics::CriticFunction">
+    <description>When the path is blocked and the robot is stuck, close to the obstacle or reversing, picks the side with more free space near the path, keeps it and attracts trajectories to a waypoint beside the obstacle until the path is free.</description>
+  </class>
+  <class type="mppi::critics::RotateFirstCritic" base_class_type="mppi::critics::CriticFunction">
+    <description>When the heading is far from the path direction, penalises forward motion and slow rotation so that MPPI turns in place first.</description>
+  </class>
+  <class type="mppi::critics::RotationDeadzoneCritic" base_class_type="mppi::critics::CriticFunction">
+    <description>Penalises in-place rotations too small to make the robot turn (drive dead zone).</description>
+  </class>
+  <class type="mppi::critics::SideChoiceCritic" base_class_type="mppi::critics::CriticFunction">
+    <description>When an obstacle blocks the path, picks the side with the best trade-off between free width and offset from the path, keeps it until the path is free, and steers MPPI toward it.</description>
+  </class>
+  <class type="mppi::critics::ClearanceCritic" base_class_type="mppi::critics::CriticFunction">
+    <description>Penalises trajectories whose footprint edge comes closer than safe_distance to obstacle cells, using a distance field of the local costmap.</description>
+  </class>
+  <class type="mppi::critics::HeadingCritic" base_class_type="mppi::critics::CriticFunction">
+    <description>Rotate-first along each trajectory toward the path direction, or toward a latched side gap when an obstacle blocks the path.</description>
+  </class>
+</library>
