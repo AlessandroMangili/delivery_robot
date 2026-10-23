@@ -171,7 +171,8 @@ def generate_launch_description():
                      'max_scan_points': 256,
                      'angular_resolution_deg': 5.0,
                      'max_candidates': 8,
-                     'nms_radius_m': 3.0}],
+                     'nms_radius_m': 3.0,
+                     'startup_status_topic': '/startup_initialization/status'}],
         condition=IfCondition(avvio_globale)
     )
 
