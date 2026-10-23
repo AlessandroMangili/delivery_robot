@@ -33,6 +33,7 @@ def lidar_actions(context):
     with open(os.path.join(convert_share, 'config', 'VLP16-velodyne_transform_node-params.yaml')) as f:
         convert_params = yaml.safe_load(f)['velodyne_transform_node']['ros__parameters']
     convert_params['calibration'] = os.path.join(convert_share, 'params', 'VLP16db.yaml')
+    convert_params['min_range'] = 0.3
     laserscan_params = os.path.join(get_package_share_directory('velodyne_laserscan'),
                                     'config', 'default-velodyne_laserscan_node-params.yaml')
     return [
