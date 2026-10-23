@@ -1,7 +1,7 @@
 import os
 import yaml
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, ExecuteProcess, IncludeLaunchDescription
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
@@ -39,9 +39,9 @@ def generate_launch_description():
         description='true = le celle letali della mappa ferma sotto l impronta attuale del robot non bloccano MPPI'
     )
 
-    compensa_rotazione_arg = DeclareLaunchArgument(
-        'compensa_rotazione', default_value='false',
-        description='true = il ponte usa il giroscopio per sbloccare le rotazioni ferme e frenare gli scatti'
+    rotazione_minima_arg = DeclareLaunchArgument(
+        'rotazione_minima', default_value='0.0',
+        description='rad/s; 0 = spenta. Sotto 0,10 m/s il ponte alza a questo valore le rotazioni chieste, con rampa'
     )
 
     nav2_navigation_launch_path = os.path.join(
@@ -55,7 +55,9 @@ def generate_launch_description():
         param_rewrites={'use_sim_time': LaunchConfiguration('use_sim_time'),
                         'footprint': robot_footprint(),
                         'libera_impronta': LaunchConfiguration('libera_impronta'),
-                        'compensa_rotazione': LaunchConfiguration('compensa_rotazione')},
+                        'rotazione_minima': LaunchConfiguration('rotazione_minima'),
+                        'default_nav_to_pose_bt_xml': os.path.join(
+                            get_package_share_directory('navigation'), 'config', 'bt_senza_spin.xml')},
         convert_types=True
     )
 
@@ -73,6 +75,13 @@ def generate_launch_description():
         name='collision_monitor',
         output='screen',
         parameters=[navigation_params]
+    )
+
+    impronta_sicurezza = ExecuteProcess(
+        cmd=['ros2', 'topic', 'pub', '--rate', '2', '/impronta_sicurezza', 'geometry_msgs/msg/PolygonStamped',
+             '{header: {frame_id: base_footprint}, polygon: {points: [{x: 0.60, y: 0.36}, {x: 0.60, y: -0.36}, '
+             '{x: -0.55, y: -0.36}, {x: -0.55, y: 0.36}]}}'],
+        output='log'
     )
 
     collision_monitor_lifecycle = Node(
@@ -94,25 +103,17 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration('muovi_robot'))
     )
 
-    goal_foxglove_node = Node(
-        package='navigation',
-        executable='goal_foxglove.py',
-        name='goal_foxglove',
-        output='screen',
-        parameters=[navigation_params]
-    )
-
     launchDescriptionObject = LaunchDescription()
 
     launchDescriptionObject.add_action(sim_time_arg)
     launchDescriptionObject.add_action(muovi_robot_arg)
     launchDescriptionObject.add_action(libera_impronta_arg)
-    launchDescriptionObject.add_action(compensa_rotazione_arg)
+    launchDescriptionObject.add_action(rotazione_minima_arg)
     launchDescriptionObject.add_action(SetParameter(name='bond_timeout', value=20.0))
     launchDescriptionObject.add_action(navigation_launch)
+    launchDescriptionObject.add_action(impronta_sicurezza)
     launchDescriptionObject.add_action(collision_monitor_node)
     launchDescriptionObject.add_action(collision_monitor_lifecycle)
     launchDescriptionObject.add_action(cmd_vel_ponte_node)
-    launchDescriptionObject.add_action(goal_foxglove_node)
 
     return launchDescriptionObject

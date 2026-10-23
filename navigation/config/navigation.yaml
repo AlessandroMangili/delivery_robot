@@ -5,7 +5,8 @@ bt_navigator:
     robot_base_frame: base_footprint
     odom_topic: /odometry/local
     bt_loop_duration: 10
-    default_server_timeout: 1000
+    default_nav_to_pose_bt_xml: "bt_senza_spin.xml"
+    default_server_timeout: 2000
     wait_for_service_timeout: 1000
     plugin_lib_names:
       - nav2_compute_path_to_pose_action_bt_node
@@ -77,9 +78,10 @@ controller_server:
     goal_checker_plugins: ["general_goal_checker"]
     controller_plugins: ["FollowPath"]
     progress_checker:
-      plugin: "nav2_controller::SimpleProgressChecker"
+      plugin: "nav2_controller::PoseProgressChecker"
       required_movement_radius: 0.3
-      movement_time_allowance: 15.0
+      required_movement_angle: 0.3
+      movement_time_allowance: 5.0
     general_goal_checker:
       stateful: true
       plugin: "nav2_controller::SimpleGoalChecker"
@@ -87,28 +89,31 @@ controller_server:
       yaw_goal_tolerance: 0.40
     FollowPath:
       plugin: "nav2_mppi_controller::MPPIController"
-      time_steps: 40
+      time_steps: 60
       model_dt: 0.1
       batch_size: 800
       vx_std: 0.2
       vy_std: 0.0
-      wz_std: 0.3
+      wz_std: 0.15
       vx_max: 0.30
       vx_min: 0.0
       vy_max: 0.0
-      wz_max: 0.30
+      wz_max: 0.25
       iteration_count: 1
-      prune_distance: 1.7
+      prune_distance: 2.5
       transform_tolerance: 0.5
-      temperature: 0.3
+      temperature: 0.2
       gamma: 0.015
       motion_model: "DiffDrive"
-      visualize: false
+      visualize: true
+      TrajectoryVisualizer:
+        trajectory_step: 1000
+        time_step: 1
       reset_period: 1.0
       regenerate_noises: false
       retry_attempt_limit: 1
       enforce_path_inversion: false
-      critics: ["ConstraintCritic", "CostCritic", "GoalCritic", "GoalAngleCritic", "PathAlignCritic", "PathFollowCritic", "PathAngleCritic", "PreferForwardCritic"]
+      critics: ["ConstraintCritic", "CostCritic", "GoalCritic", "GoalAngleCritic", "PathAlignCritic", "PathFollowCritic", "PathAngleCritic", "PreferForwardCritic", "DetourCritic", "SpatioTemporalCritic"]
       ConstraintCritic:
         enabled: true
         cost_power: 1
@@ -131,7 +136,7 @@ controller_server:
       CostCritic:
         enabled: true
         cost_power: 1
-        cost_weight: 3.81
+        cost_weight: 25.0
         critical_cost: 300.0
         consider_footprint: true
         collision_cost: 1000000.0
@@ -140,7 +145,7 @@ controller_server:
       PathAlignCritic:
         enabled: true
         cost_power: 1
-        cost_weight: 14.0
+        cost_weight: 6.0
         max_path_occupancy_ratio: 0.05
         trajectory_point_step: 4
         threshold_to_consider: 0.5
@@ -160,6 +165,52 @@ controller_server:
         threshold_to_consider: 0.5
         max_angle_to_furthest: 1.0
         mode: 0
+      SideChoiceCritic:
+        enabled: true
+        cost_weight: 10.0
+        forward_weight: 10.0
+        min_rotation_speed: 0.20
+        time_window: 1.0
+        check_distance: 2.0
+        min_distance: 0.5
+        block_cost: 253
+        free_cost: 128
+        max_offset: 2.0
+        min_gap: 0.7
+        width_cap: 2.0
+        path_half_length: 0.4
+        space_weight: 1.0
+        path_weight: 1.0
+        activation_angle_deg: 20.0
+        deactivation_angle_deg: 8.0
+        release_time: 2.0
+      DetourCritic:
+        enabled: true
+        cost_weight: 5.0
+        rotation_weight: 10.0
+        forward_weight: 10.0
+        min_rotation_speed: 0.25
+        stuck_time: 1.2
+        progress_distance: 0.15
+        near_clearance: 0.25
+        ignore_moving_tracks: true
+        check_distance: 2.0
+        corridor_half_width: 0.20
+        block_cost: 254
+        max_offset: 1.2
+        min_gap: 0.8
+        release_time: 1.5
+        goal_distance: 1.0
+      SpatioTemporalCritic:
+        enabled: true
+        prediction_horizon_s: 6.0
+        line_weight: 0.0
+        tracks_topic: /dynamic_tracks_state
+        use_footprint: true
+        collision_radius: 0.35
+        max_track_age_s: 1.0
+        publish_predictions: true
+        publish_robot_trajectory: false
 
 local_costmap:
   local_costmap:
@@ -199,10 +250,11 @@ local_costmap:
         map_topic: /ssrl_costmap
         libera_impronta: false
         margine_impronta: 0.05
+        libera_impronta_ostacoli: false
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        inflation_radius: 0.6
-        cost_scaling_factor: 6.0
+        inflation_radius: 0.56
+        cost_scaling_factor: 10.0
       always_send_full_costmap: true
 
 global_costmap:
@@ -227,8 +279,8 @@ global_costmap:
         subscribe_to_updates: false
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        inflation_radius: 0.6
-        cost_scaling_factor: 6.0
+        inflation_radius: 0.56
+        cost_scaling_factor: 10.0
       always_send_full_costmap: true
 
 planner_server:
@@ -284,9 +336,9 @@ behavior_server:
     robot_base_frame: base_footprint
     transform_tolerance: 0.5
     simulate_ahead_time: 2.0
-    max_rotational_vel: 0.30
-    min_rotational_vel: 0.15
-    rotational_acc_lim: 0.5
+    max_rotational_vel: 0.20
+    min_rotational_vel: 0.10
+    rotational_acc_lim: 0.3
 
 waypoint_follower:
   ros__parameters:
@@ -305,10 +357,10 @@ velocity_smoother:
     smoothing_frequency: 20.0
     scale_velocities: false
     feedback: "OPEN_LOOP"
-    max_velocity: [0.30, 0.0, 0.30]
-    min_velocity: [0.0, 0.0, -0.30]
-    max_accel: [0.4, 0.0, 0.6]
-    max_decel: [-0.6, 0.0, -0.8]
+    max_velocity: [0.30, 0.0, 0.25]
+    min_velocity: [-0.15, 0.0, -0.25]
+    max_accel: [0.4, 0.0, 0.3]
+    max_decel: [-0.6, 0.0, -0.3]
     odom_topic: /odometry/local
     odom_duration: 0.1
     deadband_velocity: [0.0, 0.0, 0.0]
@@ -325,24 +377,17 @@ collision_monitor:
     source_timeout: 1.0
     base_shift_correction: true
     stop_pub_timeout: 2.0
-    polygons: ["PolygonStop"]
-    PolygonStop:
+    polygons: ["PolygonVicino"]
+    PolygonVicino:
       type: "polygon"
-      points: [0.75, 0.38, 0.75, -0.38, 0.45, -0.38, 0.45, 0.38]
-      action_type: "stop"
+      action_type: "approach"
+      footprint_topic: "/impronta_sicurezza"
+      time_before_collision: 1.5
+      simulation_time_step: 0.1
       max_points: 10
       visualize: true
-      polygon_pub_topic: "polygon_stop"
-      enabled: true
-    PolygonSlow:
-      type: "polygon"
-      points: [1.35, 0.45, 1.35, -0.45, 0.45, -0.45, 0.45, 0.45]
-      action_type: "slowdown"
-      max_points: 10
-      slowdown_ratio: 0.5
-      visualize: true
-      polygon_pub_topic: "polygon_slowdown"
-      enabled: true
+      polygon_pub_topic: "polygon_vicino"
+      enabled: false
     observation_sources: ["lidar"]
     lidar:
       type: "pointcloud"
@@ -359,22 +404,5 @@ cmd_vel_ponte:
     frame_id: base_link
     max_lineare: 0.35
     max_angolare: 0.35
-    compensa_rotazione: false
-    imu_topic: /mavros/imu/data
-    comp_w_minima: 0.03
-    comp_soglia_ferma: 0.3
-    comp_soglia_gira: 0.6
-    comp_salita: 0.6
-    comp_discesa: 2.0
-    comp_spinta_max: 0.15
-    comp_scatto: 2.0
-    comp_max_angolare: 0.45
-    comp_imu_eta_max: 0.2
+    rotazione_minima: 0.0
 
-goal_foxglove:
-  ros__parameters:
-    use_sim_time: false
-    in_topic: /goal_foxglove
-    out_topic: /goal_pose
-    frame: map
-    distanza_max_m: 150.0
