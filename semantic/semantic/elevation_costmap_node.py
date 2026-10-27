@@ -313,7 +313,8 @@ class ElevationCostmapNode(Node):
         self.loc_std_resume = float(gp('loc_std_resume_m').value)
         self.loc_cov_ema = float(gp('loc_cov_ema').value)
         self.loc_std_smooth = 0.0
-        self.loc_ok = True
+        # si parte SOSPESI: vedi semantic_costmap_node
+        self.loc_ok = False
 
         # --- Stato griglia (frame map, auto-grow) ---
         self.gnx = int(self.initial_size_m / self.res)
@@ -336,7 +337,10 @@ class ElevationCostmapNode(Node):
         self.seg_t = -1e9
 
         self.tf_buffer = tf2_ros.Buffer()
-        self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
+        # /tf ricevuta da un nodo interno dedicato (node=None) con un thread
+        # suo, cosi' il buffer non resta indietro quando le callback di questo
+        # nodo sono cariche (vedi semantic_costmap_node).
+        self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, None, spin_thread=True)
 
         cloud_qos = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT,
                                history=HistoryPolicy.KEEP_LAST, depth=1)

@@ -4,6 +4,7 @@ yolo_detect_node:
     model_path: yolov8n.pt
     image_topic: /camera/image
     image_out_topic: /yolo/detections_image
+    publish_image: false                 # immagine annotata per RViz: true solo per debug
     det_out_topic: /yolo/detections
     conf: 0.5
     imgsz: 320
@@ -18,7 +19,6 @@ pointpillars_detector:
   ros__parameters:
     use_sim_time: true
     cloud_topic: /scan/points
-    detections_topic: /detections
     markers_topic: /detections/markers
     detections3d_topic: /detections3d
     cfg_file: cfgs/custom_models/pointpillar.yaml

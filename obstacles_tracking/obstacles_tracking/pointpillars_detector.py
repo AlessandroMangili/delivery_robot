@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 """Detection 3D con PointPillars, drop-in di pointcloud_detector.py.
 
-Pubblica la STESSA interfaccia del detector geometrico:
-  - PoseArray  su /detections          (centroidi, verso il tracker)
+Pubblica:
+  - Detection3DArray su /detections3d  (box complete, verso EagerMOT)
   - MarkerArray su /detections/markers (box per RViz)
-cosi' il tracker non va toccato e i due detector sono intercambiabili
-cambiando solo quale nodo lanci: e' l'A/B che serve in tesi.
 
 DEVE girare con il python del venv, che ha torch e pcdet:
   /mnt/2tbpartition/mangili/pcdet_venv/bin/python3 pointpillars_detector.py --ros-args ...
@@ -24,7 +22,6 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from rclpy.executors import ExternalShutdownException
 from sensor_msgs.msg import PointCloud2
-from geometry_msgs.msg import PoseArray, Pose
 from visualization_msgs.msg import Marker, MarkerArray
 from std_msgs.msg import ColorRGBA
 from vision_msgs.msg import (Detection3D, Detection3DArray,
@@ -89,7 +86,6 @@ class PointPillarsDetector(Node):
 
         p = self.declare_parameter
         p('cloud_topic', '/scan/points')
-        p('detections_topic', '/detections')
         p('markers_topic', '/detections/markers')
         p('detections3d_topic', '/detections3d')   # box 3D complete, per EagerMOT
         p('cfg_file', 'cfgs/custom_models/pointpillar.yaml')
@@ -107,11 +103,9 @@ class PointPillarsDetector(Node):
 
         self._carica_modello(str(g('cfg_dir')), str(g('cfg_file')), str(g('ckpt')))
 
-        self.pub_det = self.create_publisher(PoseArray, g('detections_topic'), 10)
         self.pub_mrk = self.create_publisher(MarkerArray, g('markers_topic'), 10)
-        # Il PoseArray perde dimensioni, yaw e score: basta al tracker vecchio
-        # ma non a EagerMOT, che sulla distanza scalata usa anche le
-        # dimensioni. Quindi pubblichiamo ANCHE la box 3D completa.
+        # EagerMOT usa la box 3D completa (dimensioni, yaw, score). Il vecchio
+        # PoseArray su /detections serviva solo a lidar3d_tracker: rimosso.
         self.pub_d3 = self.create_publisher(
             Detection3DArray, g('detections3d_topic'), 10)
         cloud_qos = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT,
@@ -122,7 +116,7 @@ class PointPillarsDetector(Node):
         self.get_logger().info(
             f"PointPillars detector pronto | classi={self.class_names} "
             f"| soglia={self.score_thresh} | {g('cloud_topic')} -> "
-            f"{g('detections_topic')}")
+            f"{g('detections3d_topic')}")
 
     def _carica_modello(self, cfg_dir, cfg_file, ckpt):
         """Import di pcdet e costruzione della rete. L'import sta QUI e non in
@@ -200,9 +194,6 @@ class PointPillarsDetector(Node):
                 f"TOT={tot*1000:.0f} ms ({1/max(tot,1e-9):.1f} Hz)")
 
     def publish(self, header, box, score, tenute):
-        # PoseArray dei centroidi accettati (stessa interfaccia del geometrico).
-        # L'orientamento porta lo yaw della box: il tracker oggi lo ignora, ma
-        # cosi' non si perde quando passeremo alla strada completa.
         # --- Detection3DArray: box completa (centro, taglia, yaw, score) ---
         d3 = Detection3DArray()
         d3.header = header
@@ -229,19 +220,6 @@ class PointPillarsDetector(Node):
             det.results.append(ip)
             d3.detections.append(det)
         self.pub_d3.publish(d3)
-
-        pa = PoseArray()
-        pa.header = header
-        for i in np.flatnonzero(tenute):
-            ps = Pose()
-            ps.position.x = float(box[i, 0])
-            ps.position.y = float(box[i, 1])
-            ps.position.z = float(box[i, 2])
-            yaw = float(box[i, 6])
-            ps.orientation.z = float(np.sin(yaw / 2.0))
-            ps.orientation.w = float(np.cos(yaw / 2.0))
-            pa.poses.append(ps)
-        self.pub_det.publish(pa)
 
         ma = MarkerArray()
         clear = Marker()

@@ -12,6 +12,7 @@ import tf2_ros
 from rclpy.duration import Duration
 from std_srvs.srv import Trigger
 import os
+from collections import deque
 
 CLASS_COST = {
     1: 0, 9: 70, 0: 90,
@@ -194,7 +195,10 @@ class SemanticCostmapNode(Node):
         self.loc_std_resume = float(gp('loc_std_resume_m').value)
         self.loc_cov_ema = float(gp('loc_cov_ema').value)
         self.loc_std_smooth = 0.0
-        self.loc_ok = True
+        # si parte SOSPESI: si mappa solo dopo un messaggio di localizzazione
+        # con std sotto la soglia di ripresa (spawn lontano dall'origine: il
+        # filtro va prima portato dal GPS alla posizione vera)
+        self.loc_ok = False
         if self.use_loc_gate:
             from geometry_msgs.msg import PoseWithCovarianceStamped
             from nav_msgs.msg import Odometry as _Odom
@@ -210,8 +214,9 @@ class SemanticCostmapNode(Node):
         self.lidar_frame = gp('lidar_frame').value
         self.lidar_max_age = float(gp('lidar_max_age_s').value)
         self.lidar_min_range = float(gp('lidar_min_range').value)
-        self.cloud = None            # Nx3 nel frame base_scan
-        self.cloud_t = -1e9
+        # ultime nuvole (stamp, Nx3 nel frame base_scan): a ogni immagine si
+        # sceglie quella con l'istante piu' vicino, non semplicemente l'ultima
+        self.clouds = deque(maxlen=30)
         cloud_qos = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT,
                                history=HistoryPolicy.KEEP_LAST, depth=1)
         self.create_subscription(PointCloud2, gp('lidar_topic').value,
@@ -245,7 +250,13 @@ class SemanticCostmapNode(Node):
         self.K = None
 
         self.tf_buffer = tf2_ros.Buffer()
-        self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
+        # /tf (70 Hz) ricevuta da un nodo interno dedicato (node=None) con un
+        # thread suo. Sul thread di questo nodo la coda della TF restava
+        # indietro di secondi quando seg_cb era carico, e le lookup
+        # all'istante dell'immagine fallivano. NB: con node=self e
+        # spin_thread=True la libreria fa girare TUTTO questo nodo in un
+        # secondo executor, e il ritardo resta.
+        self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, None, spin_thread=True)
 
         self.create_subscription(CameraInfo, '/camera/camera_info', self.info_cb, 1)
         seg_qos = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT,
@@ -384,10 +395,12 @@ class SemanticCostmapNode(Node):
     def info_cb(self, msg: CameraInfo):
         self.K = np.array(msg.k).reshape(3, 3)
 
-    def lookup(self, frame):
+    def lookup(self, frame, stamp=None):
+        """target <- frame all'istante stamp (msg Time); None = ultima disponibile."""
+        t = rclpy.time.Time() if stamp is None else rclpy.time.Time.from_msg(stamp)
         try:
             return self.tf_buffer.lookup_transform(
-                self.target, frame, rclpy.time.Time(), timeout=Duration(seconds=0.2))
+                self.target, frame, t, timeout=Duration(seconds=0.2))
         except Exception as e:
             self.get_logger().warn(f'TF unavailable {frame}->{self.target}: {e}',
                                    throttle_duration_sec=2.0)
@@ -466,9 +479,33 @@ class SemanticCostmapNode(Node):
         seg = self.bridge.imgmsg_to_cv2(msg, desired_encoding='mono8')
         h, w = seg.shape
 
-        T_cam = self.lookup(self.cam_frame)
-        T_base = self.lookup(self.base_frame)
-        if T_cam is None or T_base is None:
+        # ===== SINCRONIZZAZIONE NUVOLA-IMMAGINE =====
+        # La classe viene dall'immagine (istante t_img), la geometria dalla
+        # nuvola (istante t_cloud). Si usa la nuvola piu' vicina nel tempo e
+        # ciascuna misura con la SUA posa: punti in map con la posa del LiDAR a
+        # t_cloud, poi proiettati con la posa della camera a t_img. Prima
+        # entrambe usavano l'ultima trasformata disponibile: ruotando a
+        # 0.3-0.9 rad/s, 100 ms di scarto spostavano il punto di 15-44 pixel.
+        if not self.clouds:
+            self.get_logger().warn(
+                'Nessuna nuvola LiDAR ricevuta: non si mappa nulla. '
+                'Controlla il topic del LiDAR.', throttle_duration_sec=10.0)
+            return
+        cloud_stamp, cloud_pts = min(
+            self.clouds, key=lambda c: abs(
+                c[0].sec + c[0].nanosec * 1e-9 - stamp_sec))
+        dt_sync = abs(cloud_stamp.sec + cloud_stamp.nanosec * 1e-9 - stamp_sec)
+        if dt_sync > self.lidar_max_age:
+            self.get_logger().warn(
+                f'Nessuna nuvola entro {self.lidar_max_age:.2f} s da questa '
+                f'immagine (la piu\' vicina a {dt_sync:.2f} s): frame saltato.',
+                throttle_duration_sec=10.0)
+            return
+
+        T_cam = self.lookup(self.cam_frame, msg.header.stamp)    # map <- camera @ t_img
+        T_scan = self.lookup(self.lidar_frame, cloud_stamp)      # map <- base_scan @ t_cloud
+        T_base = self.lookup(self.base_frame, cloud_stamp)       # robot @ t_cloud (filtri sui punti)
+        if T_cam is None or T_scan is None or T_base is None:
             return
         M = transform_to_matrix(T_cam)
         origin = M[:3, 3]                      # posizione camera in map (serve alle occlusioni)
@@ -482,24 +519,10 @@ class SemanticCostmapNode(Node):
         # La posizione di ogni punto viene MISURATA dal LiDAR 3D (geometria accurata,
         # z reale, occlusioni native: il raggio non attraversa i muri). La classe
         # viene letta dal pixel di segmentazione su cui il punto si proietta.
-        T_scan = self.lookup(self.lidar_frame)          # map <- base_scan
-        if self.cloud is None or T_scan is None:
-            if self.cloud is None:
-                self.get_logger().warn(
-                    'Nessuna nuvola LiDAR ricevuta: non si mappa nulla. '
-                    'Controlla il topic del LiDAR.', throttle_duration_sec=10.0)
-            self.publish_map(bx, by, msg.header.stamp)
-            return
-        if (stamp_sec - self.cloud_t) > self.lidar_max_age:
-            self.get_logger().warn('Nuvola LiDAR troppo vecchia in questo frame.',
-                                   throttle_duration_sec=10.0)
-            self.publish_map(bx, by, msg.header.stamp)
-            return
-
         M_scan2map = transform_to_matrix(T_scan)
-        M_scan2cam = np.linalg.inv(M) @ M_scan2map      # base_scan -> camera ottica
+        M_scan2cam = np.linalg.inv(M) @ M_scan2map      # base_scan @ t_cloud -> camera @ t_img
         uu, vv, X, Y, Xz, Yz, ok, dist = position_points(
-            self.cloud, M_scan2map, M_scan2cam, self.K, w, h,
+            cloud_pts, M_scan2map, M_scan2cam, self.K, w, h,
             bz, self.max_obs_h, bx, by, self.map_write_max_range)
 
         classes = seg[vv, uu]
@@ -763,8 +786,7 @@ class SemanticCostmapNode(Node):
         if pts.shape[0] == 0:
             return
 
-        self.cloud = pts
-        self.cloud_t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
+        self.clouds.append((msg.header.stamp, pts))
 
 
 def main():
