@@ -2,6 +2,7 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, SetEnvironmentVariable
+from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
@@ -14,6 +15,10 @@ def generate_launch_description():
     # invece di /clock (~870 msg/s): ogni messaggio sveglia l'executor Python.
     # Con un bag riprodotto (ros2 bag play --clock) passare clock_topic:=/clock.
     clock_remap = [('/clock', LaunchConfiguration('clock_topic'))]
+    # semantic_overlay_node (/semantic/overlay_rgb, camera + segmentazione per
+    # RViz) spento di default: ~35% di CPU e nessun nodo lo usa. overlay:=true
+    # per riaccenderlo quando serve vederlo.
+    overlay = LaunchConfiguration('overlay')
 
     gt_relay = Node(
         package='semantic', executable='gt_segmentation_node',
@@ -31,10 +36,11 @@ def generate_launch_description():
         name='elevation_costmap_node', output='screen',
         parameters=[params, use_sim_time], remappings=clock_remap,
     )
-    overlay = Node(
+    overlay_node = Node(
         package='semantic', executable='semantic_overlay_node',
         name='semantic_overlay_node', output='screen',
         parameters=[use_sim_time], remappings=clock_remap,
+        condition=IfCondition(overlay),
     )
 
     combiner = Node(
@@ -47,15 +53,19 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'clock_topic', default_value='/clock_throttled',
             description='Topic del tempo simulato per i nodi Python'),
-        # Senza limite OpenBLAS/OpenMP creano un thread per core (48) anche per
-        # operazioni numpy piccole: semantic_costmap_node usava ~29 core in
-        # attesa attiva e rallentava la simulazione (real-time factor 0.65).
-        # Con 4: ~4 core, real-time factor 0.86.
-        SetEnvironmentVariable('OMP_NUM_THREADS', '4'),
-        SetEnvironmentVariable('OPENBLAS_NUM_THREADS', '4'),
+        DeclareLaunchArgument(
+            'overlay', default_value='false',
+            description='Pubblica /semantic/overlay_rgb (camera + segmentazione, per RViz)'),
+        # 1 thread BLAS: le operazioni sono piccole (es. 90k punti x matrice
+        # 3x3) e i thread extra di OpenBLAS restano in attesa ATTIVA fra una
+        # chiamata e l'altra. Misurato sulla trasformazione della nuvola a
+        # 17 Hz: 4 thread = 310% CPU (5.8 ms/frame), 1 thread = 16% (9.5 ms).
+        # Senza limite (48 thread) semantic_costmap_node usava ~29 core.
+        SetEnvironmentVariable('OMP_NUM_THREADS', '1'),
+        SetEnvironmentVariable('OPENBLAS_NUM_THREADS', '1'),
         gt_relay,
         costmap,
         elevation,
-        overlay,
+        overlay_node,
         combiner,
     ])

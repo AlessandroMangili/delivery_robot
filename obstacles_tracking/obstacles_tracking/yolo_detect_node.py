@@ -120,6 +120,9 @@ class YoloDetectNode(Node):
         self.declare_parameter('person_only', True)  # tieni solo classe person (COCO id 0)
         self.declare_parameter('device', 'cpu')      # 'cpu' o '0' se avessi una GPU
         self.declare_parameter('process_every_n', 1) # 1 = ogni frame; 2 = uno su due
+        # immagine annotata solo per RViz: disegno + codifica a ogni frame costa
+        # CPU e nessun nodo la usa. true per il debug visivo.
+        self.declare_parameter('publish_image', False)
 
         gp = self.get_parameter
         model_path = gp('model_path').value
@@ -145,7 +148,8 @@ class YoloDetectNode(Node):
         self.sub = self.create_subscription(
             Image, gp('image_topic').value, self.cb, qos)
         # due publisher: immagine annotata + bbox strutturate
-        self.pub_img = self.create_publisher(Image, gp('image_out_topic').value, qos)
+        self.pub_img = (self.create_publisher(Image, gp('image_out_topic').value, qos)
+                        if gp('publish_image').value else None)
         self.pub_det = self.create_publisher(Detection2DArray, gp('det_out_topic').value, qos)
 
         self._t_ema = None
@@ -188,6 +192,8 @@ class YoloDetectNode(Node):
         self.pub_det.publish(da)   # pubblica sempre (anche vuoto): ritmo costante
 
         # --- 2. immagine annotata su /yolo/detections_image (per RViz) ---
+        if self.pub_img is None:
+            return
         annotated = result.plot()
         n = len(dets)
         fps = 1.0 / self._t_ema if self._t_ema and self._t_ema > 0 else 0.0

@@ -20,7 +20,11 @@
 #include <cmath>
 #include <algorithm>
 #include <limits>
+#include <cstdio>
+#include <ctime>
+#include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <utility>
 
 #include <xtensor/xmath.hpp>
@@ -42,6 +46,12 @@ void SpatioTemporalCritic::initialize()
   getParam(min_ped_speed_, "min_ped_speed", 0.4f);
   getParam(max_vel_std_, "max_vel_std", 0.8f);
   getParam(max_track_age_s_, "max_track_age_s", 0.5f);
+  getParam(rear_filter_, "rear_filter", false);
+  getParam(rear_use_prediction_, "rear_use_prediction", false);
+  getParam(rear_margin_m_, "rear_margin_m", 0.3f);
+  getParam(rear_keep_close_, "rear_keep_close", true);
+  getParam(rear_keep_radius_m_, "rear_keep_radius_m", 1.0f);
+  getParam(rear_on_reverse_, "rear_on_reverse", true);
   getParam(prediction_horizon_s_, "prediction_horizon_s", 3.0f);
   getParam(max_radius_, "max_radius", 1.5f);
   getParam(worst_case_, "worst_case", true);
@@ -77,6 +87,23 @@ void SpatioTemporalCritic::initialize()
       RCLCPP_WARN(logger_, "Impossibile aprire il CSV %s", diag_csv_path_.c_str());
     }
   }
+  // Righe [STC] su file invece che nel terminale della navigazione, dove si
+  // perdevano. Un file per avvio, nome gg-mm-aa_HH-MM-SS.log.
+  getParam(diag_log_dir_, "diag_log_dir", std::string(""));
+  if (!diag_log_dir_.empty()) {
+    std::error_code ec;
+    std::filesystem::create_directories(diag_log_dir_, ec);
+    char quando[32];
+    const std::time_t now_wall = std::time(nullptr);
+    std::strftime(quando, sizeof(quando), "%d-%m-%y_%H-%M-%S", std::localtime(&now_wall));
+    const std::string path = diag_log_dir_ + "/" + quando + ".log";
+    diag_log_.open(path, std::ios::out | std::ios::app);
+    if (diag_log_.is_open()) {
+      RCLCPP_INFO(logger_, "Log diagnostico [STC] -> %s", path.c_str());
+    } else {
+      RCLCPP_WARN(logger_, "Impossibile aprire il log %s: stampo nel terminale", path.c_str());
+    }
+  }
 
   // Parametri di visualizzazione.
   getParam(publish_predictions_, "publish_predictions", true);
@@ -106,10 +133,31 @@ void SpatioTemporalCritic::initialize()
   RCLCPP_INFO(
     logger_,
     "SpatioTemporalCritic: mode=%s | overlap w=%.1f (worst_case=%d) | "
-    "ttc w=%.1f pow=%.2f eps=%.2f | horizon=%.1fs radius=%.2f | tracks_topic=%s",
+    "ttc w=%.1f pow=%.2f eps=%.2f | horizon=%.1fs radius=%.2f | tracks_topic=%s | "
+    "rear_filter=%d (margin %.2f m, keep_close=%d %.2f m, on_reverse=%d)",
     cost_mode_.c_str(), weight_, static_cast<int>(worst_case_),
     ttc_weight_, ttc_power_, ttc_epsilon_, prediction_horizon_s_,
-    collision_radius_, tracks_topic_.c_str());
+    collision_radius_, tracks_topic_.c_str(),
+    static_cast<int>(rear_filter_), rear_margin_m_, static_cast<int>(rear_keep_close_),
+    rear_keep_radius_m_, static_cast<int>(rear_on_reverse_));
+}
+
+bool SpatioTemporalCritic::considerato(
+  double px, double py, double t, const RobotRef & r) const
+{
+  if (!rear_filter_) {
+    return true;
+  }
+  // il robot avanza anche lui: chi lo segue alla stessa velocita' resta dietro
+  const double dx = px - (r.x + r.v * t * r.cyaw);
+  const double dy = py - (r.y + r.v * t * r.syaw);
+  if (rear_keep_close_ &&
+    dx * dx + dy * dy < static_cast<double>(rear_keep_radius_m_) * rear_keep_radius_m_)
+  {
+    return true;
+  }
+  // componente lungo la direzione di marcia attuale del robot
+  return dx * r.cyaw + dy * r.syaw > -static_cast<double>(rear_margin_m_);
 }
 
 void SpatioTemporalCritic::tracksCallback(
@@ -209,12 +257,56 @@ void SpatioTemporalCritic::score(mppi::CriticData & data)
   // 2000 traiettorie sono in conflitto e l'ottimizzatore non ha scelta.
   std::vector<char> diag_libero(batch, 1);
 
+  // posa attuale del robot (stesso frame delle traiettorie e delle tracce)
+  const auto & rp = data.state.pose.pose;
+  const double ryaw = std::atan2(
+    2.0 * (rp.orientation.w * rp.orientation.z + rp.orientation.x * rp.orientation.y),
+    1.0 - 2.0 * (rp.orientation.y * rp.orientation.y + rp.orientation.z * rp.orientation.z));
+  const RobotRef robot{rp.position.x, rp.position.y, std::cos(ryaw), std::sin(ryaw),
+    data.state.speed.linear.x};
+  size_t diag_n_dietro = 0;   // tracce mai davanti nell'orizzonte: ignorate
+
+  // Traiettorie campionate che arretrano (il robot finisce >5 cm dietro la
+  // posizione attuale): per loro i pedoni dietro contano sempre, cosi' MPPI
+  // sceglie di arretrare solo se dietro non c'e' nessuno.
+  std::vector<char> indietro(batch, 0);
+  size_t diag_n_indietro = 0;
+  if (rear_filter_ && rear_on_reverse_) {
+    for (size_t i = 0; i < batch; ++i) {
+      for (size_t j = 0; j < time_pred; ++j) {
+        const double fwd = (traj_x(i, j) - robot.x) * robot.cyaw +
+          (traj_y(i, j) - robot.y) * robot.syaw;
+        if (fwd < -0.05) {
+          indietro[i] = 1;
+          ++diag_n_indietro;
+          break;
+        }
+      }
+    }
+  }
+  const bool qualcuno_indietro = diag_n_indietro > 0;
+
   for (const auto & tr : tracks) {
     const double speed = std::hypot(tr.vx, tr.vy);
     if (speed < min_ped_speed_) {
       continue;
     }
     if (tr.vel_std > max_vel_std_) {
+      continue;
+    }
+    // Pedone da ignorare (salvo traiettorie che arretrano): con la posizione
+    // attuale, se ORA e' dietro; con la predizione, se resta dietro per tutto
+    // l'orizzonte.
+    const bool davanti_ora = considerato(tr.x, tr.y, 0.0, robot);
+    bool mai_davanti = !davanti_ora;
+    if (rear_use_prediction_) {
+      for (size_t j = 0; j < time_pred && mai_davanti; ++j) {
+        const float t = static_cast<float>(j) * dt;
+        mai_davanti = !considerato(tr.x + tr.vx * t, tr.y + tr.vy * t, t, robot);
+      }
+    }
+    if (mai_davanti && !qualcuno_indietro) {
+      ++diag_n_dietro;
       continue;
     }
     ++diag_n_tracks;
@@ -226,6 +318,13 @@ void SpatioTemporalCritic::score(mppi::CriticData & data)
       const float t = static_cast<float>(j) * dt;
       const double px = tr.x + tr.vx * t;
       const double py = tr.y + tr.vy * t;
+      // posizione attuale: tutta la scia se ora e' davanti, niente se dietro;
+      // predizione: solo gli istanti in cui e' davanti (es. sorpasso).
+      // Le traiettorie che arretrano considerano comunque tutto.
+      const bool davanti = rear_use_prediction_ ? considerato(px, py, t, robot) : davanti_ora;
+      if (!davanti && !qualcuno_indietro) {
+        continue;
+      }
       double radius = collision_radius_ + tr.pos_std +
         vel_std_gain_ * tr.vel_std * t;
       if (radius > max_radius_) {
@@ -234,6 +333,9 @@ void SpatioTemporalCritic::score(mppi::CriticData & data)
       const double r2 = radius * radius;
 
       for (size_t i = 0; i < batch; ++i) {
+        if (!davanti && !indietro[i]) {
+          continue;
+        }
         const double ddx = traj_x(i, j) - px;
         const double ddy = traj_y(i, j) - py;
         const double d2 = ddx * ddx + ddy * ddy;
@@ -342,14 +444,31 @@ void SpatioTemporalCritic::score(mppi::CriticData & data)
       ? -1.0 : static_cast<double>(diag_tau_max) * dt;
 
     if (vuole_log) {
-      RCLCPP_INFO(
-        logger_,
-        "[STC] mode=%s tracce=%zu contatti=%zu/%zu liberi=%zu/%zu "
+      char riga[512];
+      std::snprintf(
+        riga, sizeof(riga),
+        "[STC] mode=%s tracce=%zu dietro_ignorate=%zu campioni_indietro=%zu "
+        "contatti=%zu/%zu liberi=%zu/%zu "
         "tau=[%.2f..%.2f]s | overlap=%.1f ttc=%.1f | "
         "mia penalita' max=%.1f su costo max=%.1f",
-        cost_mode_.c_str(), diag_n_tracks, diag_n_hit, batch * diag_n_tracks,
+        cost_mode_.c_str(), diag_n_tracks, diag_n_dietro, diag_n_indietro,
+        diag_n_hit, batch * diag_n_tracks,
         liberi, batch, tau_min, tau_max,
         diag_sum_ovl, diag_sum_ttc, pen_max, cost_max);
+      if (diag_log_.is_open()) {
+        char ora[16];
+        const std::time_t now_wall = std::time(nullptr);
+        std::strftime(ora, sizeof(ora), "%H:%M:%S", std::localtime(&now_wall));
+        double t_sim = 0.0;
+        if (auto node = parent_.lock()) {
+          t_sim = node->now().seconds();
+        }
+        diag_log_ << ora << " t_sim=" << std::fixed << std::setprecision(2) << t_sim
+                  << ' ' << riga << '\n';
+        diag_log_.flush();
+      } else {
+        RCLCPP_INFO(logger_, "%s", riga);
+      }
     }
     if (vuole_csv) {
       double t_ora = 0.0;
@@ -366,13 +485,13 @@ void SpatioTemporalCritic::score(mppi::CriticData & data)
 
   // Viz scie dei PEDONI (solo con pedoni), sul loro topic separato.
   if (publish_predictions_ && pred_pub_) {
-    publishPredictions(tracks, dt, time);
+    publishPredictions(tracks, dt, time, robot);
   }
 }
 
 void SpatioTemporalCritic::publishPredictions(
   const std::vector<TrackSnapshot> & tracks,
-  float dt, size_t time)
+  float dt, size_t time, const RobotRef & r)
 {
   visualization_msgs::msg::MarkerArray arr;
 
@@ -397,10 +516,18 @@ void SpatioTemporalCritic::publishPredictions(
     if (tr.vel_std > max_vel_std_) {
       continue;
     }
+    // stessa regola del costo: con la posizione attuale, un pedone ora dietro
+    // non ha scia
+    if (!rear_use_prediction_ && !considerato(tr.x, tr.y, 0.0, r)) {
+      continue;
+    }
     for (size_t j = 0; j < time_pred; j += step) {
       const float t = static_cast<float>(j) * dt;
       const double px = tr.x + tr.vx * t;
       const double py = tr.y + tr.vy * t;
+      if (rear_use_prediction_ && !considerato(px, py, t, r)) {
+        continue;   // stessi istanti ignorati dal costo
+      }
       double radius = collision_radius_ + tr.pos_std +
         vel_std_gain_ * tr.vel_std * t;
       if (radius > max_radius_) {

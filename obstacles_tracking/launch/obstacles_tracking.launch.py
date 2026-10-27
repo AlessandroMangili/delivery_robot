@@ -46,17 +46,29 @@ def generate_launch_description():
         'pcdet_python', default_value='python3',
         description='Interprete python del venv con torch/pcdet per pointpillars_detector')
 
+    # /clock_throttled (100 Hz, da clock_throttle nel launch della simulazione)
+    # invece di /clock (~870 msg/s): ogni messaggio sveglia l'executor Python,
+    # ~46% di un core per nodo. Con un bag (ros2 bag play --clock): clock_topic:=/clock.
+    clock_topic_arg = DeclareLaunchArgument(
+        'clock_topic', default_value='/clock_throttled',
+        description='Topic del tempo simulato per i nodi Python')
+    clock_remap = [('/clock', LaunchConfiguration('clock_topic'))]
+
     config_file = LaunchConfiguration('config_file')
 
     # 4 thread: YOLO su CPU usa davvero il parallelismo, ma senza limite
     # torch/OpenMP si dimensionano su tutti i 48 core (120 thread osservati).
+    # OMP_WAIT_POLICY=PASSIVE: fra un'inferenza e l'altra i thread OpenMP di
+    # torch dormono invece di restare in attesa attiva (CPU sprecata).
     yolo_node = Node(
         package='obstacles_tracking',
         executable='yolo_detect_node',
         name='yolo_detect_node',
         output='screen',
         parameters=[config_file, {'use_sim_time': LaunchConfiguration('use_sim_time')}],
-        additional_env={'OMP_NUM_THREADS': '4', 'OPENBLAS_NUM_THREADS': '4'},
+        additional_env={'OMP_NUM_THREADS': '4', 'OPENBLAS_NUM_THREADS': '4',
+                        'OMP_WAIT_POLICY': 'PASSIVE'},
+        remappings=clock_remap,
     )
 
     # 1 thread BLAS: il Kalman lavora su matrici 10x10, dove il multithreading
@@ -69,6 +81,7 @@ def generate_launch_description():
         output='screen',
         parameters=[config_file, {'use_sim_time': LaunchConfiguration('use_sim_time')}],
         additional_env={'OMP_NUM_THREADS': '1', 'OPENBLAS_NUM_THREADS': '1'},
+        remappings=clock_remap,
     )
 
     # Avviato come processo con l'interprete del venv (non `ros2 run`, che
@@ -80,6 +93,7 @@ def generate_launch_description():
             'obstacles_tracking.pointpillars_detector',
             '--ros-args', '--params-file', config_file,
             '-p', ['use_sim_time:=', LaunchConfiguration('use_sim_time')],
+            '-r', ['/clock:=', LaunchConfiguration('clock_topic')],
         ],
         output='screen',
         condition=IfCondition(LaunchConfiguration('launch_pointpillars')),
@@ -90,6 +104,7 @@ def generate_launch_description():
         use_sim_time_arg,
         launch_pointpillars_arg,
         pcdet_python_arg,
+        clock_topic_arg,
         yolo_node,
         eagermot_node,
         pointpillars_process,

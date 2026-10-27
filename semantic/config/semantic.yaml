@@ -1,8 +1,8 @@
-gt_segmentation_relay:
+gt_segmentation_node:
   ros__parameters:
     labels_topic: /semantic/labels_map     # Gazebo semantic camera topic (input)
     out_topic: /semantic/segmentation      # segmentation in Cityscapes IDs (output)
-    publish_overlay: true                  # also publish the coloured debug overlay
+    publish_overlay: false                 # /semantic/overlay (segmentazione colorata): nessuno lo usa
 
 semantic_costmap_node:
   ros__parameters:
@@ -62,8 +62,11 @@ semantic_costmap_node:
     use_loc_quality_gate: true             # abilita/disabilita il gate
     loc_pose_topic: /odometry/global       # topic posa-con-covarianza
     loc_cov_source: odometry               # 'odometry' per EKF (robot_localization)
-    loc_std_suspend_m: 1.0                 # [m] std liscia sopra questo -> SOSPENDI
-    loc_std_resume_m: 0.5                  # [m] sotto questo -> RIPRENDI (isteresi)
+    # Soglie proporzionate alle celle da 5 cm (erano 1.0 / 0.5 m, cioe' 10-20
+    # celle di errore accettato). Se la mappatura non parte mai, il log dice
+    # "LOCALIZATION LOST (smoothed std X m ...)": confrontare X con queste soglie.
+    loc_std_suspend_m: 0.15                # [m] std liscia sopra questo -> SOSPENDI
+    loc_std_resume_m: 0.08                 # [m] sotto questo -> RIPRENDI (isteresi)
     loc_cov_ema: 0.4                       # smoothing covarianza (0..1; piu' alto = piu' reattivo)
 
 elevation_costmap_node:
@@ -120,8 +123,8 @@ elevation_costmap_node:
     # Gate di localizzazione (stesso schema del semantico)
     use_loc_quality_gate: true
     loc_pose_topic: /odometry/global
-    loc_std_suspend_m: 1.0
-    loc_std_resume_m: 0.5
+    loc_std_suspend_m: 0.15            # come la semantica: proporzionate alle celle da 5 cm
+    loc_std_resume_m: 0.08
     loc_cov_ema: 0.4
 
     map_save_name: 'elevation1'

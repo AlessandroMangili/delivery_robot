@@ -38,10 +38,23 @@ protected:
   // Callback del topic /dynamic_tracks_state: aggiorna lo snapshot delle tracce.
   void tracksCallback(const dynamic_tracker_msgs::msg::TrackArray::SharedPtr msg);
 
+  // Posa e velocita' attuali del robot, per il filtro dei pedoni dietro.
+  struct RobotRef
+  {
+    double x, y, cyaw, syaw, v;   // v: velocita' lungo la direzione di marcia [m/s]
+  };
+
+  // true se il pedone in (px,py) all'istante t va considerato: davanti al
+  // robot fatto avanzare a velocita' costante fino a t (oltre -rear_margin_
+  // lungo la direzione di marcia) oppure entro rear_keep_radius_ da lui.
+  // Sempre true con rear_filter_ spento.
+  bool considerato(double px, double py, double t, const RobotRef & r) const;
+
   // Pubblica le scie predette dei PEDONI (per RViz), sul topic dei pedoni.
+  // Solo gli istanti considerati dal critic.
   void publishPredictions(
     const std::vector<TrackSnapshot> & tracks,
-    float dt, size_t time);
+    float dt, size_t time, const RobotRef & r);
 
   // Pubblica il campione a costo minimo del batch (debug del critic), su un
   // topic SEPARATO, a ogni chiamata di score(). Va chiamata a costi definitivi.
@@ -62,6 +75,28 @@ protected:
   float min_ped_speed_{0.4f};      // [m/s] sotto: pedone "fermo", non genera collisione futura
   float max_vel_std_{0.8f};        // [m/s] scarta tracce con velocita' troppo incerta
   float max_track_age_s_{0.5f};    // [s] tracce piu' vecchie di cosi' vengono ignorate
+
+  // --- pedoni dietro al robot ---
+  // Si considerano solo gli istanti della predizione in cui il pedone e'
+  // davanti al robot: chi segue o sorpassa e' responsabile di evitarlo, e
+  // prima faceva scansare il robot. Resta tracciato, ed entra nel costo
+  // appena la predizione lo porta davanti (sorpasso, attraversamento).
+  bool rear_filter_{false};        // false = tutti i pedoni, come prima
+  // false = decide la posizione ATTUALE: un pedone dietro e' solo tracciato,
+  //         e appena supera il fianco del robot entra con tutta la predizione.
+  // true  = decide la predizione: conta gia' ora la parte di scia che lo porta
+  //         davanti (anticipa i sorpassi, ma disegna scie di pedoni ancora dietro).
+  bool rear_use_prediction_{false};
+  float rear_margin_m_{0.3f};      // [m] "davanti" parte da qui dietro il centro: include chi e' di lato
+  bool rear_keep_close_{true};     // true = entro rear_keep_radius_m_ il pedone conta anche se dietro
+  float rear_keep_radius_m_{1.0f}; // [m] raggio dell'eccezione sopra
+  // Retromarcia: le traiettorie campionate che portano il robot dietro la
+  // posizione attuale considerano TUTTI i pedoni (si verifica che dietro non
+  // ci sia nessuno PRIMA di scegliere di arretrare). Niente regola "robot gia'
+  // in retromarcia": con vx_min < 0 MPPI arretra spesso di pochi cm/s per
+  // frenare, e spegneva il filtro. Le traiettorie in avanti non raggiungono
+  // chi sta dietro.
+  bool rear_on_reverse_{true};
 
   // --- limiti della predizione (per non generare aloni giganti) ---
   float prediction_horizon_s_{3.0f};  // [s] predici il pedone solo per questo tempo
@@ -114,6 +149,10 @@ protected:
   // Traccia CSV per i grafici: vuoto = disattivata. Una riga per ciclo.
   std::string diag_csv_path_;
   std::ofstream diag_csv_;
+  // Righe [STC] su file (<diag_log_dir>/gg-mm-aa_HH-MM-SS.log) invece che nel
+  // terminale. Vuoto = nel terminale, come prima.
+  std::string diag_log_dir_;
+  std::ofstream diag_log_;
 };
 
 }  // namespace mppi::critics

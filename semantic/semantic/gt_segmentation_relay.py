@@ -39,7 +39,8 @@ class GtSegRelay(Node):
                          history=HistoryPolicy.KEEP_LAST, depth=1)
         self.sub = self.create_subscription(Image, lt, self.cb, qos)
         self.pub = self.create_publisher(Image, ot, qos)
-        self.pub_ov = self.create_publisher(Image, '/semantic/overlay', qos)
+        self.pub_ov = (self.create_publisher(Image, '/semantic/overlay', qos)
+                       if self.publish_overlay else None)
 
         self.get_logger().info(f'GT relay: {lt} -> {ot} (ID Cityscapes)')
 

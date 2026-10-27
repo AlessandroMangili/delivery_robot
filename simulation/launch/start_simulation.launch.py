@@ -135,26 +135,41 @@ def generate_launch_description():
     gz_bridge_node = Node(
         package="ros_gz_bridge",
         executable="parameter_bridge",
+        # Direzione: '[' Gazebo -> ROS, ']' ROS -> Gazebo, '@' entrambe. Con '@'
+        # sui sensori il bridge si iscriveva anche ai topic che pubblica (e
+        # rileggeva le proprie immagini): sensori '[', solo /cmd_vel ']'.
+        # /scan serve a RViz e al collision_monitor configurato in
+        # navigation.yaml (oggi non avviato). Tolto /camera/depth_image:
+        # nessun lettore su nessun branch.
         arguments=[
             "/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock",
-            "/cmd_vel@geometry_msgs/msg/Twist@gz.msgs.Twist",
-            "/odom@nav_msgs/msg/Odometry@gz.msgs.Odometry",
-            "/joint_states@sensor_msgs/msg/JointState@gz.msgs.Model",
-            #"/tf@tf2_msgs/msg/TFMessage@gz.msgs.Pose_V",
-            "/camera/image@sensor_msgs/msg/Image@gz.msgs.Image",
-            "/camera/camera_info@sensor_msgs/msg/CameraInfo@gz.msgs.CameraInfo",
-            "imu@sensor_msgs/msg/Imu@gz.msgs.IMU",
+            "/cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist",
+            "/odom@nav_msgs/msg/Odometry[gz.msgs.Odometry",
+            "/joint_states@sensor_msgs/msg/JointState[gz.msgs.Model",
+            "/camera/image@sensor_msgs/msg/Image[gz.msgs.Image",
+            "/camera/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo",
+            "imu@sensor_msgs/msg/Imu[gz.msgs.IMU",
             "/navsat@sensor_msgs/msg/NavSatFix[gz.msgs.NavSat",
-            "/scan@sensor_msgs/msg/LaserScan@gz.msgs.LaserScan",
-            "/camera/depth_image@sensor_msgs/msg/Image@gz.msgs.Image",
+            "/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan",
             "/scan/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked",
             "/semantic/labels_map@sensor_msgs/msg/Image[gz.msgs.Image",
-
         ],
         output="screen",
         parameters=[
             {'use_sim_time': LaunchConfiguration('use_sim_time')},
         ]
+    )
+
+    # /clock a ogni passo di fisica (1 ms, ~870 msg/s reali): ogni messaggio
+    # risveglia l'executor di un nodo Python con use_sim_time (~46% di un core
+    # anche a nodo vuoto). I launch di semantica e tracking leggono questa
+    # copia a 100 Hz; i nodi C++ restano su /clock.
+    clock_throttle_node = Node(
+        package='clock_throttle',
+        executable='clock_throttle_node',
+        name='clock_throttle',
+        output='screen',
+        parameters=[{'period_s': 0.01}],
     )
 
     launchDescriptionObject = LaunchDescription()
@@ -171,6 +186,7 @@ def generate_launch_description():
     launchDescriptionObject.add_action(rviz_node)
     launchDescriptionObject.add_action(spawn_urdf_node)
     launchDescriptionObject.add_action(gz_bridge_node)
+    launchDescriptionObject.add_action(clock_throttle_node)
     launchDescriptionObject.add_action(robot_state_publisher_node)
 
     return launchDescriptionObject

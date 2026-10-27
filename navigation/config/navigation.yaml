@@ -55,7 +55,7 @@ controller_server:
       vy_std: 0.0                 
       wz_std: 0.4
       vx_max: 0.30                # allineato al max tarato del robot
-      vx_min: 0.0                 # niente retro, metti -0.35 per consentirlo
+      vx_min: -0.1                # retromarcia lenta: PreferForwardCritic la lascia come ultima risorsa (0.0 = niente retro)
       vy_max: 0.0                 
       wz_max: 1.9
       iteration_count: 2          # era 1: rifinisce la scelta (aiuta a impegnarsi su un lato)
@@ -93,6 +93,9 @@ controller_server:
         ttc_power: 1.0           # 1.0 = graduale · 2.0 = concentrato sull'imminente
         ttc_epsilon: 0.1         # [s] tetto: costo max = (1/0.1)^ttc_power
         diag_period_calls: 10    # 0 = diagnostica spenta · 10 = ~1 log/s
+        # righe [STC] su file (un file per avvio, gg-mm-aa_HH-MM-SS.log) invece che nel
+        # terminale; la cartella logs/ e' gia' nel .gitignore del repo
+        diag_log_dir: "/home/mangili/Desktop/thesis_ws/src/delivery_robot/logs"
         diag_csv_path: "/tmp/stc.csv"
         cost_power: 1
         # contatto fisico = robot_radius 0.22 + pedone 0.30 = 0.52 m; +0.20 di
@@ -105,6 +108,24 @@ controller_server:
         max_radius: 1.5
         min_ped_speed: 0.4
         max_track_age_s: 0.5
+        # Pedoni dietro: contano solo gli istanti in cui la predizione li porta
+        # davanti al robot (fatto avanzare alla sua velocita'). Chi segue o
+        # attraversa dietro e' ignorato, chi sorpassa conta da quando affianca;
+        # davanti e di lato contano sempre.
+        rear_filter: true
+        # false = decide la posizione ATTUALE: un pedone dietro e' solo
+        # tracciato, appena supera il fianco del robot entra con tutta la scia.
+        # true = decide la predizione (conta gia' ora il tratto futuro davanti).
+        rear_use_prediction: false
+        # confine = bordo POSTERIORE del robot (la base arriva a ~0.2 m dietro
+        # il centro, URDF): conta chi e' a fianco del corpo, anche verso la
+        # coda, cosi' un pedone perpendicolare che punta al fianco non sfugge
+        rear_margin_m: 0.2
+        rear_keep_close: false        # true = entro rear_keep_radius_m contano anche se dietro
+        rear_keep_radius_m: 1.0
+        # Retromarcia: le traiettorie campionate che arretrano considerano anche
+        # i pedoni dietro, cosi' si arretra solo se dietro e' libero.
+        rear_on_reverse: true
         worst_case: true
         publish_predictions: true
         predictions_topic: "/spatiotemporal_critic/predictions"
@@ -199,7 +220,10 @@ local_costmap:
           marking: True
           clearing: False
           min_obstacle_height: 0.10
-          max_obstacle_height: 2.0
+          # 0.3 = altezza del robot + margine, coerente col clearance della
+          # mappa semantica (0.20): con 2.0 tavoli, insegne e rami segnavano
+          # ostacolo la cella sotto, dove il robot passa.
+          max_obstacle_height: 0.3
           obstacle_max_range: 4.5
           obstacle_min_range: 0.35
         pc_clear:                         # PULISCE: include il terreno, servono i capolinea
