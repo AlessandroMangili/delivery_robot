@@ -25,6 +25,7 @@ semantic_costmap_node:
     stacked_min_votes: 3
     ost_write_range_m: 15.0
     ost_classes: [2,3,4,5]
+    footprint_clear: true
     ray_clear_mode: suolo
     ray_clear_low_h: 0.12
     ray_clear_ground_tol: 0.25
@@ -153,6 +154,7 @@ elevation_costmap_node:
       raycast_stride: 2
     tilt_max_offset_m: 0.0
     tilt_max_deg: 1.5
+    tilt_reject_deg: 0.7
     tf_timeout_s: 0.1
 
     # Publishing
