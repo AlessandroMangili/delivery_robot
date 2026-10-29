@@ -296,7 +296,7 @@ class ElevationGrid:
                  confirm_s=0.0, change_min_m=0.08, change_k=2.0, change_max_m=0.25, max_gap_s=3.0,
                  min_hits=3, tilt_comp=False, tilt_min_points=300, tilt_max_offset_m=0.10,
                  tilt_max_deg=1.5, tilt_cell_var=0.0025, tilt_min_obs=5,
-                 free_space_filter=False, free_margin_m=0.10):
+                 free_space_filter=False, free_margin_m=0.10, tilt_reject_deg=0.0):
         self.res = res
         self.confirm_s = float(confirm_s)
         self.change_min_m = float(change_min_m)
@@ -311,6 +311,8 @@ class ElevationGrid:
         self.tilt_cell_var = float(tilt_cell_var)
         self.tilt_min_obs = int(tilt_min_obs)
         self.tilt_stats = [0, 0]
+        self.tilt_reject = math.tan(math.radians(float(tilt_reject_deg))) if tilt_reject_deg > 0.0 else 0.0
+        self.reject_stats = [0, 0, 0]
         self.free_space_filter = bool(free_space_filter)
         self.free_margin_m = float(free_margin_m)
         self.n_dynamic = 0
@@ -496,6 +498,27 @@ class ElevationGrid:
         self.last_tilt = (a, b, c)
         return Z - (a + b * (X - base_xy[0]) + c * (Y - base_xy[1]))
 
+    def scan_tilt(self, flat, X, Y, Z, var_pts, base_xy):
+        Hs = self.h.reshape(-1)
+        conf = ((self.n.reshape(-1)[flat] >= self.tilt_min_obs)
+                & (self.var_min.reshape(-1)[flat] < self.tilt_cell_var))
+        r = Z - Hs[flat]
+        sel = conf & (np.abs(r) < 0.3)
+        if sel.sum() < self.tilt_min_points:
+            return None
+        dx = X[sel] - base_xy[0]
+        dy = Y[sel] - base_xy[1]
+        w = 1.0 / np.maximum(var_pts[sel], 1e-6)
+        rs = r[sel]
+        keep = np.ones(dx.size, bool)
+        coef = None
+        for _ in range(2):
+            coef = weighted_plane_fit(dx[keep], dy[keep], rs[keep], w[keep])
+            keep = np.abs(rs - (coef[0] + coef[1] * dx + coef[2] * dy)) < 0.08
+            if keep.sum() < self.tilt_min_points:
+                return None
+        return float(math.hypot(coef[1], coef[2]))
+
     def integrate(self, X, Y, Z, var_pts, t_rel, base_xy=None):
         self.ensure_capacity(X, Y)
         gi = ((X - self.gox) / self.res).astype(np.int64)
@@ -508,6 +531,14 @@ class ElevationGrid:
         var_pts = var_pts[inside]
         if self.tilt_comp and base_xy is not None:
             Z = self.tilt_correction(flat, X[inside], Y[inside], Z, var_pts, base_xy)
+        if self.tilt_reject > 0.0 and base_xy is not None:
+            self.reject_stats[0] += 1
+            sl = self.scan_tilt(flat, X[inside], Y[inside], Z, var_pts, base_xy)
+            if sl is not None:
+                self.reject_stats[1] += 1
+                if sl > self.tilt_reject:
+                    self.reject_stats[2] += 1
+                    return 0
         if self.free_space_filter:
             static = Z <= self.free_floor.reshape(-1)[flat] + self.free_margin_m
             self.n_dynamic += int(static.size - np.count_nonzero(static))
@@ -768,6 +799,7 @@ class ElevationCostmapNode(Node):
         self.declare_parameter('tilt_min_points', 300)
         self.declare_parameter('tilt_max_offset_m', 0.10)
         self.declare_parameter('tilt_max_deg', 1.5)
+        self.declare_parameter('tilt_reject_deg', 0.0)
         self.declare_parameter('free_space_filter', False)
         self.declare_parameter('free_margin_m', 0.10)
         self.declare_parameter('hybrid_k_sigma', 2.5)
@@ -884,6 +916,7 @@ class ElevationCostmapNode(Node):
             max_gap_s=gp('max_gap_s').value, min_hits=gp('min_hits').value,
             tilt_comp=gm('tilt_compensation').value, tilt_min_points=gp('tilt_min_points').value,
             tilt_max_offset_m=gp('tilt_max_offset_m').value, tilt_max_deg=gp('tilt_max_deg').value,
+            tilt_reject_deg=float(gp('tilt_reject_deg').value),
             free_space_filter=gp('free_space_filter').value, free_margin_m=gp('free_margin_m').value)
         self._n_clouds = 0
         self._n_skipped = 0
@@ -1394,7 +1427,8 @@ class ElevationCostmapNode(Node):
             f' | assetto trovato {self.n_att[0]}, mancante {self.n_att[2]}'
             f' | inclinazione corretta {self.grid.tilt_stats[1]}/{self.grid.tilt_stats[0]}'
             + (f' | quota IMU {self.zi[0]:+.3f} m, allineamenti {self.n_anchor}, correzione totale {self.z_corr_sum:.2f} m' if self.zi is not None else '')
-            + f' | scansioni saltate da fermo {self.n_fermo}')
+            + f' | scansioni saltate da fermo {self.n_fermo}'
+            + f' | inclinazione controllata {self.grid.reject_stats[1]}/{self.grid.reject_stats[0]}, scartate {self.grid.reject_stats[2]}')
 
     # ---------------- pubblicazione (deriva costo) ----------------
     def publish_timer(self):

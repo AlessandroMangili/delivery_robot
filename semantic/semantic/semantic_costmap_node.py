@@ -366,6 +366,9 @@ class SemanticCostmapNode(Node):
         self.declare_parameter('ray_clear_protect_cells', 1)
         self.declare_parameter('ray_clear_mode', 'banda')
         self.declare_parameter('ost_write_range_m', 0.0)
+        self.declare_parameter('footprint_clear', False)
+        self.declare_parameter('footprint_clear_half_length', 0.40)
+        self.declare_parameter('footprint_clear_half_width', 0.28)
         self.declare_parameter('ost_classes', [2, 3, 4, 5])
         self.declare_parameter('ray_clear_low_h', 0.12)
         self.declare_parameter('ray_clear_ground_tol', 0.25)
@@ -447,6 +450,11 @@ class SemanticCostmapNode(Node):
         self.rc_dil = int(gp('ray_clear_protect_cells').value)
         self.rc_mode = str(gp('ray_clear_mode').value)
         self.ost_range = float(gp('ost_write_range_m').value)
+        self.fp_clear = bool(gp('footprint_clear').value)
+        self.fp_hl = float(gp('footprint_clear_half_length').value)
+        self.fp_hw = float(gp('footprint_clear_half_width').value)
+        self.fp_stats = [0, 0]
+        self.fp_last = time.monotonic()
         self.ost_classes = [int(c) for c in gp('ost_classes').value]
         self.rc_low_h = float(gp('ray_clear_low_h').value)
         self.rc_ground_tol = float(gp('ray_clear_ground_tol').value)
@@ -940,6 +948,8 @@ class SemanticCostmapNode(Node):
             self._significant_change = int(np.count_nonzero(crossed & changed))
         if self.rc_on:
             self.ray_clear(M_scan2map, X, Y, Zm, bz, stamp_sec)
+        if self.fp_clear:
+            self.footprint_clear(bx, by, yaw_b)
         self.publish_map(bx, by, msg.header.stamp)
 
     def ray_clear(self, M_scan2map, X, Y, Zm, bz, stamp_sec):
@@ -999,6 +1009,45 @@ class SemanticCostmapNode(Node):
                 f'pulizia raggi: passate {self.rc_stats[0]}, celle letali toccate {self.rc_stats[1]}, '
                 f'tornate non letali {self.rc_stats[2]}, {1000.0 * self.rc_stats[3] / n:.1f} ms per passata')
             self.rc_last = time.monotonic()
+
+    def footprint_clear(self, bx, by, yaw):
+        n = int(np.ceil(max(self.fp_hl, self.fp_hw) / self.res)) + 1
+        oi = int(np.floor((bx - self.gox) / self.res))
+        oj = int(np.floor((by - self.goy) / self.res))
+        ii, jj = np.meshgrid(np.arange(oi - n, oi + n + 1), np.arange(oj - n, oj + n + 1))
+        ii = ii.ravel()
+        jj = jj.ravel()
+        cx = self.gox + (ii + 0.5) * self.res - bx
+        cy = self.goy + (jj + 0.5) * self.res - by
+        u = cx * np.cos(yaw) + cy * np.sin(yaw)
+        v = -cx * np.sin(yaw) + cy * np.cos(yaw)
+        k = ((np.abs(u) <= self.fp_hl) & (np.abs(v) <= self.fp_hw)
+             & (ii >= 0) & (ii < self.gnx) & (jj >= 0) & (jj < self.gny))
+        c = jj[k] * self.gnx + ii[k]
+        if c.size == 0:
+            return
+        V = self.grid.reshape(-1)
+        c = c[V[c] >= 100.0]
+        if c.size == 0:
+            return
+        A = self.alpha.reshape(-1, N_CLASSES)
+        KN = self.known.reshape(-1)
+        sub = A[c]
+        sub[:, self.lethal_classes] = 0.0
+        A[c] = sub
+        gone = A[c].sum(axis=1) < self.alpha_min
+        KN[c[gone]] = False
+        new = expected_cost(A[c], self.cost_vec, KN[c], self.lethal_classes, self.p_lethal)
+        V[c] = new
+        self.grid_i8.reshape(-1)[c] = grid_to_i8(new)
+        self._map_dirty = True
+        self._dirty_since_save = True
+        self.fp_stats[0] += int(c.size)
+        self.fp_stats[1] += int(np.count_nonzero(new < 100.0))
+        if time.monotonic() - self.fp_last > 30.0:
+            self.get_logger().info(
+                f'footprint clear: lethal cells under the robot {self.fp_stats[0]}, now free {self.fp_stats[1]}')
+            self.fp_last = time.monotonic()
 
     def map_jump_ok(self, stamp, t, bx, by, bz):
         if self.jump_gate is None:
