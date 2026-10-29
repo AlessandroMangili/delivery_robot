@@ -1,0 +1,11 @@
+/**:
+    ros__parameters:
+      video_device: "/dev/video0"
+      framerate: 10.0
+      io_method: "mmap"
+      frame_id: "gmsl_camera_optical_frame"
+      pixel_format: "uyvy2rgb"
+      image_width: 1920
+      image_height: 1280
+      camera_name: "gmsl"
+      camera_info_url: ""

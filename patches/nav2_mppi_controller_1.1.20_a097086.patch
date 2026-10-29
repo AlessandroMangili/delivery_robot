@@ -1,0 +1,53 @@
+diff --git a/nav2_mppi_controller/include/nav2_mppi_controller/critics/cost_critic.hpp b/nav2_mppi_controller/include/nav2_mppi_controller/critics/cost_critic.hpp
+index 77df20a..428cae9 100644
+--- a/nav2_mppi_controller/include/nav2_mppi_controller/critics/cost_critic.hpp
++++ b/nav2_mppi_controller/include/nav2_mppi_controller/critics/cost_critic.hpp
+@@ -81,6 +81,7 @@ protected:
+   float possibly_inscribed_cost_;
+ 
+   bool consider_footprint_{true};
++  bool footprint_repulsion_{false};
+   float circumscribed_radius_{0};
+   float circumscribed_cost_{0};
+   float collision_cost_{0};
+diff --git a/nav2_mppi_controller/src/critics/cost_critic.cpp b/nav2_mppi_controller/src/critics/cost_critic.cpp
+index 191d7c3..29ce2b3 100644
+--- a/nav2_mppi_controller/src/critics/cost_critic.cpp
++++ b/nav2_mppi_controller/src/critics/cost_critic.cpp
+@@ -24,6 +24,7 @@ void CostCritic::initialize()
+ {
+   auto getParam = parameters_handler_->getParamGetter(name_);
+   getParam(consider_footprint_, "consider_footprint", false);
++  getParam(footprint_repulsion_, "footprint_repulsion", false);
+   getParam(power_, "cost_power", 1);
+   getParam(weight_, "cost_weight", 3.81);
+   getParam(critical_cost_, "critical_cost", 300.0);
+@@ -150,12 +151,22 @@ void CostCritic::score(CriticData & data)
+       // The costAtPose doesn't use orientation
+       // The footprintCostAtPose will always return "INSCRIBED" if footprint is over it
+       // So the center point has more information than the footprint
+-      pose_cost = costAtPose(traj.x(i, j), traj.y(i, j));
+-      if (pose_cost < 1.0f) {continue;}  // In free space
+-
+-      if (inCollision(pose_cost, traj.x(i, j), traj.y(i, j), traj.yaws(i, j))) {
+-        trajectory_collide = true;
+-        break;
++      if (footprint_repulsion_) {
++        pose_cost = static_cast<float>(collision_checker_.footprintCostAtPose(
++            traj.x(i, j), traj.y(i, j), traj.yaws(i, j), costmap_ros_->getRobotFootprint()));
++        if (pose_cost < 1.0f) {continue;}
++        if (pose_cost >= nav2_costmap_2d::LETHAL_OBSTACLE) {
++          trajectory_collide = true;
++          break;
++        }
++      } else {
++        pose_cost = costAtPose(traj.x(i, j), traj.y(i, j));
++        if (pose_cost < 1.0f) {continue;}  // In free space
++
++        if (inCollision(pose_cost, traj.x(i, j), traj.y(i, j), traj.yaws(i, j))) {
++          trajectory_collide = true;
++          break;
++        }
+       }
+ 
+       // Let near-collision trajectory points be punished severely
