@@ -8,9 +8,6 @@
   <class type="mppi::critics::RotateFirstCritic" base_class_type="mppi::critics::CriticFunction">
     <description>When the heading is far from the path direction, penalises forward motion and slow rotation so that MPPI turns in place first.</description>
   </class>
-  <class type="mppi::critics::RotationDeadzoneCritic" base_class_type="mppi::critics::CriticFunction">
-    <description>Penalises in-place rotations too small to make the robot turn (drive dead zone).</description>
-  </class>
   <class type="mppi::critics::SideChoiceCritic" base_class_type="mppi::critics::CriticFunction">
     <description>When an obstacle blocks the path, picks the side with the best trade-off between free width and offset from the path, keeps it until the path is free, and steers MPPI toward it.</description>
   </class>

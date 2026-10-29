@@ -10,6 +10,7 @@
 
 #include "nav2_mppi_controller/critic_function.hpp"
 #include "dynamic_tracker_msgs/msg/track_array.hpp"
+#include "visualization_msgs/msg/marker_array.hpp"
 
 namespace mppi::critics
 {
@@ -77,9 +78,21 @@ protected:
 
   bool segmentFree(double x0, double y0, double x1, double y1) const;
 
+  bool corridorFree(
+
+    double x0, double y0, double x1, double y1, double half_width, double skip,
+
+    int threshold) const;
+
+  bool turnFree(double x, double y) const;
+
   void tracksCallback(const dynamic_tracker_msgs::msg::TrackArray::SharedPtr msg);
 
   std::vector<Mover> currentMovers(double now) const;
+
+  void publishDebug(
+    double now, double rx, double ry, bool target, size_t idx, bool direct, double tgx, double tgy,
+    float k);
 
   float attraction_weight_{5.0f};
   float rotation_weight_{10.0f};
@@ -136,6 +149,15 @@ protected:
   float reach_ahead_{0.1f};
   float reach_radius_{0.35f};
   float passive_gain_{0.5f};
+  float pre_wp1_gain_{1.0f};
+  bool straight_segments_{false};
+  float segment_margin_{0.10f};
+  float turn_margin_{0.05f};
+  float align_exit_deg_{-1.0f};
+  bool turning_{false};
+  double wp1_x_{0.0};
+  double wp1_y_{0.0};
+  double wp1_st_{0.0};
   float passive_align_deg_{60.0f};
   float pass_margin_{0.2f};
   float mover_speed_{0.3f};
@@ -190,6 +212,10 @@ protected:
   size_t last_target_{0};
 
   rclcpp::Subscription<dynamic_tracker_msgs::msg::TrackArray>::SharedPtr tracks_sub_;
+  bool debug_{false};
+  double debug_time_{-1e9};
+  std::string frame_{"odom"};
+  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr debug_pub_;
   mutable std::mutex tracks_mutex_;
   std::vector<Mover> movers_;
   double movers_time_{-1e9};
