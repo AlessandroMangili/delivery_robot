@@ -56,6 +56,7 @@ bt_navigator:
       - nav2_assisted_teleop_cancel_bt_node
       - nav2_drive_on_heading_cancel_bt_node
       - nav2_is_battery_charging_condition_bt_node
+      - delivery_progress_recovery_bt_node
 
 bt_navigator_navigate_through_poses_rclcpp_node:
   ros__parameters:
@@ -187,6 +188,7 @@ controller_server:
       DetourCritic:
         enabled: true
         cost_weight: 5.0
+        pre_wp1_gain: 4.0
         rotation_weight: 10.0
         forward_weight: 10.0
         min_rotation_speed: 0.25
