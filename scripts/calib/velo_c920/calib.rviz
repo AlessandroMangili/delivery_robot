@@ -1,0 +1,73 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Enabled: true
+      Reference Frame: <Fixed Frame>
+      Cell Size: 1
+      Plane Cell Count: 20
+    - Class: rviz_default_plugins/Axes
+      Name: velodyne
+      Enabled: true
+      Reference Frame: velodyne
+      Length: 0.3
+      Radius: 0.01
+    - Class: rviz_default_plugins/PointCloud2
+      Name: velodyne_points
+      Enabled: true
+      Topic:
+        Value: /velodyne_points
+        Depth: 5
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Durability Policy: Volatile
+      Style: Flat Squares
+      Size (m): 0.03
+      Color Transformer: AxisColor
+      Axis: X
+      Use Fixed Frame: true
+      Decay Time: 0
+      Selectable: true
+    - Class: rviz_default_plugins/Image
+      Name: overlay
+      Enabled: true
+      Topic:
+        Value: /c920/lidar_overlay
+        Depth: 2
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Durability Policy: Volatile
+  Enabled: true
+  Global Options:
+    Background Color: 48; 48; 48
+    Fixed Frame: velodyne
+    Frame Rate: 30
+  Name: root
+  Tools:
+    - Class: rviz_default_plugins/Interact
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/PublishPoint
+      Single click: true
+      Topic:
+        Value: /clicked_point
+  Value: true
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 4
+      Focal Point:
+        X: 2
+        Y: 0
+        Z: 0
+      Pitch: 0.15
+      Yaw: 3.14
+      Name: Current View
+      Target Frame: <Fixed Frame>
+Window Geometry:
+  Width: 1400
+  Height: 900

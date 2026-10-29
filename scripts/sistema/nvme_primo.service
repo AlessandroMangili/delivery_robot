@@ -1,0 +1,10 @@
+[Unit]
+Description=Avvio sempre dal disco NVMe (BootNext e BootOrder)
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/nvme_primo.sh
+
+[Install]
+WantedBy=multi-user.target

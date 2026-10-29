@@ -1,0 +1,195 @@
+diff --git a/include/lidar_localization/lidar_localization_component.hpp b/include/lidar_localization/lidar_localization_component.hpp
+index b4ecdc8..d61d525 100644
+--- a/include/lidar_localization/lidar_localization_component.hpp
++++ b/include/lidar_localization/lidar_localization_component.hpp
+@@ -406,6 +406,7 @@ public:
+   bool use_gtsam_smoother_{false};
+   bool enable_debug_{false};
+   bool enable_map_odom_tf_{false};
++  double map_odom_tf_future_s_{0.0};
+   // AMCL-style odom bridge: the map -> odom offset composed from the last
+   // ACCEPTED scan match, frozen and rebroadcast (re-stamped) on every scan
+   // callback even while matches are rejected/lost, so map -> base_link stays
+@@ -710,6 +711,7 @@ public:
+     const geometry_msgs::msg::TransformStamped & map_to_base_link_stamped,
+     bool freeze_as_last_good = true);
+   void republishFrozenMapToOdomTransform(const builtin_interfaces::msg::Time & stamp);
++  void sendMapToOdomTransform(const geometry_msgs::msg::TransformStamped & map_to_odom);
+   void publishOdomBridgePose(
+     const builtin_interfaces::msg::Time & stamp,
+     const geometry_msgs::msg::TransformStamped & frozen_map_to_odom);
+diff --git a/scripts/global_localization_node.py b/scripts/global_localization_node.py
+index 19d4d19..6383a81 100755
+--- a/scripts/global_localization_node.py
++++ b/scripts/global_localization_node.py
+@@ -80,6 +80,7 @@ class GlobalLocalizationNode(Node):
+ 
+         self.declare_parameter("occupancy_yaml", "")
+         self.declare_parameter("cloud_topic", "cloud")
++        self.declare_parameter("startup_status_topic", "")
+         self.declare_parameter("global_frame_id", "map")
+         # The scan is moved into base_frame_id and levelled with the roll and
+         # pitch of odom_frame_id -> base_frame_id (a gravity-aligned odometry
+@@ -261,6 +262,11 @@ class GlobalLocalizationNode(Node):
+         self.status_pub = self.create_publisher(String, "~/status", 10)
+         self._query_seq = 0
+         self.query_srv = self.create_service(Trigger, "~/query", self.handle_query)
++        startup_status_topic = self.get_parameter("startup_status_topic").value
++        if startup_status_topic:
++            self.create_subscription(
++                String, startup_status_topic, self._on_startup_status, candidate_qos
++            )
+         self.get_logger().info(
+             f"global localization service ready: source={self.engine.candidate_source} map={occupancy_yaml or reference_csv} scan={cloud_topic} backend={self.engine.backend}"
+         )
+@@ -268,6 +274,23 @@ class GlobalLocalizationNode(Node):
+     def cloud_received(self, msg: PointCloud2) -> None:
+         self.latest_cloud = msg
+ 
++    def _on_startup_status(self, msg: String) -> None:
++        if self.cloud_sub is None:
++            return
++        try:
++            state = json.loads(msg.data).get("state")
++        except (ValueError, AttributeError):
++            return
++        if state != "active":
++            return
++        self.destroy_subscription(self.cloud_sub)
++        self.cloud_sub = None
++        self.tf_listener.unregister()
++        self.latest_cloud = None
++        self.get_logger().info(
++            "startup localized: global search paused, no more scans or transforms"
++        )
++
+     def _lookup(self, target: str, source: str, stamp):
+         """Transform at the scan stamp, else the latest one, else None."""
+         for when in (Time.from_msg(stamp), Time()):
+diff --git a/scripts/startup_initialization_node.py b/scripts/startup_initialization_node.py
+index 477749f..0cdc649 100755
+--- a/scripts/startup_initialization_node.py
++++ b/scripts/startup_initialization_node.py
+@@ -210,7 +210,7 @@ class StartupInitializationNode(Node):
+         self.status_pub = self.create_publisher(
+             String, str(self.get_parameter("status_topic").value), transient
+         )
+-        self.create_subscription(
++        self.cloud_sub = self.create_subscription(
+             PointCloud2,
+             str(self.get_parameter("cloud_topic").value),
+             self._on_cloud,
+@@ -466,6 +466,8 @@ class StartupInitializationNode(Node):
+         self.diagnostic_fresh = False
+         decision = model.decide_startup(self.params, self.state, observation)
+         self.state = decision.state
++        if self.state.name == model.STATE_ACTIVE and self.cloud_sub is not None:
++            self._release_scan_inputs()
+         if decision.action == model.ACTION_PUBLISH_SAVED:
+             self._publish_saved_pose()
+         elif decision.action == model.ACTION_QUERY_GLOBAL:
+@@ -488,6 +490,16 @@ class StartupInitializationNode(Node):
+         else:
+             self._report(decision.reason)
+ 
++    def _release_scan_inputs(self) -> None:
++        self.destroy_subscription(self.cloud_sub)
++        self.cloud_sub = None
++        if self.tf_buffer is not None:
++            self.tf_listener.unregister()
++            self.tf_buffer = None
++        self.get_logger().info(
++            "localized: no more scans or transforms, only the pose is still saved"
++        )
++
+     def _issue_query(self) -> None:
+         if self.query_in_flight:
+             return
+diff --git a/src/component_lifecycle.cpp b/src/component_lifecycle.cpp
+index 53512d2..0e9b3be 100644
+--- a/src/component_lifecycle.cpp
++++ b/src/component_lifecycle.cpp
+@@ -21,6 +21,7 @@ PCLLocalization::PCLLocalization(const rclcpp::NodeOptions & options)
+   declare_parameter("odom_frame_id", "odom");
+   declare_parameter("base_frame_id", "base_link");
+   declare_parameter("enable_map_odom_tf", false);
++  declare_parameter("map_odom_tf_future_s", 0.0);
+   declare_parameter("use_odom_tf_prediction", false);
+   declare_parameter("constrain_odom_tf_prediction_to_planar", false);
+   declare_parameter("constrain_odom_tf_prediction_height_only", false);
+diff --git a/src/component_parameters.cpp b/src/component_parameters.cpp
+index 6856169..6cfab42 100644
+--- a/src/component_parameters.cpp
++++ b/src/component_parameters.cpp
+@@ -156,6 +156,7 @@ void PCLLocalization::initializeParameters()
+   get_parameter("odom_frame_id", odom_frame_id_);
+   get_parameter("base_frame_id", base_frame_id_);
+   get_parameter("enable_map_odom_tf", enable_map_odom_tf_);
++  get_parameter("map_odom_tf_future_s", map_odom_tf_future_s_);
+   get_parameter("use_odom_tf_prediction", use_odom_tf_prediction_);
+   get_parameter(
+     "constrain_odom_tf_prediction_to_planar",
+@@ -553,6 +554,7 @@ void PCLLocalization::initializeParameters()
+   RCLCPP_INFO(get_logger(),"odom_frame_id: %s", odom_frame_id_.c_str());
+   RCLCPP_INFO(get_logger(),"base_frame_id: %s", base_frame_id_.c_str());
+   RCLCPP_INFO(get_logger(),"enable_map_odom_tf: %d", enable_map_odom_tf_);
++  RCLCPP_INFO(get_logger(),"map_odom_tf_future_s: %.3f", map_odom_tf_future_s_);
+   RCLCPP_INFO(get_logger(),"use_odom_tf_prediction: %d", use_odom_tf_prediction_);
+   RCLCPP_INFO(
+     get_logger(), "constrain_odom_tf_prediction_to_planar: %d",
+diff --git a/src/component_pose_publisher.cpp b/src/component_pose_publisher.cpp
+index 9c20e31..e3ee156 100644
+--- a/src/component_pose_publisher.cpp
++++ b/src/component_pose_publisher.cpp
+@@ -34,7 +34,7 @@ void PCLLocalization::publishCurrentPose(
+     publishBridgePoseAsRejectedOutput(stamp);
+     geometry_msgs::msg::TransformStamped frozen = last_good_map_to_odom_;
+     frozen.header.stamp = stamp;
+-    broadcaster_.sendTransform(frozen);
++    sendMapToOdomTransform(frozen);
+     return;
+   }
+   publishPoseMessage(*corrent_pose_with_cov_stamped_ptr_);
+@@ -111,7 +111,7 @@ bool PCLLocalization::publishMapToOdomTransform(
+       map_to_base_link_stamped,
+       odom_to_base_link_msg,
+       level_map_to_odom_);
+-  broadcaster_.sendTransform(map_to_odom);
++  sendMapToOdomTransform(map_to_odom);
+   // Freeze this map -> odom offset so republishFrozenMapToOdomTransform can keep
+   // it alive (re-stamped) through a dropout. Only called from accepted-match /
+   // accepted-reset call sites (see publishPoseTransform's default and its one
+@@ -145,10 +145,23 @@ void PCLLocalization::republishFrozenMapToOdomTransform(
+   }
+   geometry_msgs::msg::TransformStamped frozen = last_good_map_to_odom_;
+   frozen.header.stamp = stamp;
+-  broadcaster_.sendTransform(frozen);
++  sendMapToOdomTransform(frozen);
+   publishOdomBridgePose(stamp, frozen);
+ }
+ 
++void PCLLocalization::sendMapToOdomTransform(
++  const geometry_msgs::msg::TransformStamped & map_to_odom)
++{
++  if (map_odom_tf_future_s_ <= 0.0) {
++    broadcaster_.sendTransform(map_to_odom);
++    return;
++  }
++  geometry_msgs::msg::TransformStamped sent = map_to_odom;
++  sent.header.stamp = rclcpp::Time(map_to_odom.header.stamp, RCL_ROS_TIME) +
++    rclcpp::Duration::from_seconds(map_odom_tf_future_s_);
++  broadcaster_.sendTransform(sent);
++}
++
+ void PCLLocalization::publishOdomBridgePose(
+   const builtin_interfaces::msg::Time & stamp,
+   const geometry_msgs::msg::TransformStamped & frozen_map_to_odom)
+@@ -436,7 +449,7 @@ void PCLLocalization::timerPublishPose()
+     // callback budget while /clock is slightly ahead of GLIM's newest TF.
+     geometry_msgs::msg::TransformStamped frozen = last_good_map_to_odom_;
+     frozen.header.stamp = pose_copy.header.stamp;
+-    broadcaster_.sendTransform(frozen);
++    sendMapToOdomTransform(frozen);
+   } else {
+     publishPoseTransform(pose_copy.header.stamp, pose_copy.pose.pose, false);
+   }
