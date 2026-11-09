@@ -1,6 +1,6 @@
 # Urban Outdoor Navigation: Clearpath Husky A100
 
-Autonomous sidewalk navigation for a small delivery robot, developed for a Master's thesis at the University of Minnesota and tested on the sidewalks of the East Bank campus. This `master` branch runs on the real Clearpath Husky A100. The Gazebo simulation is on the [`simulation`](https://github.com/AlessandroMangili/urban_outdoor_navigation/tree/simulation) branch.
+Autonomous sidewalk navigation for a small delivery robot, developed for a Master's thesis in Robotics Engineering at the University of Genoa, in collaboration with the University of Minnesota. All the experiments were run at the Shepherd Lab of the University of Minnesota, on the sidewalks of the East Bank campus. This `master` branch runs on the real Clearpath Husky A100. The Gazebo simulation is on the [`simulation`](https://github.com/AlessandroMangili/urban_outdoor_navigation/tree/simulation) branch.
 
 <p align="center">
   <img src="docs/media/husky_a100.jpg" width="620" alt="The Clearpath Husky A100 on a campus sidewalk, with the LiDAR and the camera on the turret">
