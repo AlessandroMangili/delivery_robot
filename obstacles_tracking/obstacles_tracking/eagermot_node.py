@@ -1,29 +1,3 @@
-#!/usr/bin/env python3
-"""Nodo ROS2 di tracking EagerMOT.
-
-Lega insieme i pezzi:
-    /detections3d     (vision_msgs/Detection3DArray)  <- pointpillars_detector
-    /yolo/detections  (vision_msgs/Detection2DArray)  <- yolo_detect_node
-    /camera/camera_info
-                 |
-            fusione in istanze  (eagermot_fusion)
-                 |
-            tracking a due stadi (eagermot_tracker)
-                 |
-    /dynamic_tracks_state  (dynamic_tracker_msgs/TrackArray)  -> il critic MPPI
-    /tracks/markers        (visualization_msgs/MarkerArray)   -> RViz
-
-E' un sostituto di lidar3d_tracker.py: pubblica gli stessi due topic, quindi il
-critic e RViz non vanno toccati. Si lanciano in alternativa, mai insieme.
-
-Il tracking avviene nel frame FISSO (odom), non in quello del robot: un modello
-a velocita' costante nel frame di un veicolo che si muove descriverebbe il moto
-relativo, non quello del pedone.
-
-Va lanciato col python del venv (serve numpy; non serve torch qui, ma il nodo
-convive con il detector che gira nello stesso ambiente).
-"""
-
 import math
 
 import numpy as np
@@ -46,22 +20,16 @@ from dynamic_tracker_msgs.msg import Track as TrackMsg, TrackArray
 import tf2_ros
 from tf2_ros import TransformException
 
-from .eagermot_fusion import fuse_detections, conta_istanze
+from .eagermot_fusion import fuse_detections, count_instances
 from .eagermot_tracker import EagerMOT, transform_box3d
 
 
-# ============================================================================
-# Conversioni messaggio -> array (pure, testabili)
-# ============================================================================
-
 def quat_to_yaw(q):
-    """Yaw da un quaternione (rotazione attorno a z)."""
     return math.atan2(2.0 * (q.w * q.z + q.x * q.y),
                       1.0 - 2.0 * (q.y * q.y + q.z * q.z))
 
 
 def transform_to_matrix(t):
-    """geometry_msgs/TransformStamped -> matrice omogenea 4x4."""
     q = t.transform.rotation
     tr = t.transform.translation
     x, y, z, w = q.x, q.y, q.z, q.w
@@ -77,11 +45,6 @@ def transform_to_matrix(t):
 
 
 def det3d_to_boxes(msg):
-    """Detection3DArray -> (boxes (N,7), scores (N,)).
-
-    La box esce come [x, y, z, dx, dy, dz, yaw], l'ordine di OpenPCDet, che e'
-    quello che il tracker si aspetta.
-    """
     boxes, scores = [], []
     for det in msg.detections:
         c = det.bbox.center
@@ -99,12 +62,6 @@ def det3d_to_boxes(msg):
 
 
 def det2d_to_boxes(msg):
-    """Detection2DArray -> (boxes (M,4) [x1,y1,x2,y2], scores (M,)).
-
-    Robusto alle due varianti di BoundingBox2D.center (vision_msgs/Pose2D con
-    .position, oppure geometry_msgs/Pose2D piatta), come gia' fa il tracker
-    esistente.
-    """
     boxes, scores = [], []
     for det in msg.detections:
         b = det.bbox
@@ -125,12 +82,7 @@ def det2d_to_boxes(msg):
     return np.asarray(boxes, dtype=np.float64), np.asarray(scores, dtype=np.float64)
 
 
-# ============================================================================
-# Nodo
-# ============================================================================
-
 class EagerMOTNode(Node):
-
     def __init__(self):
         super().__init__('eagermot_tracker_node')
 
@@ -144,42 +96,23 @@ class EagerMOTNode(Node):
         d('sensor_frame', 'base_scan')
         d('camera_frame', 'camera_rgb_optical_frame')
 
-        # --- soglie EagerMOT (valori del paper, riga pedestrian di NuScenes) ---
-        d('theta_fusion', 0.3)     # IoU minima per fondere una 3D con una 2D
-        d('theta_3d', 1.8)         # distanza scalata MASSIMA, stadio 1 [m]
-        d('theta_2d', 0.5)         # IoU minima, stadio 2
-        d('age_max', 3)            # frame senza update dopo i quali si muore
-        d('age_2d', 3)             # frame entro cui serve evidenza 2D
-        # --- deviazioni dal paper, disattivate di default (vedi confermata()) ---
-        # age_3d: -1 = regola del paper (serve evidenza 2D). N >= 0 = accetta
-        #   anche evidenza 3D entro N frame. Indispensabile qui, dove il LiDAR
-        #   copre 360 gradi e la camera solo ~72: un pedone di lato non potra'
-        #   MAI avere evidenza 2D, e con la regola originale resta invisibile
-        #   al critic pur essendo visto benissimo dal LiDAR.
+        d('theta_fusion', 0.3)
+        d('theta_3d', 1.8)
+        d('theta_2d', 0.5)
+        d('age_max', 3)
+        d('age_2d', 3)
         d('age_3d', -1)
-        # confirm_coast_frames: 0 = regola del paper (conferma non appiccicosa).
-        #   N > 0 = la conferma sopravvive a N frame senza match, contro lo
-        #   sfarfallio di un detector che perde qualche frame.
         d('confirm_coast_frames', 0)
-        # dup_suppress_radius: 0.0 = regola del paper. R > 0 = un'istanza 3D
-        #   orfana a meno di R metri da una traccia viva non apre una traccia
-        #   nuova: aggiorna quella (se mancata dallo stadio 1) o si scarta
-        #   (se doppia detection). Vedi lo step 2.5 in EagerMOT.step().
         d('dup_suppress_radius', 0.0)
-        # min_hits_3d: 0 = nessun vincolo. N > 0 = una traccia confermata solo
-        #   dal 3D (via age_3d) deve essere stata associata in almeno N frame.
         d('min_hits_3d', 0)
 
-        # --- covarianze del Kalman (default AB3DMOT, tarati su auto KITTI) ---
         d('kf_p_pos', 10.0)
         d('kf_p_vel', 10000.0)
         d('kf_q_pos', 1.0)
         d('kf_q_vel', 0.01)
         d('kf_r_meas', 1.0)
 
-        # --- pubblicazione ---
-        d('min_speed', 0.0)        # 0 = pubblica tutte le confermate; il critic
-                                   # ha gia' il suo min_ped_speed
+        d('min_speed', 0.0)
         d('marker_z', 0.6)
         d('arrow_time_scale', 1.0)
         d('diag_period_frames', 20)
@@ -228,8 +161,6 @@ class EagerMOTNode(Node):
 
         self.create_subscription(Detection3DArray, g('detections3d_topic'),
                                  self.on_det3d, qos, callback_group=cb_main)
-        # Il ramo camera e' ASINCRONO: qui si memorizza soltanto l'ultima
-        # Detection2DArray, la fusione avviene quando arriva la nuvola.
         self.yolo_boxes = np.zeros((0, 4))
         self.yolo_scores = np.zeros(0)
         self.K = None
@@ -248,12 +179,11 @@ class EagerMOTNode(Node):
             f"{g('tracks_topic')} | theta_fusion={self.theta_fusion} "
             f"theta_3d={self.mot.theta_3d} theta_2d={self.mot.theta_2d} "
             f"age_max={self.mot.age_max} age_2d={self.mot.age_2d} "
-            f"age_3d={self.mot.age_3d if self.mot.age_3d is not None else 'off (regola paper)'} "
+            f"age_3d={self.mot.age_3d if self.mot.age_3d is not None else 'off (paper rule)'} "
             f"coast={self.mot.confirm_coast_frames} "
             f"dup_r={self.mot.dup_suppress_radius} "
             f"min_hits_3d={self.mot.min_hits_3d}")
 
-    # -- ramo camera ------------------------------------------------------
     def on_yolo(self, msg):
         self.yolo_boxes, self.yolo_scores = det2d_to_boxes(msg)
 
@@ -262,7 +192,6 @@ class EagerMOTNode(Node):
         self.img_w = int(msg.width)
         self.img_h = int(msg.height)
 
-    # -- ciclo principale -------------------------------------------------
     def on_det3d(self, msg):
         self._frame += 1
         stamp = msg.header.stamp
@@ -272,11 +201,10 @@ class EagerMOTNode(Node):
 
         if self.K is None:
             self.get_logger().warn(
-                'CameraInfo non ancora ricevuta: niente fusione ne\' stadio 2.',
+                'No CameraInfo yet: no fusion and no second stage.',
                 throttle_duration_sec=5.0)
             return
 
-        # --- TF: sensore -> odom (per tracciare) e odom -> camera (per proiettare)
         try:
             tf_odom_sensor = self.tf_buffer.lookup_transform(
                 self.tracking_frame, msg.header.frame_id or self.sensor_frame,
@@ -287,64 +215,58 @@ class EagerMOTNode(Node):
                 rclpy.time.Time.from_msg(stamp),
                 timeout=Duration(seconds=self.tf_timeout))
         except TransformException as e:
-            self.get_logger().warn(f'TF non disponibile: {e}',
+            self.get_logger().warn(f'TF not available: {e}',
                                    throttle_duration_sec=2.0)
             return
 
         T_odom_sensor = transform_to_matrix(tf_odom_sensor)
         T_cam_odom = transform_to_matrix(tf_cam_odom)
 
-        # --- detection 3D dal frame del LiDAR a odom ---
         boxes_s, scores3d = det3d_to_boxes(msg)
         boxes_o = (np.array([transform_box3d(b, T_odom_sensor) for b in boxes_s])
                    if len(boxes_s) else np.zeros((0, 7)))
 
-        # --- FUSIONE (le box 3D sono in odom, quindi si proietta da odom) ---
-        istanze = fuse_detections(boxes_o, scores3d,
+        instances = fuse_detections(boxes_o, scores3d,
                                   self.yolo_boxes, self.yolo_scores,
                                   T_cam_odom, self.K, self.img_w, self.img_h,
                                   theta_fusion=self.theta_fusion)
 
-        # --- TRACKING a due stadi ---
-        self.mot.step(istanze, dt, T_cam_odom, self.K, self.img_w, self.img_h)
+        self.mot.step(instances, dt, T_cam_odom, self.K, self.img_w, self.img_h)
 
-        confermate = [t for t in self.mot.tracks_confermate()
-                      if float(np.hypot(*t.velocita[:2])) >= self.min_speed]
-        self.publish(stamp, confermate)
+        confirmed = [t for t in self.mot.confirmed_tracks()
+                      if float(np.hypot(*t.velocity[:2])) >= self.min_speed]
+        self.publish(stamp, confirmed)
 
         if self.diag_period_frames > 0 and self._frame % self.diag_period_frames == 0:
-            b, t3, t2 = conta_istanze(istanze)
-            d = self.mot.diagnostica
+            b, t3, t2 = count_instances(instances)
+            d = self.mot.diagnostics
             self.get_logger().info(
                 f"[emot] det3d={len(boxes_o)} yolo={len(self.yolo_boxes)} | "
-                f"istanze both={b} solo3d={t3} solo2d={t2} | "
-                f"match1={d['match1']} match2={d['match2']} salvate={d['salvate']} soppresse={d['soppresse']} "
-                f"nuove={d['nuove']} morte={d['morte']} | "
-                f"vive={d['vive']} confermate={len(confermate)} | dt={dt*1000:.0f}ms")
+                f"instances both={b} only3d={t3} only2d={t2} | "
+                f"match1={d['match1']} match2={d['match2']} rescued={d['rescued']} suppressed={d['suppressed']} "
+                f"born={d['born']} died={d['died']} | "
+                f"alive={d['alive']} confirmed={len(confirmed)} | dt={dt*1000:.0f}ms")
 
-    # -- uscita -----------------------------------------------------------
-    def publish(self, stamp, tracce):
+    def publish(self, stamp, tracks):
         out = TrackArray()
         out.header.stamp = stamp
         out.header.frame_id = self.tracking_frame
-        for t in tracce:
+        for t in tracks:
             box = t.box3d
-            vel = t.velocita
+            vel = t.velocity
             tr = TrackMsg()
             tr.id = int(t.id)
             tr.x = float(box[0])
             tr.y = float(box[1])
             tr.vx = float(vel[0])
             tr.vy = float(vel[1])
-            # deviazioni standard dalla covarianza del filtro: la diagonale di P
-            # sulle componenti di posizione (0,1) e di velocita' (7,8).
             tr.pos_std = float(np.sqrt(max(t.kf.P[0, 0], t.kf.P[1, 1], 0.0)))
             tr.vel_std = float(np.sqrt(max(t.kf.P[7, 7], t.kf.P[8, 8], 0.0)))
             out.tracks.append(tr)
         self.pub_tracks.publish(out)
-        self.publish_markers(stamp, tracce)
+        self.publish_markers(stamp, tracks)
 
-    def publish_markers(self, stamp, tracce):
+    def publish_markers(self, stamp, tracks):
         arr = MarkerArray()
         clear = Marker()
         clear.header.frame_id = self.tracking_frame
@@ -352,15 +274,12 @@ class EagerMOTNode(Node):
         clear.action = Marker.DELETEALL
         arr.markers.append(clear)
 
-        for t in tracce:
+        for t in tracks:
             box = t.box3d
-            vel = t.velocita
-            # colore: verde se il LiDAR l'ha vista in questo frame, ambra se no.
-            # Etichetta: [2D] solo se in questo frame l'ha aggiornata la camera,
-            # [coast] se nessuna misura (sola predizione del Kalman).
-            coasting = t.eta_da_3d > 0
+            vel = t.velocity
+            coasting = t.age_since_3d > 0
             tag = ('' if not coasting else
-                   ' [2D]' if t.eta_da_2d == 0 else ' [coast]')
+                   ' [2D]' if t.age_since_2d == 0 else ' [coast]')
             col = (ColorRGBA(r=0.95, g=0.65, b=0.10, a=0.85) if coasting
                    else ColorRGBA(r=0.10, g=0.85, b=0.25, a=0.85))
 

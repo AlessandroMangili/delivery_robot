@@ -3,13 +3,9 @@
 <package format="3">
   <name>obstacles_tracking</name>
   <version>0.0.0</version>
-  <description>
-    Detection e tracking dinamico secondo EagerMOT (Kim, Osep, Leal-Taixe, ICRA 2021):
-    detector 3D (PointPillars) e 2D (YOLO), fusione, tracker a due stadi con
-    ciclo di vita nascita/conferma/morte. Sostituto di dynamic_layer/lidar3d_tracker.
-  </description>
+  <description>People detection with PointPillars and YOLO, and EagerMOT tracking (Kim, Osep, Leal-Taixe, ICRA 2021)</description>
   <maintainer email="alessandro.mangili1@studenti.unimi.it">alessandro</maintainer>
-  <license>TODO: License declaration</license>
+  <license>MIT</license>
 
   <depend>rclpy</depend>
   <depend>sensor_msgs</depend>

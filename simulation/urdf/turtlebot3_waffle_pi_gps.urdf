@@ -1,13 +1,11 @@
 <?xml version="1.0" ?>
 <robot name="turtlebot3_waffle_pi" xmlns:xacro="http://ros.org/wiki/xacro">
-  <!-- <xacro:include filename="$(find simulation)/urdf/common_properties.urdf"/> -->
 
   <xacro:arg name="namespace" default=""/>
   <xacro:property name="namespace" value="$(arg namespace)"/>
 
   <xacro:include filename="$(find simulation)/urdf/turtlebot3_waffle_pi_gps.gazebo" />
 
-  <!-- Init colour -->
   <material name="black">
       <color rgba="0.0 0.0 0.0 1.0"/>
   </material>

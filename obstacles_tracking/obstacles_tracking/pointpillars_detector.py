@@ -1,17 +1,3 @@
-#!/usr/bin/env python3
-"""Detection 3D con PointPillars, drop-in di pointcloud_detector.py.
-
-Pubblica:
-  - Detection3DArray su /detections3d  (box complete, verso EagerMOT)
-  - MarkerArray su /detections/markers (box per RViz)
-
-DEVE girare con il python del venv, che ha torch e pcdet:
-  /mnt/2tbpartition/mangili/pcdet_venv/bin/python3 pointpillars_detector.py --ros-args ...
-
-Il config usa _BASE_CONFIG_ con percorso RELATIVO, quindi il nodo si sposta da
-solo in OpenPCDet/tools prima di caricarlo (vedi cfg_dir).
-"""
-
 import os
 import time
 
@@ -28,16 +14,12 @@ from vision_msgs.msg import (Detection3D, Detection3DArray,
                              ObjectHypothesisWithPose)
 
 
-# ===================== lettura nuvola (vista strutturata) =====================
-# codici datatype di sensor_msgs/PointField
 _PF = {1: np.int8, 2: np.uint8, 3: np.int16, 4: np.uint16,
        5: np.int32, 6: np.uint32, 7: np.float32, 8: np.float64}
 
 
-def dtype_da_campi(fields, point_step, is_bigendian=False):
-    """dtype strutturato che descrive UN punto del messaggio, padding compreso.
-    Funzione PURA. Ritorna None se il layout non e' interpretabile."""
-    voci = []
+def dtype_from_fields(fields, point_step, is_bigendian=False):
+    entries = []
     offset = 0
     for f in sorted(fields, key=lambda f: f.offset):
         if f.datatype not in _PF or getattr(f, 'count', 1) != 1:
@@ -45,26 +27,19 @@ def dtype_da_campi(fields, point_step, is_bigendian=False):
         if f.offset < offset:
             return None
         if f.offset > offset:
-            voci.append((f'_pad{offset}', np.uint8, f.offset - offset))
-        voci.append((f.name, _PF[f.datatype]))
+            entries.append((f'_pad{offset}', np.uint8, f.offset - offset))
+        entries.append((f.name, _PF[f.datatype]))
         offset = f.offset + np.dtype(_PF[f.datatype]).itemsize
     if offset > point_step:
         return None
     if offset < point_step:
-        voci.append(('_padfine', np.uint8, point_step - offset))
-    dt = np.dtype(voci)
+        entries.append(('_padend', np.uint8, point_step - offset))
+    dt = np.dtype(entries)
     return dt.newbyteorder('>') if is_bigendian else dt
 
 
 def cloud_to_xyzi(msg):
-    """PointCloud2 -> ndarray (N,4) float32 [x, y, z, intensity], senza NaN/inf.
-
-    La quarta colonna e' forzata a ZERO anche se il messaggio porta
-    un'intensita' vera: nel dataset di training aveva un solo valore distinto
-    (tutta zero), quindi passarne una diversa metterebbe il modello fuori
-    distribuzione su una feature che la PillarVFE riceve davvero in ingresso.
-    """
-    dt = dtype_da_campi(msg.fields, msg.point_step,
+    dt = dtype_from_fields(msg.fields, msg.point_step,
                         getattr(msg, 'is_bigendian', False))
     if dt is None or not all(n in dt.names for n in ('x', 'y', 'z')):
         return np.zeros((0, 4), dtype=np.float32)
@@ -79,7 +54,6 @@ def cloud_to_xyzi(msg):
     return out[np.isfinite(out).all(axis=1)]
 
 
-# ===================== nodo =====================
 class PointPillarsDetector(Node):
     def __init__(self):
         super().__init__('pointpillars_detector')
@@ -87,11 +61,11 @@ class PointPillarsDetector(Node):
         p = self.declare_parameter
         p('cloud_topic', '/scan/points')
         p('markers_topic', '/detections/markers')
-        p('detections3d_topic', '/detections3d')   # box 3D complete, per EagerMOT
+        p('detections3d_topic', '/detections3d')
         p('cfg_file', 'cfgs/custom_models/pointpillar.yaml')
         p('cfg_dir', '/mnt/2tbpartition/mangili/OpenPCDet/tools')
         p('ckpt', '/home/mangili/Downloads/checkpoint_epoch_80.pth')
-        p('score_thresh', 0.30)        # soglia di confidenza per accettare una box
+        p('score_thresh', 0.30)
         p('debug_show_rejected', False)
         p('diag_period_frames', 20)
 
@@ -101,11 +75,9 @@ class PointPillarsDetector(Node):
         self.diag_period_frames = int(g('diag_period_frames'))
         self._frame = 0
 
-        self._carica_modello(str(g('cfg_dir')), str(g('cfg_file')), str(g('ckpt')))
+        self._load_model(str(g('cfg_dir')), str(g('cfg_file')), str(g('ckpt')))
 
         self.pub_mrk = self.create_publisher(MarkerArray, g('markers_topic'), 10)
-        # EagerMOT usa la box 3D completa (dimensioni, yaw, score). Il vecchio
-        # PoseArray su /detections serviva solo a lidar3d_tracker: rimosso.
         self.pub_d3 = self.create_publisher(
             Detection3DArray, g('detections3d_topic'), 10)
         cloud_qos = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT,
@@ -114,46 +86,40 @@ class PointPillarsDetector(Node):
                                  self.on_cloud, cloud_qos)
 
         self.get_logger().info(
-            f"PointPillars detector pronto | classi={self.class_names} "
-            f"| soglia={self.score_thresh} | {g('cloud_topic')} -> "
+            f"PointPillars detector ready | classes={self.class_names} "
+            f"| threshold={self.score_thresh} | {g('cloud_topic')} -> "
             f"{g('detections3d_topic')}")
 
-    def _carica_modello(self, cfg_dir, cfg_file, ckpt):
-        """Import di pcdet e costruzione della rete. L'import sta QUI e non in
-        cima al file perche' tira dentro torch/spconv/numba: se fallisce, il
-        messaggio d'errore arriva a nodo gia' avviato ed e' leggibile nei log."""
+    def _load_model(self, cfg_dir, cfg_file, ckpt):
         import torch
         from pcdet.config import cfg, cfg_from_yaml_file
         from pcdet.datasets import DatasetTemplate
         from pcdet.models import build_network
         from pcdet.utils import common_utils
 
-        # _BASE_CONFIG_ nel yaml e' relativo alla CWD: mi ci sposto.
-        vecchia = os.getcwd()
+        previous_cwd = os.getcwd()
         os.chdir(cfg_dir)
         try:
             cfg_from_yaml_file(cfg_file, cfg)
         finally:
-            os.chdir(vecchia)
+            os.chdir(previous_cwd)
 
         self.torch = torch
         self.class_names = list(cfg.CLASS_NAMES)
         self.pc_range = np.array(cfg.DATA_CONFIG.POINT_CLOUD_RANGE, dtype=np.float32)
 
-        class _Uno(DatasetTemplate):
-            """Riusa il preprocessing del config: stesso identico trattamento
-            del training (mask fuori range, voxelizzazione)."""
+        class _SingleFrame(DatasetTemplate):
             def __init__(s, dcfg, names, logger):
                 super().__init__(dataset_cfg=dcfg, class_names=names,
                                  training=False, root_path=None, logger=logger)
             def __len__(s):
                 return 1
-            def prepara(s, punti):
-                d = s.prepare_data(data_dict={'points': punti, 'frame_id': 0})
+            def prepare_points(s, points):
+                d = s.prepare_data(data_dict={'points': points, 'frame_id': 0})
                 return s.collate_batch([d])
 
         logger = common_utils.create_logger()
-        self.ds = _Uno(cfg.DATA_CONFIG, self.class_names, logger)
+        self.ds = _SingleFrame(cfg.DATA_CONFIG, self.class_names, logger)
         self.model = build_network(model_cfg=cfg.MODEL,
                                    num_class=len(self.class_names),
                                    dataset=self.ds)
@@ -163,41 +129,39 @@ class PointPillarsDetector(Node):
         from pcdet.models import load_data_to_gpu
         self._to_gpu = load_data_to_gpu
 
-    # -----------------------------------------------------------------------
     def on_cloud(self, msg):
         self._frame += 1
         t0 = time.perf_counter()
-        punti = cloud_to_xyzi(msg)
+        points = cloud_to_xyzi(msg)
         t_read = time.perf_counter() - t0
-        if len(punti) == 0:
+        if len(points) == 0:
             return
 
         t0 = time.perf_counter()
         with self.torch.no_grad():
-            batch = self.ds.prepara(punti)
+            batch = self.ds.prepare_points(points)
             self._to_gpu(batch)
             pred, _ = self.model.forward(batch)
-        box = pred[0]['pred_boxes'].cpu().numpy()      # (M,7) x y z dx dy dz yaw
+        box = pred[0]['pred_boxes'].cpu().numpy()
         score = pred[0]['pred_scores'].cpu().numpy()
         t_inf = time.perf_counter() - t0
 
-        tenute = score >= self.score_thresh
-        self.publish(msg.header, box, score, tenute)
+        kept = score >= self.score_thresh
+        self.publish(msg.header, box, score, kept)
 
         if self.diag_period_frames > 0 and self._frame % self.diag_period_frames == 0:
             tot = t_read + t_inf
             self.get_logger().info(
-                f"[pp] punti={len(punti)} box={len(box)} "
-                f"sopra_soglia={int(tenute.sum())} "
+                f"[pp] points={len(points)} box={len(box)} "
+                f"above_thresh={int(kept.sum())} "
                 f"score_max={float(score.max()) if len(score) else 0.0:.2f} | "
                 f"read={t_read*1000:.0f} inf={t_inf*1000:.0f} "
                 f"TOT={tot*1000:.0f} ms ({1/max(tot,1e-9):.1f} Hz)")
 
-    def publish(self, header, box, score, tenute):
-        # --- Detection3DArray: box completa (centro, taglia, yaw, score) ---
+    def publish(self, header, box, score, kept):
         d3 = Detection3DArray()
         d3.header = header
-        for i in np.flatnonzero(tenute):
+        for i in np.flatnonzero(kept):
             det = Detection3D()
             det.header = header
             det.bbox.center.position.x = float(box[i, 0])
@@ -210,8 +174,6 @@ class PointPillarsDetector(Node):
             det.bbox.size.y = float(box[i, 4])
             det.bbox.size.z = float(box[i, 5])
             ip = ObjectHypothesisWithPose()
-            # vision_msgs cambia layout fra le distribuzioni: in Humble lo
-            # score sta in .hypothesis, altrove direttamente sull'oggetto.
             if hasattr(ip, 'hypothesis'):
                 ip.hypothesis.class_id = 'Person'
                 ip.hypothesis.score = float(score[i])
@@ -229,7 +191,7 @@ class PointPillarsDetector(Node):
 
         mid = 0
         for i in range(len(box)):
-            ok = bool(tenute[i])
+            ok = bool(kept[i])
             if (not ok) and (not self.debug_show_rejected):
                 continue
             mk = Marker()
@@ -254,7 +216,6 @@ class PointPillarsDetector(Node):
                 mk.color = ColorRGBA(r=0.90, g=0.20, b=0.10, a=0.30)
             ma.markers.append(mk)
 
-            # etichetta con lo score, per leggere la confidenza in RViz
             tx = Marker()
             tx.header = header
             tx.ns = 'det_score'

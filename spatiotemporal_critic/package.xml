@@ -3,12 +3,8 @@
 <package format="3">
   <name>spatiotemporal_critic</name>
   <version>0.1.0</version>
-  <description>
-    Critic spazio-temporale per il controller MPPI di Nav2. Valuta le traiettorie
-    contro la posizione FUTURA dei pedoni (predizione dal Kalman del tracker) e
-    premia le manovre verso lo spazio libero laterale. Contributo di tesi.
-  </description>
-  <maintainer email="alessandro@example.com">alessandro</maintainer>
+  <description>MPPI critic that scores trajectories against the predicted positions of the tracked people</description>
+  <maintainer email="alessandro.mangili1@studenti.unimi.it">alessandro</maintainer>
   <license>MIT</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
@@ -22,7 +18,6 @@
 
   <export>
     <build_type>ament_cmake</build_type>
-    <!-- Dice a nav2_mppi_controller che questo pacchetto fornisce un critic -->
     <nav2_mppi_controller plugin="${prefix}/critics.xml" />
   </export>
 </package>

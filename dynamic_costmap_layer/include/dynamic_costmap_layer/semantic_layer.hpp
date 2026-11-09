@@ -42,6 +42,6 @@ private:
   bool enabled_layer_{true};
 };
 
-}  // namespace dynamic_costmap_layer
+}
 
-#endif  // DYNAMIC_COSTMAP_LAYER__SEMANTIC_LAYER_HPP_
+#endif

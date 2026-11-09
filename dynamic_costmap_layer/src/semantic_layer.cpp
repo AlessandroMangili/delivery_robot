@@ -19,7 +19,7 @@ void SemanticLayer::onInitialize()
 {
   auto node = node_.lock();
   if (!node) {
-    throw std::runtime_error{"SemanticLayer: impossibile bloccare il node"};
+    throw std::runtime_error{"SemanticLayer: cannot lock the node"};
   }
 
   declareParameter("enabled", rclcpp::ParameterValue(true));
@@ -31,8 +31,6 @@ void SemanticLayer::onInitialize()
   enabled_ = enabled_layer_;
   current_ = true;
 
-  // /ssrl_costmap si aggiorna in continuo -> QoS reliable + volatile,
-  // come lo static_layer del global (map_subscribe_transient_local: False).
   rclcpp::QoS qos(1);
   qos.reliable().durability_volatile();
 
@@ -42,7 +40,7 @@ void SemanticLayer::onInitialize()
 
   RCLCPP_INFO(
     node->get_logger(),
-    "SemanticLayer inizializzato | topic=%s | map->odom via TF", topic_.c_str());
+    "SemanticLayer ready | topic=%s | map->odom via TF", topic_.c_str());
 }
 
 void SemanticLayer::gridCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
@@ -52,13 +50,12 @@ void SemanticLayer::gridCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr m
 }
 
 void SemanticLayer::updateBounds(
-  double /*robot_x*/, double /*robot_y*/, double /*robot_yaw*/,
+  double , double , double ,
   double * min_x, double * min_y, double * max_x, double * max_y)
 {
   if (!enabled_) {
     return;
   }
-  // La semantica sta ovunque nel raggio -> aggiorna l'INTERA finestra rolling.
   auto * master = layered_costmap_->getCostmap();
   const double ox = master->getOriginX();
   const double oy = master->getOriginY();
@@ -87,10 +84,9 @@ void SemanticLayer::updateCosts(
     return;
   }
 
-  const std::string map_frame = grid->header.frame_id;                   // 'map'
-  const std::string local_frame = layered_costmap_->getGlobalFrameID();  // 'odom'
+  const std::string map_frame = grid->header.frame_id;
+  const std::string local_frame = layered_costmap_->getGlobalFrameID();
 
-  // Trasformazione local(odom) -> map, UNA volta per ciclo (non per cella).
   double tx, ty, cyaw, syaw;
   try {
     geometry_msgs::msg::TransformStamped tf =
@@ -104,7 +100,7 @@ void SemanticLayer::updateCosts(
     cyaw = std::cos(yaw);
     syaw = std::sin(yaw);
   } catch (const std::exception & e) {
-    return;  // TF non pronta: salta questo ciclo, nessun danno
+    return;
   }
 
   const auto & info = grid->info;
@@ -114,36 +110,30 @@ void SemanticLayer::updateCosts(
   const int swidth = static_cast<int>(info.width);
   const int sheight = static_cast<int>(info.height);
 
-  // Itero le celle della FINESTRA LOCALE (piccola), non la mappa semantica (enorme).
   for (int j = min_j; j < max_j; ++j) {
     for (int i = min_i; i < max_i; ++i) {
-      // cella local -> mondo in odom
       double wx, wy;
       master_grid.mapToWorld(
         static_cast<unsigned int>(i), static_cast<unsigned int>(j), wx, wy);
 
-      // odom -> map (rototraslazione 2D)
       const double mx = tx + cyaw * wx - syaw * wy;
       const double my = ty + syaw * wx + cyaw * wy;
 
-      // mondo map -> indice della mappa semantica
       const int sgx = static_cast<int>((mx - sox) / sres);
       const int sgy = static_cast<int>((my - soy) / sres);
       if (sgx < 0 || sgx >= swidth || sgy < 0 || sgy >= sheight) {
-        continue;  // fuori dalla mappa semantica -> lascio libero (traversabile)
+        continue;
       }
 
       const int8_t v = grid->data[sgy * swidth + sgx];
       if (v <= 0) {
-        continue;  // sconosciuto (-1) o marciapiede (0): non scrivo nulla
+        continue;
       }
 
-      // 0..100 -> 0..254 conservando il gradiente (confinement + costi classe); 100 -> letale
       const unsigned char cost = (v >= 100) ?
         LETHAL_OBSTACLE :
         static_cast<unsigned char>((static_cast<int>(v) * 254) / 100);
 
-      // updateWithMax: non cancella scan/cono, prende il massimo
       const unsigned char old_cost = master_grid.getCost(
         static_cast<unsigned int>(i), static_cast<unsigned int>(j));
       if (old_cost == NO_INFORMATION || old_cost < cost) {
@@ -154,6 +144,6 @@ void SemanticLayer::updateCosts(
   }
 }
 
-}  // namespace dynamic_costmap_layer
+}
 
 PLUGINLIB_EXPORT_CLASS(dynamic_costmap_layer::SemanticLayer, nav2_costmap_2d::Layer)

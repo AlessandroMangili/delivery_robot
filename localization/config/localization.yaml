@@ -1,49 +1,41 @@
 ekf_local:
   ros__parameters:
-    use_sim_time: true
-    frequency: 30.0
-    sensor_timeout: 0.1
-    two_d_mode: true
-    transform_time_offset: 0.0
-    transform_timeout: 0.0
-    print_diagnostics: true
-    publish_tf: true
+    use_sim_time: true                      # Gazebo clock
+    frequency: 30.0                         # output rate [Hz]
+    sensor_timeout: 0.1                     # a sensor silent for longer is ignored [s]
+    two_d_mode: true                        # planar motion: z, roll and pitch are not estimated
+    transform_time_offset: 0.0              # time added to the published transform [s]
+    transform_timeout: 0.0                  # longest wait for a transform [s]
+    print_diagnostics: true                 # publishes diagnostics
+    publish_tf: true                        # publishes odom -> base_footprint
 
     map_frame: map
     odom_frame: odom
     base_link_frame: base_footprint
-    world_frame: odom
+    world_frame: odom                       # the filter works in the odom frame
 
-    odom0: /odom
+    # Each *_config lists what is fused, in this order:
+    # x, y, z, roll, pitch, yaw, vx, vy, vz, vroll, vpitch, vyaw, ax, ay, az
+
+    odom0: /odom                            # wheel odometry of the Gazebo diff drive
     odom0_config: [false, false, false,
                    false, false, false,
                    true,  true,  false,
                    false, false, false,
-                   false, false, false]
+                   false, false, false]     # forward and lateral velocity
     odom0_queue_size: 10
     odom0_differential: false
     odom0_relative: false
 
-    odom1: /Odometry
-    odom1_config: [true,  true,  false,
-                   false, false, true,
-                   false, false, false,
-                   false, false, false,
-                   false, false, false]
-    odom1_differential: true
-    odom1_queue_size: 10
-
-    imu0: /imu
-
+    imu0: /imu                              # simulated IMU
     imu0_config: [false, false, false,
                   false, false, true,
                   false, false, false,
                   false, false, true,
-                  false,  false, false]
+                  false,  false, false]     # yaw and yaw rate
     imu0_queue_size: 10
     imu0_differential: false
     imu0_relative: false
-
     imu0_remove_gravitational_acceleration: true
 
 ekf_global:
@@ -51,22 +43,20 @@ ekf_global:
     use_sim_time: true
     frequency: 30.0
     sensor_timeout: 0.1
-    two_d_mode: true                 
+    two_d_mode: true
     transform_time_offset: 0.0
     transform_timeout: 0.0
     print_diagnostics: true
-    publish_tf: true
+    publish_tf: true                        # publishes map -> odom
 
     map_frame: map
     odom_frame: odom
     base_link_frame: base_footprint
-    world_frame: map                 # -> pubblica la trasformata map->odom
+    world_frame: map                        # the filter works in the map frame
 
-    # Incertezza iniziale GRANDE su x,y (std 10 m): il filtro parte da (0,0)
-    # e finche' il GPS non lo porta alla posizione vera deve dichiararsi
-    # incerto. Col default (1e-9) si dichiarava sicuro in (0,0): spawnando
-    # altrove, il gate di localizzazione di semantica/elevazione lasciava
-    # scrivere in mappa nel punto sbagliato nei primi secondi. Resto = default.
+    # Large initial uncertainty on x and y (std 10 m): the filter starts at (0, 0) and must
+    # report itself uncertain until the GPS moves it to the real position, so that the
+    # mapping nodes do not write the maps in the wrong place. The rest is the default.
     initial_estimate_covariance: [
       100.0, 0.0,   0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
       0.0,   100.0, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
@@ -84,66 +74,49 @@ ekf_global:
       0.0,   0.0,   0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  1.0e-9, 0.0,
       0.0,   0.0,   0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  1.0e-9]
 
-    # --- odometria ruote (/odom dal DiffDrive): uso le VELOCITA' ---
-    odom0: /odom
+    odom0: /odom                            # wheel odometry
     odom0_config: [false, false, false,
                    false, false, false,
                    true,  true,  false,
                    false, false, false,
-                   false, false, false]
+                   false, false, false]     # forward and lateral velocity
     odom0_queue_size: 10
     odom0_differential: false
     odom0_relative: false
 
-    # --- IMU (/imu): uso yaw, vel. yaw, accel. x ---
-    imu0: /imu
+    imu0: /imu                              # simulated IMU
     imu0_config: [false, false, false,
                   false, false, true,
                   false, false, false,
                   false, false, true,
-                  false,  false, false]
+                  false,  false, false]     # yaw and yaw rate
     imu0_differential: false
     imu0_relative: false
     imu0_remove_gravitational_acceleration: true
 
-    # --- GPS convertito (/odometry/gps da navsat_transform): uso x,y assoluti ---
-    odom1: /odometry/gps
+    odom1: /odometry/gps                    # GPS converted by navsat_transform_node
     odom1_config: [true,  true,  false,
                    false, false, false,
                    false, false, false,
                    false, false, false,
-                   false, false, false]
+                   false, false, false]     # absolute x and y
     odom1_queue_size: 10
     odom1_differential: false
     odom1_relative: false
 
-
-    # FAST-LIO nel global: riserva assoluta durante i buchi GPS
-    odom2: /Odometry
-    odom2_config: [true,  true,  false,
-                   false, false, true,
-                   false, false, false,
-                   false, false, false,
-                   false, false, false]
-    odom2_differential: true
-    odom2_queue_size: 10
-
 navsat_transform_node:
   ros__parameters:
     use_sim_time: true
-    frequency: 30.0
-    delay: 3.0                       # attende che odom/imu siano stabili
+    frequency: 30.0                         # output rate [Hz]
+    delay: 3.0                              # wait for odometry and IMU to settle [s]
     magnetic_declination_radians: 0.0
-    yaw_offset: 0.0
-    zero_altitude: true
+    yaw_offset: 0.0                         # the simulated IMU reports 0 when facing east
+    zero_altitude: true                     # the GPS altitude is not used
     broadcast_utm_transform: false
-    publish_filtered_gps: true
-    use_odometry_yaw: false           
-    # Datum FISSO = origine geografica del mondo (spherical_coordinates di
-    # sidewalk.world), orientamento 0 = asse x verso Est. Con false l'origine
-    # di 'map' era il primo fix GPS, cioe' il punto di spawn: spawnando
-    # altrove, le mappe salvate (map1, elevation1) risultavano traslate.
-    # Con lo spawn in (0,0) il frame e' identico a prima. Sul robot reale:
-    # usare un punto rilevato una volta per tutte.
+    publish_filtered_gps: true              # publishes /gps/filtered, the filtered position as GPS
+    use_odometry_yaw: false                 # the heading comes from the IMU
+    # Fixed datum = geographic origin of sidewalk.world (its spherical_coordinates), heading 0 =
+    # x axis towards east. The map frame is then the same wherever the robot spawns, and the
+    # saved maps stay aligned.
     wait_for_datum: true
     datum: [47.478950, 19.057785, 0.0]

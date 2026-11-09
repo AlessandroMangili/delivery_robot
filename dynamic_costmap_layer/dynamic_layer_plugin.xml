@@ -1,5 +1,5 @@
 <library path="dynamic_costmap_layer">
   <class name="dynamic_costmap_layer/SemanticLayer" type="dynamic_costmap_layer::SemanticLayer" base_class_type="nav2_costmap_2d::Layer">
-    <description>Mappa semantica SSRL nella local rolling</description>
+    <description>Injects the fused map (/ssrl_costmap) into the rolling local costmap</description>
   </class>
 </library>

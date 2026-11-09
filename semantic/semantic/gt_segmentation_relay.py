@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
@@ -30,7 +28,6 @@ class GtSegRelay(Node):
 
         self.bridge = CvBridge()
 
-        # LUT: gz_label -> ID Cityscapes (= gz-1). 0 (sfondo) -> 255 = "ignora"
         lut = np.arange(256, dtype=np.int16) - 1
         lut[0] = 255
         self.lut = np.clip(lut, 0, 255).astype(np.uint8)
@@ -42,15 +39,15 @@ class GtSegRelay(Node):
         self.pub_ov = (self.create_publisher(Image, '/semantic/overlay', qos)
                        if self.publish_overlay else None)
 
-        self.get_logger().info(f'GT relay: {lt} -> {ot} (ID Cityscapes)')
+        self.get_logger().info(f'GT relay: {lt} -> {ot} (Cityscapes IDs)')
 
     def cb(self, msg: Image):
         lab = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
-        if lab.ndim == 3:               # alcune build pubblicano 3 canali: prendine uno
+        if lab.ndim == 3:
             lab = lab[..., 0]
         lab = lab.astype(np.uint8)
 
-        cs = self.lut[lab]              # ID Cityscapes per pixel
+        cs = self.lut[lab]
 
         out = self.bridge.cv2_to_imgmsg(cs, 'mono8')
         out.header = msg.header
@@ -58,7 +55,7 @@ class GtSegRelay(Node):
 
         if self.publish_overlay:
             color = CITYSCAPES_PALETTE[np.clip(cs, 0, 18)]
-            color[cs > 18] = (0, 0, 0)  # sfondo/ignora -> nero
+            color[cs > 18] = (0, 0, 0)
             ov = self.bridge.cv2_to_imgmsg(color, 'rgb8')
             ov.header = msg.header
             self.pub_ov.publish(ov)

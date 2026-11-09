@@ -1,18 +1,3 @@
-// Critic spazio-temporale per MPPI (Nav2 Humble).
-//
-// TERMINE 1 - collisione futura: confronta dove sara' il pedone e dove sara' il
-//   robot allo STESSO istante t, e penalizza l'incontro. E' cio' che il cono
-//   statico non puo' fare, perche' non sa QUANDO il robot passera' di li'.
-//
-//   Il costo dell'incontro si misura in DUE modi, che guardano cose diverse:
-//     - OVERLAP (closeness): QUANTO a fondo il robot entra nella bolla del
-//       pedone. Si legge nell'istante di massimo avvicinamento.
-//     - INVERSE-TTC (1/tau): QUANDO la bolla tocca il robot la prima volta.
-//       Si legge nell'istante del primo contatto, e poi resta congelato.
-//   Sono indipendenti: due campioni possono toccare la bolla insieme e poi
-//   passare a distanze molto diverse, o passare alla stessa distanza dopo
-//   tempi molto diversi. Per questo il default e' "both".
-
 #include "spatiotemporal_critic/spatiotemporal_critic.hpp"
 
 #include "geometry_msgs/msg/point.hpp"
@@ -21,10 +6,6 @@
 #include <algorithm>
 #include <limits>
 #include <cstdio>
-#include <ctime>
-#include <filesystem>
-#include <fstream>
-#include <iomanip>
 #include <utility>
 
 #include <xtensor/xmath.hpp>
@@ -38,7 +19,6 @@ void SpatioTemporalCritic::initialize()
   getParam(enabled_, "enabled", true);
   getParam(tracks_topic_, "tracks_topic", std::string("/dynamic_tracks_state"));
 
-  // Parametri del termine 1 (collisione futura).
   getParam(power_, "cost_power", 1);
   getParam(weight_, "cost_weight", 20.0f);
   getParam(collision_radius_, "collision_radius", 0.5f);
@@ -56,7 +36,6 @@ void SpatioTemporalCritic::initialize()
   getParam(max_radius_, "max_radius", 1.5f);
   getParam(worst_case_, "worst_case", true);
 
-  // Forma del costo. Default "both": i due termini coprono i rispettivi punti ciechi.
   getParam(cost_mode_, "cost_mode", std::string("both"));
   getParam(ttc_weight_, "ttc_weight", 20.0f);
   getParam(ttc_power_, "ttc_power", 1.0f);
@@ -66,54 +45,20 @@ void SpatioTemporalCritic::initialize()
   use_ttc_ = (cost_mode_ == "inv_ttc" || cost_mode_ == "both");
   if (!use_overlap_ && !use_ttc_) {
     RCLCPP_WARN(
-      logger_, "cost_mode '%s' non valido: ripiego su 'both'.", cost_mode_.c_str());
+      logger_, "Invalid cost_mode '%s': falling back to 'both'.", cost_mode_.c_str());
     cost_mode_ = "both";
     use_overlap_ = true;
     use_ttc_ = true;
   }
 
-  // Diagnostica aggregata (0 = spenta).
   getParam(diag_period_calls_, "diag_period_calls", 0);
-  // Traccia CSV: una riga per OGNI ciclo di controllo (non ogni
-  // diag_period_calls_), cosi' i grafici hanno la risoluzione piena.
-  getParam(diag_csv_path_, "diag_csv_path", std::string(""));
-  if (!diag_csv_path_.empty()) {
-    diag_csv_.open(diag_csv_path_, std::ios::out | std::ios::trunc);
-    if (diag_csv_.is_open()) {
-      diag_csv_ << "t,tracce,contatti,coppie,liberi,batch,"
-                   "tau_min,tau_max,overlap,ttc,pen_max,cost_max\n";
-      RCLCPP_INFO(logger_, "Diagnostica CSV -> %s", diag_csv_path_.c_str());
-    } else {
-      RCLCPP_WARN(logger_, "Impossibile aprire il CSV %s", diag_csv_path_.c_str());
-    }
-  }
-  // Righe [STC] su file invece che nel terminale della navigazione, dove si
-  // perdevano. Un file per avvio, nome gg-mm-aa_HH-MM-SS.log.
-  getParam(diag_log_dir_, "diag_log_dir", std::string(""));
-  if (!diag_log_dir_.empty()) {
-    std::error_code ec;
-    std::filesystem::create_directories(diag_log_dir_, ec);
-    char quando[32];
-    const std::time_t now_wall = std::time(nullptr);
-    std::strftime(quando, sizeof(quando), "%d-%m-%y_%H-%M-%S", std::localtime(&now_wall));
-    const std::string path = diag_log_dir_ + "/" + quando + ".log";
-    diag_log_.open(path, std::ios::out | std::ios::app);
-    if (diag_log_.is_open()) {
-      RCLCPP_INFO(logger_, "Log diagnostico [STC] -> %s", path.c_str());
-    } else {
-      RCLCPP_WARN(logger_, "Impossibile aprire il log %s: stampo nel terminale", path.c_str());
-    }
-  }
 
-  // Parametri di visualizzazione.
   getParam(publish_predictions_, "publish_predictions", true);
   getParam(predictions_topic_, "predictions_topic",
     std::string("/spatiotemporal_critic/predictions"));
-  // traiettoria robot: topic separato + flag proprio (default: sempre attiva)
   getParam(publish_robot_traj_, "publish_robot_trajectory", true);
   getParam(robot_traj_topic_, "robot_trajectory_topic",
     std::string("/spatiotemporal_critic/robot_trajectory"));
-  // frame di pubblicazione (default = frame delle tracce = odom)
   getParam(world_frame_, "world_frame", std::string("odom"));
 
   auto node = parent_.lock();
@@ -142,13 +87,12 @@ void SpatioTemporalCritic::initialize()
     rear_keep_radius_m_, static_cast<int>(rear_on_reverse_));
 }
 
-bool SpatioTemporalCritic::considerato(
+bool SpatioTemporalCritic::isConsidered(
   double px, double py, double t, const RobotRef & r) const
 {
   if (!rear_filter_) {
     return true;
   }
-  // il robot avanza anche lui: chi lo segue alla stessa velocita' resta dietro
   const double dx = px - (r.x + r.v * t * r.cyaw);
   const double dy = py - (r.y + r.v * t * r.syaw);
   if (rear_keep_close_ &&
@@ -156,7 +100,6 @@ bool SpatioTemporalCritic::considerato(
   {
     return true;
   }
-  // componente lungo la direzione di marcia attuale del robot
   return dx * r.cyaw + dy * r.syaw > -static_cast<double>(rear_margin_m_);
 }
 
@@ -179,9 +122,7 @@ void SpatioTemporalCritic::score(mppi::CriticData & data)
     return;
   }
 
-  // Forme delle traiettorie: servono anche alla sola viz del robot, quindi le
-  // leggo e valido PRIMA di qualunque early-return legato ai pedoni.
-  const auto & traj_x = data.trajectories.x;   // [batch x time]
+  const auto & traj_x = data.trajectories.x;
   const auto & traj_y = data.trajectories.y;
   const float dt = data.model_dt;
   const size_t batch = traj_x.shape(0);
@@ -197,12 +138,8 @@ void SpatioTemporalCritic::score(mppi::CriticData & data)
     return;
   }
 
-  // La viz del robot mostra il campione a costo minimo: va pubblicata quando
-  // data.costs e' definitivo, cioe' dopo la nostra penalita' (siamo l'ultimo
-  // critic) oppure su un'uscita anticipata, dove non aggiungiamo nulla.
   const bool pub_robot = publish_robot_traj_ && robot_pub_;
 
-  // Copio le tracce E lo stamp sotto lock (arrivano su un altro thread).
   std::vector<TrackSnapshot> tracks;
   builtin_interfaces::msg::Time tracks_stamp;
   {
@@ -210,7 +147,6 @@ void SpatioTemporalCritic::score(mppi::CriticData & data)
     tracks = tracks_;
     tracks_stamp = tracks_stamp_;
   }
-  // Il termine di collisione futura ha senso solo con pedoni.
   if (tracks.empty()) {
     if (pub_robot) {
       publishRobotTrajectory(data, dt, time);
@@ -218,9 +154,6 @@ void SpatioTemporalCritic::score(mppi::CriticData & data)
     return;
   }
 
-  // --- scarto tracce stantie: age = now - stamp dell'ultimo TrackArray ---
-  // Senza questo, se il tracker si ferma il critic propaga all'infinito la CV
-  // sull'ultima traccia.
   if (auto node = parent_.lock()) {
     const double age = (node->now() - rclcpp::Time(tracks_stamp)).seconds();
     if (age > static_cast<double>(max_track_age_s_)) {
@@ -231,12 +164,8 @@ void SpatioTemporalCritic::score(mppi::CriticData & data)
     }
   }
 
-  // Penalita' per traiettoria. std::vector (non xtensor): la scrittura finale
-  // su data.costs va fatta elemento per elemento (operazioni xtensor su
-  // riferimenti = causa di crash su questo Humble).
   std::vector<float> penalty(batch, 0.0f);
 
-  // ================== TERMINE 1: COLLISIONE FUTURA ==================
   size_t time_pred = time;
   if (dt > 0.0f) {
     const size_t h = static_cast<size_t>(prediction_horizon_s_ / dt);
@@ -244,47 +173,39 @@ void SpatioTemporalCritic::score(mppi::CriticData & data)
   }
 
   const size_t kNoHit = std::numeric_limits<size_t>::max();
-  std::vector<float> track_pen(batch, 0.0f);     // OVERLAP: profondita' nella bolla
-  std::vector<size_t> first_hit(batch, kNoHit);  // TTC: passo del primo contatto
+  std::vector<float> track_pen(batch, 0.0f);
+  std::vector<size_t> first_hit(batch, kNoHit);
 
-  // accumulatori di diagnostica: qualche somma per ciclo, costo trascurabile
   double diag_sum_ovl = 0.0, diag_sum_ttc = 0.0;
   size_t diag_n_hit = 0, diag_n_tracks = 0;
   size_t diag_tau_min = kNoHit;
-  size_t diag_tau_max = 0;              // il contatto piu' LONTANO campionato
-  // Un campione e' "libero" se non collide con NESSUNA traccia: e' il numero
-  // che dice se MPPI ha ancora una via d'uscita. Se scende a zero, tutte le
-  // 2000 traiettorie sono in conflitto e l'ottimizzatore non ha scelta.
-  std::vector<char> diag_libero(batch, 1);
+  size_t diag_tau_max = 0;
+  std::vector<char> diag_free(batch, 1);
 
-  // posa attuale del robot (stesso frame delle traiettorie e delle tracce)
   const auto & rp = data.state.pose.pose;
   const double ryaw = std::atan2(
     2.0 * (rp.orientation.w * rp.orientation.z + rp.orientation.x * rp.orientation.y),
     1.0 - 2.0 * (rp.orientation.y * rp.orientation.y + rp.orientation.z * rp.orientation.z));
   const RobotRef robot{rp.position.x, rp.position.y, std::cos(ryaw), std::sin(ryaw),
     data.state.speed.linear.x};
-  size_t diag_n_dietro = 0;   // tracce mai davanti nell'orizzonte: ignorate
+  size_t diag_n_behind = 0;
 
-  // Traiettorie campionate che arretrano (il robot finisce >5 cm dietro la
-  // posizione attuale): per loro i pedoni dietro contano sempre, cosi' MPPI
-  // sceglie di arretrare solo se dietro non c'e' nessuno.
-  std::vector<char> indietro(batch, 0);
-  size_t diag_n_indietro = 0;
+  std::vector<char> reversing(batch, 0);
+  size_t diag_n_reversing = 0;
   if (rear_filter_ && rear_on_reverse_) {
     for (size_t i = 0; i < batch; ++i) {
       for (size_t j = 0; j < time_pred; ++j) {
         const double fwd = (traj_x(i, j) - robot.x) * robot.cyaw +
           (traj_y(i, j) - robot.y) * robot.syaw;
         if (fwd < -0.05) {
-          indietro[i] = 1;
-          ++diag_n_indietro;
+          reversing[i] = 1;
+          ++diag_n_reversing;
           break;
         }
       }
     }
   }
-  const bool qualcuno_indietro = diag_n_indietro > 0;
+  const bool any_reversing = diag_n_reversing > 0;
 
   for (const auto & tr : tracks) {
     const double speed = std::hypot(tr.vx, tr.vy);
@@ -294,19 +215,16 @@ void SpatioTemporalCritic::score(mppi::CriticData & data)
     if (tr.vel_std > max_vel_std_) {
       continue;
     }
-    // Pedone da ignorare (salvo traiettorie che arretrano): con la posizione
-    // attuale, se ORA e' dietro; con la predizione, se resta dietro per tutto
-    // l'orizzonte.
-    const bool davanti_ora = considerato(tr.x, tr.y, 0.0, robot);
-    bool mai_davanti = !davanti_ora;
+    const bool in_front_now = isConsidered(tr.x, tr.y, 0.0, robot);
+    bool never_in_front = !in_front_now;
     if (rear_use_prediction_) {
-      for (size_t j = 0; j < time_pred && mai_davanti; ++j) {
+      for (size_t j = 0; j < time_pred && never_in_front; ++j) {
         const float t = static_cast<float>(j) * dt;
-        mai_davanti = !considerato(tr.x + tr.vx * t, tr.y + tr.vy * t, t, robot);
+        never_in_front = !isConsidered(tr.x + tr.vx * t, tr.y + tr.vy * t, t, robot);
       }
     }
-    if (mai_davanti && !qualcuno_indietro) {
-      ++diag_n_dietro;
+    if (never_in_front && !any_reversing) {
+      ++diag_n_behind;
       continue;
     }
     ++diag_n_tracks;
@@ -318,11 +236,8 @@ void SpatioTemporalCritic::score(mppi::CriticData & data)
       const float t = static_cast<float>(j) * dt;
       const double px = tr.x + tr.vx * t;
       const double py = tr.y + tr.vy * t;
-      // posizione attuale: tutta la scia se ora e' davanti, niente se dietro;
-      // predizione: solo gli istanti in cui e' davanti (es. sorpasso).
-      // Le traiettorie che arretrano considerano comunque tutto.
-      const bool davanti = rear_use_prediction_ ? considerato(px, py, t, robot) : davanti_ora;
-      if (!davanti && !qualcuno_indietro) {
+      const bool in_front = rear_use_prediction_ ? isConsidered(px, py, t, robot) : in_front_now;
+      if (!in_front && !any_reversing) {
         continue;
       }
       double radius = collision_radius_ + tr.pos_std +
@@ -333,7 +248,7 @@ void SpatioTemporalCritic::score(mppi::CriticData & data)
       const double r2 = radius * radius;
 
       for (size_t i = 0; i < batch; ++i) {
-        if (!davanti && !indietro[i]) {
+        if (!in_front && !reversing[i]) {
           continue;
         }
         const double ddx = traj_x(i, j) - px;
@@ -343,15 +258,10 @@ void SpatioTemporalCritic::score(mppi::CriticData & data)
           continue;
         }
 
-        // TEMPO: j cresce in modo monotono, quindi la PRIMA volta che
-        // entriamo qui e' gia' l'istante di primo contatto. Nessuna
-        // ricerca aggiuntiva, nessun costo extra.
         if (first_hit[i] == kNoHit) {
           first_hit[i] = j;
         }
 
-        // PROFONDITA': la sqrt serve solo all'overlap. Se il termine e'
-        // spento la saltiamo -- e' il loop piu' interno (batch x time).
         if (!use_overlap_) {
           continue;
         }
@@ -367,9 +277,6 @@ void SpatioTemporalCritic::score(mppi::CriticData & data)
       }
     }
 
-    // Combinazione dei due termini, ciascuno col PROPRIO peso.
-    // NB: i pesi si applicano QUI, non piu' alla fine: cost_weight governa
-    // l'overlap, ttc_weight il termine temporale, e restano indipendenti.
     for (size_t i = 0; i < batch; ++i) {
       if (use_overlap_) {
         const float c = weight_ * track_pen[i];
@@ -378,7 +285,7 @@ void SpatioTemporalCritic::score(mppi::CriticData & data)
       }
       if (first_hit[i] != kNoHit) {
         ++diag_n_hit;
-        diag_libero[i] = 0;
+        diag_free[i] = 0;
         if (first_hit[i] < diag_tau_min) {
           diag_tau_min = first_hit[i];
         }
@@ -389,7 +296,7 @@ void SpatioTemporalCritic::score(mppi::CriticData & data)
           const float tau = static_cast<float>(first_hit[i]) * dt;
           float c = 1.0f / (tau + ttc_epsilon_);
           if (std::fabs(ttc_power_ - 1.0f) > 1e-6f) {
-            c = std::pow(c, ttc_power_);   // percorso lento solo se esponente != 1
+            c = std::pow(c, ttc_power_);
           }
           c *= ttc_weight_;
           penalty[i] += c;
@@ -411,15 +318,10 @@ void SpatioTemporalCritic::score(mppi::CriticData & data)
     publishRobotTrajectory(data, dt, time);
   }
 
-  // --- diagnostica aggregata ---
-  // data.costs qui contiene GIA' il contributo degli altri critic (questo e'
-  // l'ultimo della lista), quindi il confronto penalita'/costo dice davvero
-  // quanto pesa questo critic sul totale.
-  const bool vuole_log =
+  const bool want_log =
     (diag_period_calls_ > 0 && (++score_calls_ % diag_period_calls_) == 0);
-  const bool vuole_csv = diag_csv_.is_open();
 
-  if (vuole_log || vuole_csv) {
+  if (want_log) {
     float pen_max = 0.0f, cost_max = 0.0f;
     for (size_t i = 0; i < batch; ++i) {
       if (penalty[i] > pen_max) {
@@ -429,61 +331,31 @@ void SpatioTemporalCritic::score(mppi::CriticData & data)
         cost_max = data.costs(i);
       }
     }
-    size_t liberi = 0;
+    size_t n_free = 0;
     for (size_t i = 0; i < batch; ++i) {
-      if (diag_libero[i]) {
-        ++liberi;
+      if (diag_free[i]) {
+        ++n_free;
       }
     }
-    // tau_min = contatto piu' IMMINENTE fra tutti i campioni (il caso peggiore)
-    // tau_max = contatto piu' LONTANO fra i campioni che collidono
-    // Se coincidono, tutti i campioni in conflitto toccano nello stesso istante.
     const double tau_min = (diag_tau_min == kNoHit)
       ? -1.0 : static_cast<double>(diag_tau_min) * dt;
     const double tau_max = (diag_tau_min == kNoHit)
       ? -1.0 : static_cast<double>(diag_tau_max) * dt;
 
-    if (vuole_log) {
-      char riga[512];
-      std::snprintf(
-        riga, sizeof(riga),
-        "[STC] mode=%s tracce=%zu dietro_ignorate=%zu campioni_indietro=%zu "
-        "contatti=%zu/%zu liberi=%zu/%zu "
-        "tau=[%.2f..%.2f]s | overlap=%.1f ttc=%.1f | "
-        "mia penalita' max=%.1f su costo max=%.1f",
-        cost_mode_.c_str(), diag_n_tracks, diag_n_dietro, diag_n_indietro,
-        diag_n_hit, batch * diag_n_tracks,
-        liberi, batch, tau_min, tau_max,
-        diag_sum_ovl, diag_sum_ttc, pen_max, cost_max);
-      if (diag_log_.is_open()) {
-        char ora[16];
-        const std::time_t now_wall = std::time(nullptr);
-        std::strftime(ora, sizeof(ora), "%H:%M:%S", std::localtime(&now_wall));
-        double t_sim = 0.0;
-        if (auto node = parent_.lock()) {
-          t_sim = node->now().seconds();
-        }
-        diag_log_ << ora << " t_sim=" << std::fixed << std::setprecision(2) << t_sim
-                  << ' ' << riga << '\n';
-        diag_log_.flush();
-      } else {
-        RCLCPP_INFO(logger_, "%s", riga);
-      }
-    }
-    if (vuole_csv) {
-      double t_ora = 0.0;
-      if (auto node = parent_.lock()) {
-        t_ora = node->now().seconds();
-      }
-      diag_csv_ << t_ora << ',' << diag_n_tracks << ',' << diag_n_hit << ','
-                << (batch * diag_n_tracks) << ',' << liberi << ',' << batch << ','
-                << tau_min << ',' << tau_max << ',' << diag_sum_ovl << ','
-                << diag_sum_ttc << ',' << pen_max << ',' << cost_max << '\n';
-      diag_csv_.flush();
-    }
+    char line[512];
+    std::snprintf(
+      line, sizeof(line),
+      "[STC] mode=%s tracks=%zu ignored_behind=%zu reversing_samples=%zu "
+      "contacts=%zu/%zu free=%zu/%zu "
+      "tau=[%.2f..%.2f]s | overlap=%.1f ttc=%.1f | "
+      "own penalty max=%.1f, cost max=%.1f",
+      cost_mode_.c_str(), diag_n_tracks, diag_n_behind, diag_n_reversing,
+      diag_n_hit, batch * diag_n_tracks,
+      n_free, batch, tau_min, tau_max,
+      diag_sum_ovl, diag_sum_ttc, pen_max, cost_max);
+    RCLCPP_INFO(logger_, "%s", line);
   }
 
-  // Viz scie dei PEDONI (solo con pedoni), sul loro topic separato.
   if (publish_predictions_ && pred_pub_) {
     publishPredictions(tracks, dt, time, robot);
   }
@@ -507,7 +379,6 @@ void SpatioTemporalCritic::publishPredictions(
   }
   const size_t step = std::max<size_t>(1, static_cast<size_t>(0.5f / dt));
 
-  // === SCIE DEI PEDONI (dove sara' ogni pedone, verde->rosso) ===
   for (const auto & tr : tracks) {
     const double speed = std::hypot(tr.vx, tr.vy);
     if (speed < min_ped_speed_) {
@@ -516,17 +387,15 @@ void SpatioTemporalCritic::publishPredictions(
     if (tr.vel_std > max_vel_std_) {
       continue;
     }
-    // stessa regola del costo: con la posizione attuale, un pedone ora dietro
-    // non ha scia
-    if (!rear_use_prediction_ && !considerato(tr.x, tr.y, 0.0, r)) {
+    if (!rear_use_prediction_ && !isConsidered(tr.x, tr.y, 0.0, r)) {
       continue;
     }
     for (size_t j = 0; j < time_pred; j += step) {
       const float t = static_cast<float>(j) * dt;
       const double px = tr.x + tr.vx * t;
       const double py = tr.y + tr.vy * t;
-      if (rear_use_prediction_ && !considerato(px, py, t, r)) {
-        continue;   // stessi istanti ignorati dal costo
+      if (rear_use_prediction_ && !isConsidered(px, py, t, r)) {
+        continue;
       }
       double radius = collision_radius_ + tr.pos_std +
         vel_std_gain_ * tr.vel_std * t;
@@ -541,8 +410,6 @@ void SpatioTemporalCritic::publishPredictions(
       m.id = id++;
       m.type = visualization_msgs::msg::Marker::SPHERE;
       m.action = visualization_msgs::msg::Marker::ADD;
-      // frame_locked: RViz ri-trasforma col TF piu' recente a ogni frame, cosi'
-      // il marker non viene scartato se la map->odom allo stamp non e' bufferizzata.
       m.frame_locked = true;
       m.lifetime = rclcpp::Duration::from_seconds(0.3);
       m.pose.position.x = px;
@@ -574,10 +441,6 @@ void SpatioTemporalCritic::publishRobotTrajectory(
     return;
   }
 
-  // Campione a costo minimo (costo TOTALE: siamo l'ultimo critic). NON e' la
-  // traiettoria eseguita (quella e' "Optimal Trajectory" su /trajectories, da
-  // visualize: true), ma e' un campione reale, a differenza della media del
-  // batch, che puo' passare dove nessun campione passa.
   size_t best = 0;
   for (size_t i = 1; i < batch; ++i) {
     if (data.costs(i) < data.costs(best)) {
@@ -591,7 +454,6 @@ void SpatioTemporalCritic::publishRobotTrajectory(
     time_pred = std::min(time, std::max<size_t>(1, h));
   }
 
-  // Stamp fresco: questa viz e' pubblicata sempre, anche senza tracce recenti.
   rclcpp::Time stamp;
   auto node = parent_.lock();
   if (node) {
@@ -604,7 +466,7 @@ void SpatioTemporalCritic::publishRobotTrajectory(
   arr.markers.push_back(clear);
 
   visualization_msgs::msg::Marker line;
-  line.header.frame_id = world_frame_;   // "odom" di default
+  line.header.frame_id = world_frame_;
   line.header.stamp = stamp;
   line.ns = "robot_best_sample";
   line.id = 0;
@@ -612,8 +474,8 @@ void SpatioTemporalCritic::publishRobotTrajectory(
   line.action = visualization_msgs::msg::Marker::ADD;
   line.frame_locked = true;
   line.lifetime = rclcpp::Duration::from_seconds(0.3);
-  line.pose.orientation.w = 1.0;   // LINE_STRIP: i punti sono gia' in world, posa identita'
-  line.scale.x = 0.05;             // spessore linea [m]
+  line.pose.orientation.w = 1.0;
+  line.scale.x = 0.05;
   line.color.r = 0.1f;
   line.color.g = 0.3f;
   line.color.b = 1.0f;
@@ -631,7 +493,7 @@ void SpatioTemporalCritic::publishRobotTrajectory(
   robot_pub_->publish(arr);
 }
 
-}  // namespace mppi::critics
+}
 
 #include <pluginlib/class_list_macros.hpp>
 PLUGINLIB_EXPORT_CLASS(

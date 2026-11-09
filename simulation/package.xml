@@ -3,9 +3,9 @@
 <package format="3">
   <name>simulation</name>
   <version>0.0.0</version>
-  <description>TODO: Package description</description>
+  <description>Gazebo world, robot description, bridge and RViz configuration of the simulation</description>
   <maintainer email="alessandro.mangili1@studenti.unimi.it">alessandro</maintainer>
-  <license>TODO: License declaration</license>
+  <license>MIT</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 

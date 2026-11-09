@@ -19,11 +19,8 @@ setup(
     zip_safe=True,
     maintainer='alessandro',
     maintainer_email='alessandro.mangili1@studenti.unimi.it',
-    description=(
-        'Detection (PointPillars, YOLO) e tracking dinamico EagerMOT: fusione, '
-        'tracker a due stadi, ciclo di vita nascita/conferma/morte.'
-    ),
-    license='TODO: License declaration',
+    description='People detection with PointPillars and YOLO, and EagerMOT tracking',
+    license='MIT',
     extras_require={
         'test': [
             'pytest',

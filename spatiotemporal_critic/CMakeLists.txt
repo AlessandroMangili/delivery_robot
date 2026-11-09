@@ -22,7 +22,6 @@ set(deps
   visualization_msgs
 )
 
-# La libreria del critic: un plugin caricato a runtime da MPPI.
 add_library(${PROJECT_NAME} SHARED
   src/spatiotemporal_critic.cpp
 )
@@ -32,7 +31,6 @@ target_include_directories(${PROJECT_NAME} PUBLIC
 )
 ament_target_dependencies(${PROJECT_NAME} ${deps})
 
-# Dichiara al sistema pluginlib dove trovare il critic (base class = MPPI).
 pluginlib_export_plugin_description_file(nav2_mppi_controller critics.xml)
 
 install(TARGETS ${PROJECT_NAME}

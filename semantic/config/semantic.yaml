@@ -1,129 +1,115 @@
 gt_segmentation_node:
   ros__parameters:
-    labels_topic: /semantic/labels_map     # Gazebo semantic camera topic (input)
-    out_topic: /semantic/segmentation      # segmentation in Cityscapes IDs (output)
-    publish_overlay: false                 # /semantic/overlay (segmentazione colorata): nessuno lo usa
+    labels_topic: /semantic/labels_map     # label image of the Gazebo segmentation camera (input)
+    out_topic: /semantic/segmentation      # segmentation as Cityscapes IDs (output)
+    publish_overlay: false                 # /semantic/overlay, the coloured segmentation
 
 semantic_costmap_node:
   ros__parameters:
-    target_frame: map                                 # persistent map frame (fixed, global)
-    camera_optical_frame: camera_rgb_optical_frame    # frame ottico camera: proietta i punti LiDAR nell'immagine per leggerne la CLASSE
-    base_frame: base_footprint                        # robot base frame (pose / window)
+    target_frame: map                                 # frame of the persistent map
+    camera_optical_frame: camera_rgb_optical_frame    # camera frame: LiDAR points are projected into the image to read their class
+    base_frame: base_footprint                        # robot frame
 
-    resolution: 0.05                       # [m/cell] risoluzione mappa (5 cm) -- giustificata dal density study (>=1 pt/cella fino a ~10 m)
-    initial_size_m: 10.0                   # [m] lato iniziale, poi auto-grow
-    grow_margin_m: 3.0                     # [m] margine aggiunto a ogni espansione
+    resolution: 0.05                       # cell size [m]
+    initial_size_m: 10.0                   # initial side of the map, it grows as needed [m]
+    grow_margin_m: 3.0                     # margin added at each growth [m]
 
-    lidar_topic: /scan/points              # nuvola grezza nel frame base_scan (NON la deskewata di FAST-LIO)
-    lidar_frame: base_scan                 # frame del LiDAR
-    lidar_max_age_s: 0.3                   # [s] nuvola piu' vecchia di cosi' = non usata in quel frame
-    lidar_min_range: 0.4                   # [m] scarta i punti piu' vicini
+    lidar_topic: /scan/points              # raw LiDAR cloud
+    lidar_frame: base_scan                 # LiDAR frame
+    lidar_max_age_s: 0.3                   # a cloud older than this is not paired with the image [s]
+    lidar_min_range: 0.4                   # closer points are dropped [m]
 
-    max_range: 5.5                         # [m] distanza max per peso-distanza e occlusioni (alzabile ora che e' LiDAR, es. 10)
-    map_write_max_range: 3.0               # [m] SCRIVI in mappa solo entro questa distanza (alzabile, es. 8-10, il LiDAR e' accurato lontano)
-    max_obstacle_height: 0.20              # [m] CLEARANCE: sopra questa quota (sul robot) non scrivere -> il robot ci passa sotto (panchine, tavoli, tettoie)
+    max_range: 5.5                         # range of the distance weight and of the occlusion test [m]
+    map_write_max_range: 3.0               # only points closer than this are written [m]
+    max_obstacle_height: 0.20              # points higher than this above the ground are not written: the robot passes below [m]
 
-    # Full map publishing
-    full_map_period_s: 1.0                 # [s] ripubblica la mappa piena ogni N secondi
-    significant_change_cells: 15           # se >= N celle cambiano, pubblica SUBITO
+    full_map_period_s: 1.0                 # the full map is published every N seconds [s]
+    significant_change_cells: 15           # if at least N cells change, the full map is published at once
 
-    # Occlusion (polar z-buffer) -- ancora attiva; candidata a semplificazione con la geometria 3D nativa
-    occ_sector_deg: 2.0                    # [deg] ampiezza angolare dei settori z-buffer
-    occ_margin: 0.15                       # [m] oltre il primo ostacolo prima di dichiarare "occluso"
-    w_dist_min: 0.03                       # peso minimo a max_range (vicino ~1, lontano piccolo)
+    occ_sector_deg: 2.0                    # angular width of the occlusion sectors [deg]
+    occ_margin: 0.15                       # distance behind the first obstacle before a point counts as occluded [m]
+    w_dist_min: 0.03                       # smallest distance weight, at max_range
 
-    blocker_classes: [2,3,4,5,7,8,11,12,13,14,15,16,17,18]
+    blocker_classes: [2,3,4,5,7,8,11,12,13,14,15,16,17,18]   # classes that block the view behind them
 
-    map_save_name: 'map1'                  # vuoto = non salvare
-    map_load_name: 'map1'                  # vuoto = parti da zero
-    autosave: false                         # true = salva alla CHIUSURA del nodo
+    map_save_name: 'map1'                  # name of the saved map, empty = do not save
+    map_load_name: 'map1'                  # name of the map to load, empty = start empty
+    autosave: false                        # save when the node shuts down
 
-    # Dynamic objects exclusion (per classe; il tracker serve sul reale -> map_static_dynamics:true)
-    dynamic_classes: [11,12,13,14,15,16,17,18]
-    dyn_v_thresh: 0.3                      # [m/s] sopra = "in movimento"
-    dyn_gate: 1.0                          # [m] distanza max per associare una traccia tra frame
-    dyn_min_obs: 3                         # min frame prima di fidarsi della velocita' stimata
-    dyn_timeout: 1.0                       # [s] eta' max di una traccia non piu' vista
-    dyn_vel_beta: 0.6                      # smoothing velocita' (EMA)
-    map_static_dynamics: false             # false = una classe dinamica NON scrive MAI in mappa (anche se ferma)
-    dyn_dilate_px: 6                       # [px] alone attorno ai dinamici dove non si scrive (bordi mal segmentati)
+    dynamic_classes: [11,12,13,14,15,16,17,18]   # people and vehicles: never written into the map
+    dyn_v_thresh: 0.3                      # speed above which an object counts as moving [m/s]
+    dyn_gate: 1.0                          # largest distance to associate an object between frames [m]
+    dyn_min_obs: 3                         # frames before the estimated speed is trusted
+    dyn_timeout: 1.0                       # an object not seen for this long is forgotten [s]
+    dyn_vel_beta: 0.6                      # smoothing of the speed (EMA)
+    map_static_dynamics: false             # false = a dynamic class is never written, even when still
+    dyn_dilate_px: 6                       # no-write margin around dynamic objects in the image [px]
 
-    conf_max: 8.0          # TETTO di evidenza (nessuna cella e' immortale)
-    conf_init: 2.0         # difesa di una cella appena entrata (bassa: se la deve guadagnare)
-    confirm_gain: 1.0      # una conferma vale +1 * peso
-    deny_penalty: 2.0      # una smentita vale -2 * peso
-    conf_decay: 0.99       # l'evidenza delle celle non viste invecchia (-1%/s)
+    conf_max: 8.0                          # ceiling of the evidence of a cell
+    conf_init: 2.0                         # evidence of a cell that has just entered the map
+    confirm_gain: 1.0                      # evidence added by a confirmation, times the weight
+    deny_penalty: 2.0                      # evidence removed by a contradiction, times the weight
+    conf_decay: 0.99                       # evidence of cells not in view decays by 1 % per second
 
-    # INGRESSO in mappa: solo dopo N conferme CONSECUTIVE, poi scritta
-    new_hits: 4            # 2 = permissivo / 4 = severo
-    change_hits: 2         # conferme consecutive della classe OPPOSTA per ribaltare una cella (oltre a C che arriva a 0)
+    new_hits: 4                            # consecutive observations before a cell enters the map
+    change_hits: 2                         # consecutive observations of another class before a cell changes class
 
-    # Gate di localizzazione ROBUSTO (EMA + isteresi)
-    use_loc_quality_gate: true             # abilita/disabilita il gate
-    loc_pose_topic: /odometry/global       # topic posa-con-covarianza
-    loc_cov_source: odometry               # 'odometry' per EKF (robot_localization)
-    # Soglie proporzionate alle celle da 5 cm (erano 1.0 / 0.5 m, cioe' 10-20
-    # celle di errore accettato). Se la mappatura non parte mai, il log dice
-    # "LOCALIZATION LOST (smoothed std X m ...)": confrontare X con queste soglie.
-    loc_std_suspend_m: 0.15                # [m] std liscia sopra questo -> SOSPENDI
-    loc_std_resume_m: 0.08                 # [m] sotto questo -> RIPRENDI (isteresi)
-    loc_cov_ema: 0.4                       # smoothing covarianza (0..1; piu' alto = piu' reattivo)
+    use_loc_quality_gate: true             # stop writing when the localization is uncertain
+    loc_pose_topic: /odometry/global       # pose with covariance used by the gate
+    loc_cov_source: odometry               # the pose comes from robot_localization
+    loc_std_suspend_m: 0.15                # writing stops above this smoothed position std [m]
+    loc_std_resume_m: 0.08                 # writing resumes below this [m]
+    loc_cov_ema: 0.4                       # smoothing of the covariance (0..1, higher = faster)
 
 elevation_costmap_node:
   ros__parameters:
     target_frame: map
     base_frame: base_footprint
     lidar_frame: base_scan
-    camera_optical_frame: camera_rgb_optical_frame   # per proiettare i punti ed escludere i dinamici
+    camera_optical_frame: camera_rgb_optical_frame   # used to project points and drop dynamic objects
 
-    resolution: 0.05
-    initial_size_m: 10.0
-    grow_margin_m: 3.0
+    resolution: 0.05                       # cell size [m]
+    initial_size_m: 10.0                   # initial side of the map [m]
+    grow_margin_m: 3.0                     # margin added at each growth [m]
 
     lidar_topic: /scan/points
-    lidar_max_age_s: 0.3
-    lidar_min_range: 0.4
-    map_write_max_range: 5.0
-    elev_min_rel: -1.0                 # [m] sotto (rel. al robot) = buco profondo: scartato
-    elev_max_rel: 1.0                  # [m] sopra = overhead (chiome/insegne): scartato
+    lidar_max_age_s: 0.3                   # a cloud older than this is not used [s]
+    lidar_min_range: 0.4                   # closer points are dropped [m]
+    map_write_max_range: 5.0               # only points closer than this are written [m]
+    elev_min_rel: -1.0                     # points this far below the robot are dropped [m]
+    elev_max_rel: 1.0                      # points this far above the robot are dropped (trees, signs) [m]
 
-    # Camera + segmentazione (SOLO per escludere i dinamici)
-    seg_topic: /semantic/segmentation
+    seg_topic: /semantic/segmentation      # segmentation, used only to drop dynamic objects
     camera_info_topic: /camera/camera_info
-    seg_max_age_s: 0.3
+    seg_max_age_s: 0.3                     # a segmentation older than this is not used [s]
     dynamic_classes: [11,12,13,14,15,16,17,18]
-    dyn_dilate_px: 12
+    dyn_dilate_px: 12                      # no-write margin around dynamic objects in the image [px]
 
-    # Modello Kalman (misura + predizione)
-    sensor_var_base: 0.0009            # (0.03 m)^2 rumore base
-    sensor_var_dist: 0.0004            # coeff. * range^2 (piu' lontano = meno affidabile)
-    var_init: 1.0                      # varianza cella mai vista
-    var_max: 1.0                       # tetto varianza (inflazione)
-    process_var_rate: 0.05   #0.005    # [m^2/s] inflazione nel tempo (SIM: sostituto della prop. di posa)
-    maha_thresh: 5.0                   # gate outlier (rumore residuo)
-    min_var_for_valid: 0.25            # var oltre = cella non affidabile -> ignoto
+    sensor_var_base: 0.0009                # base variance of a height measurement [m^2]
+    sensor_var_dist: 0.0004                # extra variance per squared metre of range
+    var_init: 1.0                          # variance of a cell never seen [m^2]
+    var_max: 1.0                           # ceiling of the variance [m^2]
+    process_var_rate: 0.05                 # variance added per second to every cell [m^2/s]
+    maha_thresh: 5.0                       # Mahalanobis gate against outliers
+    min_var_for_valid: 0.25                # cells with a larger variance count as unknown [m^2]
 
-    # Derivazione COSTO (traversabilita': slope/roughness/step)
-    rough_win: 5                       # finestra roughness [celle]
-    rough_min_known: 6                 # min vicini noti per validita'
-    slope_crit: 0.35                   # [m/m] ~19 deg -> costo max
-    rough_crit: 0.06                   # [m] std locale -> costo max
-    step_crit: 0.06                    # [m] salto (cordolo) -> costo max
+    rough_win: 5                           # window of the roughness [cells]
+    rough_min_known: 6                     # known neighbours needed for the roughness
+    slope_crit: 0.35                       # slope with the highest cost (about 19 deg) [m/m]
+    rough_crit: 0.06                       # roughness with the highest cost [m]
+    step_crit: 0.06                        # step with the highest cost (a kerb) [m]
 
-    # ADDED
-    median_ksize: 5        # smoothing mediano (3=on; 0/1=off per confronto)
-    slope_dead: 0.04
-    rough_dead: 0.025
-    step_dead: 0.02
+    median_ksize: 5                        # median filter on the heights (0 or 1 = off)
+    slope_dead: 0.04                       # slope below this costs nothing [m/m]
+    rough_dead: 0.025                      # roughness below this costs nothing [m]
+    step_dead: 0.02                        # step below this costs nothing [m]
 
-    # Publishing
-    publish_period_s: 1.0
+    publish_period_s: 1.0                  # publishing period [s]
     out_topic: /elevation_cost
 
-    # Gate di localizzazione (stesso schema del semantico)
-    use_loc_quality_gate: true
+    use_loc_quality_gate: true             # same gate as the semantic map
     loc_pose_topic: /odometry/global
-    loc_std_suspend_m: 0.15            # come la semantica: proporzionate alle celle da 5 cm
+    loc_std_suspend_m: 0.15
     loc_std_resume_m: 0.08
     loc_cov_ema: 0.4
 
@@ -135,19 +121,17 @@ ssrl_combiner:
   ros__parameters:
     semantic_topic: /semantic_costmap
     elevation_topic: /elevation_cost
-    out_topic: /ssrl_costmap
-    # --- confinamento, ora calcolato qui ---
-    use_confinement: true
-    sidewalk_cost_max: 15
-    conf_max: 40.0
-    falloff: 0.4
-    include_unknown_as_edge: false
-    publish_confinement: true          # ripubblica /confinement_cost per RViz
+    out_topic: /ssrl_costmap               # combined map read by Nav2
+    use_confinement: true                  # adds a cost that grows towards the sidewalk edges
+    sidewalk_cost_max: 15                  # semantic cost up to which a cell counts as sidewalk
+    conf_max: 40.0                         # confinement cost at the edge
+    falloff: 0.4                           # decay length of the confinement cost [m]
+    include_unknown_as_edge: false         # unknown cells do not count as an edge
+    publish_confinement: true              # publishes /confinement_cost for RViz
     confinement_topic: /confinement_cost
-    # --- elevation ---
-    use_elevation: true
-    w_elev: 0.6
-    soft_ceiling: 97
-    elev_can_be_lethal: false
-    elev_lethal_thr: 92
-    grid_tol_cells: 0.01
+    use_elevation: true                    # adds the elevation cost
+    w_elev: 0.6                            # share of the room left below soft_ceiling that the elevation can use
+    soft_ceiling: 97                       # ceiling of the combined cost when elevation is added
+    elev_can_be_lethal: false              # the elevation alone never makes a cell lethal
+    elev_lethal_thr: 92                    # elevation cost that would be lethal if allowed
+    grid_tol_cells: 0.01                   # tolerance when checking that two grids are aligned [cells]

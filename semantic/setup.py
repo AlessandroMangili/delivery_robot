@@ -18,7 +18,7 @@ setup(
     zip_safe=True,
     maintainer='alessandro',
     maintainer_email='alessandro.mangili1@studenti.unimi.it',
-    description='Map semantic to keep the robot upon the sidewalk',
+    description='Semantic and elevation maps of the ground, fused into one costmap',
     license='MIT',
     extras_require={
         'test': [
@@ -30,7 +30,6 @@ setup(
             'semantic_overlay_node = semantic.semantic_overlay_node:main',
             'semantic_costmap_node = semantic.semantic_costmap_node:main',
             'gt_segmentation_node = semantic.gt_segmentation_relay:main',
-            'confinement_layer = semantic.confinement_layer:main',
             'ssrl_combiner = semantic.ssrl_combiner:main',
             'elevation_costmap_node = semantic.elevation_costmap_node:main',
         ],
