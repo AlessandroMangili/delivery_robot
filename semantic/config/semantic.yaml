@@ -1,228 +1,142 @@
+seg_infer_node:
+  ros__parameters:
+    image_topic: /c920/image_raw            # camera images to segment
+    seg_topic: /semantic/segmentation       # output: one Cityscapes class id per pixel (mono8)
+    image_encoding: bgr8                    # colour order given to the network
+    model_path: semantic.pt                 # weights in semantic/models, or an absolute path
+    device: cuda:0                          # GPU used for inference
+    imgsz: 640                              # network input size [px]
+    log_period_s: 5.0                       # period of the rate log [s]
+
 semantic_costmap_node:
   ros__parameters:
-    target_frame: odom                                 # persistent map frame (fixed, global)
-    camera_optical_frame: c920_optical
-    camera_info_topic: /c920/camera_info
-    seg_topic: /semantic/segmentation
-    base_frame: base_footprint
+    target_frame: odom                      # frame of the map, set to map by the launch file
+    base_frame: base_footprint              # robot frame
+    lidar_frame: velodyne                   # frame of the point cloud
+    camera_optical_frame: c920_optical      # optical frame of the camera
+    lidar_topic: /velodyne_points           # LiDAR point cloud
+    camera_info_topic: /c920/camera_info    # camera intrinsics
+    seg_topic: /semantic/segmentation       # segmentation from seg_infer_node
+    map_name: ''                            # map to load and save, set by the launch file
+    tf_timeout_s: 0.1                       # longest wait for a transform [s]
 
-    resolution: 0.05                       # [m/cell] risoluzione mappa (5 cm) -- giustificata dal density study (>=1 pt/cella fino a ~10 m)
-    initial_size_m: 10.0                   # [m] lato iniziale, poi auto-grow
-    grow_margin_m: 3.0                     # [m] margine aggiunto a ogni espansione
+    resolution: 0.05                        # cell size [m]
+    initial_size_m: 10.0                    # side of the map at start, it grows when needed [m]
+    grow_margin_m: 3.0                      # margin added each time the map grows [m]
 
-    lidar_topic: /velodyne_points
-    lidar_frame: velodyne
-    lidar_max_age_s: 0.3                   # [s] nuvola piu' vecchia di cosi' = non usata in quel frame
-    lidar_min_range: 0.4                   # [m] scarta i punti piu' vicini
+    lidar_max_age_s: 0.3                    # older clouds are not used for a camera frame [s]
+    lidar_min_range: 0.4                    # closer points are ignored [m]
+    max_range: 15.0                         # range at which the vote weight reaches its minimum [m]
+    map_write_max_range: 8.0                # farthest ground point written in the map [m]
+    max_obstacle_height: 0.64               # higher points are not written: the robot passes under them [m]
+    w_dist_min: 0.03                        # smallest weight of a far point
 
-    max_range: 15.0                        # [m] distanza max per peso-distanza e occlusioni (>= map_write_max_range)
-    map_write_max_range: 8.0
-    max_obstacle_height: 0.64              # [m] CLEARANCE: sopra questa quota (da terra, base_footprint) non scrivere -> il robot ci passa sotto (panchine, tavoli, tettoie)
-    stacked_vote: true
-    stacked_low_min: 0.15
-    stacked_high_max: 2.0
-    stacked_tol_cells: 1
-    stacked_min_votes: 3
-    ost_write_range_m: 15.0
-    ost_classes: [2,3,4,5]
-    footprint_clear: true
-    ray_clear_mode: suolo
-    ray_clear_low_h: 0.12
-    ray_clear_ground_tol: 0.25
+    alpha_min: 2.0                          # votes needed before a cell is known
+    alpha_max: 10.0                         # cap on the votes, so that a cell can still change class
+    p_lethal: 0.5                           # share of obstacle votes that makes a cell lethal
+    blocker_classes: [2,3,4,5,7,8,11,12,13,14,15,16,17,18]   # classes counted as obstacles
+    dynamic_classes: [11,12,13,14,15,16,17,18]               # people and vehicles: never written
+    dyn_dilate_px: 6                        # margin around people and vehicles in the image [px]
 
-    # Full map publishing
-    full_map_period_s: 1.0                 # [s] ripubblica la mappa piena ogni N secondi
-    significant_change_cells: 15           # se >= N celle cambiano, pubblica SUBITO
+    occ_sector_deg: 2.0                     # angular sector used to find occluded points [deg]
+    occ_margin: 0.15                        # distance behind an obstacle after which points are occluded [m]
 
-    # Occlusion (polar z-buffer) -- ancora attiva; candidata a semplificazione con la geometria 3D nativa
-    occ_sector_deg: 2.0                    # [deg] ampiezza angolare dei settori z-buffer
-    occ_margin: 0.15                       # [m] oltre il primo ostacolo prima di dichiarare "occluso"
-    w_dist_min: 0.03                       # peso minimo a max_range (vicino ~1, lontano piccolo)
+    stacked_vote: true                      # a cell takes the class of a wall or pole standing on it
+    stacked_low_min: 0.15                   # lowest height of the structure above the ground [m]
+    stacked_high_max: 2.0                   # highest height of the structure above the ground [m]
+    stacked_tol_cells: 1                    # neighbouring cells searched for the structure
+    stacked_min_votes: 3                    # points needed to accept the structure
 
-    blocker_classes: [2,3,4,5,7,8,11,12,13,14,15,16,17,18]
+    ost_write_range_m: 15.0                 # walls and poles are written up to this range [m]
+    ost_classes: [2,3,4,5]                  # classes written up to ost_write_range_m
 
-    map_name: ''
+    footprint_clear: true                   # clears lethal cells under the robot's footprint
 
-    # Dynamic objects exclusion (per classe; il tracker serve sul reale -> map_static_dynamics:true)
-    dynamic_classes: [11,12,13,14,15,16,17,18]
-    dyn_v_thresh: 0.3                      # [m/s] sopra = "in movimento"
-    dyn_gate: 1.0                          # [m] distanza max per associare una traccia tra frame
-    dyn_min_obs: 3                         # min frame prima di fidarsi della velocita' stimata
-    dyn_timeout: 1.0                       # [s] eta' max di una traccia non piu' vista
-    dyn_vel_beta: 0.6                      # smoothing velocita' (EMA)
-    map_static_dynamics: false             # false = una classe dinamica NON scrive MAI in mappa (anche se ferma)
-    dyn_dilate_px: 6                       # [px] alone attorno ai dinamici dove non si scrive (bordi mal segmentati)
+    ray_clear_enable: true                  # set by the launch file (semantic_ray_clearing)
+    ray_clear_low_h: 0.12                   # height above the ground below which a ray clears a cell [m]
+    ray_clear_ground_tol: 0.25              # only rays ending this close to the ground height clear cells [m]
 
-    alpha_min: 2.0
-    alpha_max: 10.0
-    fusion_decay: 1.0
-    p_lethal: 0.5
-    tf_timeout_s: 0.1
-
-    # Gate di localizzazione ROBUSTO (EMA + isteresi)
-    use_loc_quality_gate: false             # abilita/disabilita il gate
-    loc_pose_topic: /odometry/local
-    loc_cov_source: odometry               # 'odometry' per EKF (robot_localization)
-    loc_std_suspend_m: 1.0                 # [m] std liscia sopra questo -> SOSPENDI
-    loc_std_resume_m: 0.5                  # [m] sotto questo -> RIPRENDI (isteresi)
-    loc_cov_ema: 0.4                       # smoothing covarianza (0..1; piu' alto = piu' reattivo)
+    full_map_period_s: 1.0                  # period of the full map publication [s]
+    significant_change_cells: 15            # cells that must change to publish at once
 
 elevation_costmap_node:
   ros__parameters:
-    target_frame: odom
-    base_frame: base_footprint
-    lidar_frame: velodyne
-    camera_optical_frame: c920_optical
+    target_frame: odom                      # frame of the map, set to map by the launch file
+    base_frame: base_footprint              # robot frame
+    lidar_frame: velodyne                   # frame of the point cloud
+    lidar_topic: /velodyne_points           # LiDAR point cloud
+    attitude_imu_topic: /mavros/imu/data    # IMU that gives roll and pitch
+    out_topic: /elevation_cost              # output costmap
+    map_name: ''                            # map to load and save, set by the launch file
+    tf_timeout_s: 0.1                       # longest wait for a transform [s]
+    publish_period_s: 1.0                   # period of the cost computation and publication [s]
 
-    resolution: 0.05
-    initial_size_m: 10.0
-    grow_margin_m: 3.0
+    resolution: 0.05                        # cell size [m]
+    initial_size_m: 10.0                    # side of the map at start, it grows when needed [m]
+    grow_margin_m: 3.0                      # margin added each time the map grows [m]
 
-    # LiDAR (geometria)
-    lidar_topic: /velodyne_points
-    lidar_max_age_s: 0.3
-    lidar_min_range: 0.4
-    map_write_max_range: 8.0
-    elev_min_rel: -1.0                 # [m] sotto (rel. al robot) = buco profondo: scartato
-    elev_max_rel: 0.64                 # [m] sopra = overhead (chiome/insegne): scartato
+    lidar_min_range: 0.4                    # closer points are ignored [m]
+    map_write_max_range: 8.0                # farthest point written in the map [m]
+    elev_min_rel: -1.0                      # lower points, relative to the robot, are discarded [m]
+    elev_max_rel: 0.64                      # higher points, such as branches and signs, are discarded [m]
 
-    # Camera + segmentazione (SOLO per escludere i dinamici)
-    seg_topic: /semantic/segmentation
-    camera_info_topic: /c920/camera_info
-    seg_max_age_s: 0.3
-    dynamic_classes: [11,12,13,14,15,16,17,18]
-    dyn_dilate_px: 12
+    sensor_var_base: 0.0009                 # height noise of a point next to the sensor [m^2]
+    sensor_var_dist: 0.0004                 # growth of the noise with the squared range [1/m^2]
+    var_init: 1.0                           # variance of a cell never seen [m^2]
+    var_max: 1.0                            # largest variance of a cell [m^2]
+    min_var_for_valid: 0.25                 # cells with a larger variance are unknown [m^2]
+    hybrid_k_sigma: 2.5                     # inside a cell, only the highest group of points is kept
+    confirm_s: 2.5                          # a new height must last this long to replace the old one [s]
+    process_var_rate: 0.0                   # growth of the cell variance over time [m^2/s]
+    raycast_every_n: 10                     # rays clear the map once every this many scans
+    raycast_stride: 4                       # one ray out of this many is traced
+    raycast_end_margin: 0.25                # rays stop this short of their end point [m]
+    raycast_sigma_k: 3.0                    # a ray clears a cell only if it passes this many sigma below it
+    raycast_protect_s: 1.0                  # cells updated more recently than this are not cleared [s]
 
-    # Modello Kalman (misura + predizione)
-    sensor_var_base: 0.0009            # (0.03 m)^2 rumore base
-    sensor_var_dist: 0.0004            # coeff. * range^2 (piu' lontano = meno affidabile)
-    var_init: 1.0                      # varianza cella mai vista
-    var_max: 1.0                       # tetto varianza (inflazione)
-    maha_thresh: 5.0                   # gate outlier (rumore residuo)
-    min_var_for_valid: 0.25            # var oltre = cella non affidabile -> ignoto
+    median_ksize: 5                         # median filter on the heights before the cost [cells]
+    rough_win: 5                            # window of the roughness [cells]
+    rough_min_known: 6                      # known neighbours needed to compute the cost
+    slope_dead: 0.08                        # slope with no cost [m/m]
+    slope_crit: 0.35                        # slope with full cost [m/m]
+    rough_dead: 0.025                       # roughness with no cost [m]
+    rough_crit: 0.06                        # roughness with full cost [m]
+    step_dead: 0.04                         # step with no cost [m]
+    step_crit: 0.10                         # step with full cost [m]
+    step_drop_radius_m: 0.6                 # distance over which a drop counts as a step [m]
+    step_rise_radius_m: 0.2                 # distance over which a rise counts as a step [m]
+    step_slope_allow: 0.05                  # slope subtracted from a step before its cost [m/m]
+    step_lethal_m: 0.10                     # steps at least this high are lethal [m]
 
-    # Derivazione COSTO (traversabilita': slope/roughness/step)
-    rough_win: 5                       # finestra roughness [celle]
-    rough_min_known: 6                 # min vicini noti per validita'
-    slope_crit: 0.35                   # [m/m] ~19 deg -> costo max
-    rough_crit: 0.06                   # [m] std locale -> costo max
-    step_crit: 0.10                    # [m] salto (cordolo) -> costo max
+    imu_roll_offset_deg: 0.12               # mounting roll of the Pixhawk [deg]
+    imu_pitch_offset_deg: -0.28             # mounting pitch of the Pixhawk [deg]
+    tilt_reject_deg: 0.7                    # scans tilted more than this against the map are discarded [deg]
+    z_align_tau_s: 2.0                      # time constant of the height alignment to the map [s]
+    z_align_min_age_s: 60.0                 # only cells older than this are used for the alignment [s]
+    z_align_max_diff_m: 1.5                 # largest height difference accepted for the alignment [m]
 
-    # ADDED
-    median_ksize: 5        # smoothing mediano (3=on; 0/1=off per confronto)
-    slope_dead: 0.08
-    rough_dead: 0.025
-    step_dead: 0.04
-    step_drop_radius_m: 0.6
-    step_rise_radius_m: 0.2
-    step_slope_allow: 0.05
-    step_lethal_m: 0.10
-    hybrid_k_sigma: 2.5
-
-    raycast_enable: true
-    raycast_end_margin: 0.25
-    raycast_sigma_k: 3.0
-    raycast_protect_s: 1.0
-    attitude_topic: /pcl_pose
-    attitude_imu_topic: /mavros/imu/data
-    imu_roll_offset_deg: 0.12
-    imu_pitch_offset_deg: -0.28
-    z_from_imu: true
-    z_align_tau_s: 2.0
-    z_align_min_age_s: 60.0
-    z_align_max_diff_m: 1.5
-    z_start_anchor: true
-    fermo_min_spostamento_m: 0.02
-    fermo_min_rotazione_deg: 1.0
-    fermo_periodo_s: 2.0
-    elevazione_360: true
-    modo_360:
-      write_outside_camera: true
-      use_segmentation: false
-      confirm_s: 2.5
-      process_var_rate: 0.0
-      tilt_compensation: false
-      raycast_every_n: 10
-      raycast_stride: 4
-    modo_camera:
-      write_outside_camera: false
-      use_segmentation: true
-      confirm_s: 0.0
-      process_var_rate: 0.005
-      tilt_compensation: false
-      raycast_every_n: 5
-      raycast_stride: 2
-    tilt_max_offset_m: 0.0
-    tilt_max_deg: 1.5
-    tilt_reject_deg: 0.7
-    tf_timeout_s: 0.1
-
-    # Publishing
-    publish_period_s: 1.0
-    out_topic: /elevation_cost
-
-    # Gate di localizzazione (stesso schema del semantico)
-    use_loc_quality_gate: false
-    loc_pose_topic: /odometry/local
-    loc_std_suspend_m: 1.0
-    loc_std_resume_m: 0.5
-    loc_cov_ema: 0.4
-
-    map_name: ''
+    still_min_motion_m: 0.02                # with the robot still, scans are skipped until it moves this much [m]
+    still_min_rotation_deg: 1.0             # or turns this much [deg]
+    still_period_s: 2.0                     # or this much time passes [s]
 
 ssrl_combiner:
   ros__parameters:
-    semantic_topic: /semantic_costmap
-    elevation_topic: /elevation_cost
-    out_topic: /ssrl_costmap
-    # --- confinamento, ora calcolato qui ---
-    use_confinement: true
-    sidewalk_cost_max: 15
-    conf_max: 40.0
-    falloff: 0.4
-    include_unknown_as_edge: false
-    publish_confinement: true          # ripubblica /confinement_cost per RViz
-    confinement_topic: /confinement_cost
-    # --- elevation ---
-    use_elevation: true
-    w_elev: 0.6
-    soft_ceiling: 97
-    elev_can_be_lethal: true
-    elev_lethal_thr: 100
-    elev_where_sem_unknown: false
-    grid_tol_cells: 0.01
+    semantic_topic: /semantic_costmap       # semantic map
+    elevation_topic: /elevation_cost        # elevation map
+    out_topic: /ssrl_costmap                # fused costmap used by Nav2
+    confinement_topic: /confinement_cost    # confinement cost, for display
+    use_confinement: true                   # adds the confinement cost on the sidewalk
+    sidewalk_cost_max: 15                   # cells with a semantic cost up to this value are sidewalk
+    conf_max: 40.0                          # confinement cost at the sidewalk edge
+    falloff: 0.4                            # decay length of the confinement towards the middle [m]
+    use_elevation: true                     # adds the elevation cost
+    w_elev: 0.6                             # weight of the elevation cost
+    soft_ceiling: 97                        # highest cost the elevation can reach without being lethal
+    elev_lethal_thr: 100                    # elevation cost that makes a cell lethal
+    grid_tol_cells: 0.01                    # tolerance when aligning the two grids [cells]
 
-seg_infer_node:
-  ros__parameters:
-    image_topic: /c920/image_raw
-    seg_topic: /semantic/segmentation
-    image_encoding: bgr8
-
-    # --- Modello / inferenza ---
-    model_path: yolo26n-sem.pt
-    device: cuda:0
-    imgsz: 640
-    half: true
-    warmup: true
-
-    # --- Contratto col consumer ---
-    publish_at_input_res: true
-    ignore_id: 255
-
-    # Remap opzionale id-modello -> trainId. Vuoto = identita' (pesi ufficiali Cityscapes).
-    label_remap: ""
-
-    log_period_s: 5.0
-    
 semantic_overlay_node:
   ros__parameters:
-    rgb_topic: /c920/image_raw
-    seg_topic: /semantic/segmentation
-    out_topic: /semantic/overlay_rgb
-
-image_brighten_node:
-  ros__parameters:
-    in_topic: /c920/image_raw
-    out_topic: /c920/image_bright
-    gamma: 2.2
-    gain: 1.0
+    rgb_topic: /c920/image_raw              # camera images
+    seg_topic: /semantic/segmentation       # segmentation to draw over them
+    out_topic: /semantic/overlay_rgb        # image with the coloured classes, for display

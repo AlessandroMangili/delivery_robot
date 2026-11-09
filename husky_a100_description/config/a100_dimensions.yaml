@@ -1,52 +1,48 @@
-# Clearpath Husky A100 - dimensioni per l'URDF parametrico.
-# Unità SI (metri, chilogrammi).
+# Clearpath Husky A100 dimensions for the parametric URDF, in metres and kilograms.
 #
-# Legenda della provenienza di ogni valore:
-#   UFFICIALE = manuale Clearpath "Husky A100 User Guide" (2010), §2.2 Fig. 1 (quote 860/605/350/92 mm)
-#   DISEGNO   = misurato sul disegno in scala della Fig. 1, calibrato sulle quote ufficiali
-#               860 mm e 605 mm (1.8175 mm/pixel). Incertezza stimata circa +-3 mm.
-#   MESH      = misurato sulla mesh importata (bounding box)
-#   MISURATO  = misurato sul robot reale (prevale sul manuale)
-#   STIMA     = dato non disponibile nel manuale: da misurare o pesare sul robot reale
+# Source of each value:
+#   OFFICIAL = Clearpath "Husky A100 User Guide" (2010), section 2.2, figure 1 (860/605/350/92 mm)
+#   DRAWING  = measured on the scaled drawing of figure 1, calibrated on 860 and 605 mm (about +-3 mm)
+#   MESH     = bounding box of the imported mesh
+#   MEASURED = measured on the real robot, preferred over the manual
+#   ESTIMATE = not in the manual, to be measured or weighed on the robot
 #
-# Convenzioni: X avanti, Y sinistra, Z su (REP 103). Il frame base_footprint sta a terra,
-# sotto il centro del robot (= sotto l'asse della ruota centrale, che e' al centro dell'ingombro).
+# Axes: x forward, y left, z up (REP 103). base_footprint is on the ground under the centre of the robot.
 
 overall:
-  length: 0.860            # UFFICIALE: ingombro totale con paraurti tubolari
-  width: 0.620             # MISURATO (manuale: 0.605): ingombro totale, facce esterne di piastre laterali / tubi
-  height: 0.340            # MISURATO (manuale: 0.350): da terra al piano superiore del corpo
-  ground_clearance: 0.092  # UFFICIALE: da terra al fondo del corpo
+  length: 0.860            # OFFICIAL: total length including the tubular bumpers
+  width: 0.620             # MEASURED (manual 0.605): total width, outer faces of the side rails
+  height: 0.340            # MEASURED (manual 0.350): from the ground to the top plate
+  ground_clearance: 0.092  # OFFICIAL: from the ground to the bottom of the body
 
 chassis:
-  length: 0.718            # DISEGNO: corpo nella parte bassa (vista dall'alto)
-  top_length: 0.587        # DISEGNO: piano superiore piatto (vista laterale)
-  width: 0.402             # DISEGNO: vista di testa
-  chamfer_start_height: 0.230  # DISEGNO: quota da terra dove iniziano gli smussi anteriore/posteriore
-  mass: 38.0               # STIMA: corpo + 2 batterie piombo 12 V 21 Ah + elettronica
+  length: 0.718            # DRAWING: lower body, top view
+  top_length: 0.587        # DRAWING: flat top plate, side view
+  width: 0.402             # DRAWING: front view
+  chamfer_start_height: 0.230  # DRAWING: height where the front and rear chamfers start
+  mass: 38.0               # ESTIMATE: body, two 12 V 21 Ah lead-acid batteries and electronics
 
 wheels:
-  radius: 0.105            # MISURATO: gomma alta 0.21 m da terra = diametro (disegno: 0.229)
-  width: 0.062             # DISEGNO: larghezza gomma (vista di testa)
-  axle_spacing: 0.266      # DISEGNO: distanza tra assi adiacenti (asse centrale al centro)
-  track: 0.484             # DISEGNO: centro-centro ruote sinistra/destra
-                           #   (il manuale usa 0.50 m come "larghezza effettiva" per la cinematica,
-                           #    che include lo slittamento: non e' la carreggiata geometrica)
-  mass: 1.5                # STIMA (per ruota)
+  radius: 0.105            # MEASURED: the tyre is 0.21 m tall (drawing 0.229)
+  width: 0.062             # DRAWING: tyre width, front view
+  axle_spacing: 0.266      # DRAWING: distance between neighbouring axles
+  track: 0.484             # DRAWING: left to right wheel centres; the manual uses 0.50 m as the
+                           # effective width for the kinematics, which includes skidding
+  mass: 1.5                # ESTIMATE, per wheel
 
-side_rails:                # piastre laterali gialle esterne alle ruote, all'altezza degli assi
-  length: 0.600            # DISEGNO
-  height: 0.055            # DISEGNO
-  thickness: 0.025         # DISEGNO
-  mass: 1.0                # STIMA (per piastra)
+side_rails:                # yellow side rails outside the wheels, at axle height
+  length: 0.600            # DRAWING
+  height: 0.055            # DRAWING
+  thickness: 0.025         # DRAWING
+  mass: 1.0                # ESTIMATE, per rail
 
-bumpers:                   # paraurti tubolari anteriore e posteriore (tratto dritto + smussi 45 gradi + tratti laterali)
-  tube_diameter: 0.0254    # DISEGNO: tubo da 1 pollice
-  axis_height: 0.211       # DISEGNO: quota da terra dell'asse del tubo
-  straight_half_width: 0.219  # DISEGNO: semi-lunghezza del tratto dritto trasversale
-  mass: 1.0                # STIMA (per paraurti)
+bumpers:                   # front and rear tubular bumpers: straight part, 45 degree chamfers and side parts
+  tube_diameter: 0.0254    # DRAWING: 1 inch tube
+  axis_height: 0.211       # DRAWING: height of the tube axis
+  straight_half_width: 0.219  # DRAWING: half length of the straight part
+  mass: 1.0                # ESTIMATE, per bumper
 
 mesh:
-  wheel_file: package://husky_a100_description/meshes/wheel.dae  # da husky_description (noetic-devel)
+  wheel_file: package://husky_a100_description/meshes/wheel.dae  # from husky_description (noetic-devel)
   wheel_native_diameter: 0.3556  # MESH
   wheel_native_width: 0.1143     # MESH

@@ -3,12 +3,9 @@
 <package format="3">
   <name>husky_a100_description</name>
   <version>0.1.1</version>
-  <description>
-    URDF parametrico del Clearpath Husky A100 (6 ruote, 3 per lato). Dimensioni dal manuale
-    Clearpath 2010 (§2.2) e dal suo disegno in scala; mesh ruota, macro ruota, materiali e
-    meccanismo extras ripresi da husky/husky_description (branch noetic-devel, BSD).
-  </description>
-  <maintainer email="alessandro@example.com">Alessandro</maintainer>
+  <description>Parametric URDF of the Clearpath Husky A100 (six wheels), with its sensors and the sensor drivers launch. Wheel mesh, wheel macro, materials and extras mechanism from husky/husky_description (noetic-devel, BSD).</description>
+  <maintainer email="alessandro.mangili1@studenti.unimi.it">Alessandro</maintainer>
+  <license>MIT</license>
   <license>BSD-3-Clause</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>

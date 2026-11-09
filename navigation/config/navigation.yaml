@@ -1,14 +1,14 @@
 bt_navigator:
   ros__parameters:
-    use_sim_time: false
-    global_frame: map
-    robot_base_frame: base_footprint
-    odom_topic: /odometry/local
-    bt_loop_duration: 10
-    default_nav_to_pose_bt_xml: "bt_senza_spin.xml"
-    default_server_timeout: 2000
-    wait_for_service_timeout: 1000
-    plugin_lib_names:
+    use_sim_time: false                         # true when replaying a bag with --clock
+    global_frame: map                           # frame of the goals and of the plan
+    robot_base_frame: base_footprint            # robot frame
+    odom_topic: /odometry/local                 # odometry used by the behavior tree
+    bt_loop_duration: 10                        # period of the behavior tree [ms]
+    default_nav_to_pose_bt_xml: "bt_no_spin.xml" # behavior tree, set by the launch file
+    default_server_timeout: 2000                # longest wait for an action server [ms]
+    wait_for_service_timeout: 1000              # longest wait for a service [ms]
+    plugin_lib_names:                           # behavior tree node libraries, the last one is ProgressRecoveryNode
       - nav2_compute_path_to_pose_action_bt_node
       - nav2_compute_path_through_poses_action_bt_node
       - nav2_smooth_path_action_bt_node
@@ -60,351 +60,298 @@ bt_navigator:
 
 bt_navigator_navigate_through_poses_rclcpp_node:
   ros__parameters:
-    use_sim_time: false
+    use_sim_time: false                         # true when replaying a bag with --clock
 
 bt_navigator_navigate_to_pose_rclcpp_node:
   ros__parameters:
-    use_sim_time: false
+    use_sim_time: false                         # true when replaying a bag with --clock
 
 controller_server:
   ros__parameters:
-    use_sim_time: false
-    controller_frequency: 10.0
-    min_x_velocity_threshold: 0.001
-    min_y_velocity_threshold: 0.5
-    min_theta_velocity_threshold: 0.001
-    failure_tolerance: 0.5
-    odom_topic: /odometry/local
-    progress_checker_plugin: "progress_checker"
-    goal_checker_plugins: ["general_goal_checker"]
-    controller_plugins: ["FollowPath"]
+    use_sim_time: false                         # true when replaying a bag with --clock
+    controller_frequency: 10.0                  # rate of MPPI [Hz]
+    min_x_velocity_threshold: 0.001             # smaller odometry speeds count as zero [m/s]
+    min_y_velocity_threshold: 0.5               # smaller odometry speeds count as zero [m/s]
+    min_theta_velocity_threshold: 0.001         # smaller odometry rotations count as zero [rad/s]
+    failure_tolerance: 0.5                      # time MPPI may fail before the controller gives up [s]
+    odom_topic: /odometry/local                 # odometry used by MPPI
+    progress_checker_plugin: "progress_checker" # checks that the robot keeps moving
+    goal_checker_plugins: ["general_goal_checker"] # checks when the goal is reached
+    controller_plugins: ["FollowPath"]          # controller name, configured below
     progress_checker:
-      plugin: "nav2_controller::PoseProgressChecker"
-      required_movement_radius: 0.3
-      required_movement_angle: 0.3
-      movement_time_allowance: 5.0
+      plugin: "nav2_controller::PoseProgressChecker" # progress checker type
+      required_movement_radius: 0.3             # the robot must move this much ... [m]
+      required_movement_angle: 0.3              # ... or turn this much ... [rad]
+      movement_time_allowance: 5.0              # ... within this time, or the controller fails [s]
     general_goal_checker:
-      stateful: true
-      plugin: "nav2_controller::SimpleGoalChecker"
-      xy_goal_tolerance: 0.30
-      yaw_goal_tolerance: 0.40
+      stateful: true                            # once the position is reached, only the heading is checked
+      plugin: "nav2_controller::SimpleGoalChecker" # goal checker type
+      xy_goal_tolerance: 0.30                   # distance from the goal that counts as reached [m]
+      yaw_goal_tolerance: 0.40                  # heading error that counts as reached [rad]
     FollowPath:
-      plugin: "nav2_mppi_controller::MPPIController"
-      time_steps: 60
-      model_dt: 0.1
-      batch_size: 800
-      vx_std: 0.2
-      vy_std: 0.0
-      wz_std: 0.15
-      vx_max: 0.30
-      vx_min: 0.0
-      vy_max: 0.0
-      wz_max: 0.25
-      iteration_count: 1
-      prune_distance: 2.5
-      transform_tolerance: 0.5
-      temperature: 0.2
-      gamma: 0.015
-      motion_model: "DiffDrive"
-      visualize: true
+      plugin: "nav2_mppi_controller::MPPIController" # MPPI controller
+      time_steps: 60                            # steps of each sampled trajectory
+      model_dt: 0.1                             # duration of a step: time_steps x model_dt is the 6 s horizon [s]
+      batch_size: 800                           # trajectories sampled at each cycle
+      vx_std: 0.2                               # noise of the sampled forward speed [m/s]
+      vy_std: 0.0                               # no lateral motion on a skid-steer robot [m/s]
+      wz_std: 0.15                              # noise of the sampled rotation speed [rad/s]
+      vx_max: 0.30                              # highest forward speed [m/s]
+      vx_min: 0.0                               # highest reverse speed, 0 means no reverse [m/s]
+      vy_max: 0.0                               # no lateral motion [m/s]
+      wz_max: 0.25                              # highest rotation speed [rad/s]
+      iteration_count: 1                        # optimization iterations per cycle
+      prune_distance: 2.5                       # length of the global path given to the critics [m]
+      transform_tolerance: 0.5                  # largest accepted age of a transform [s]
+      temperature: 0.2                          # softness of the weighted average: lower follows the best trajectory more closely
+      gamma: 0.015                              # weight of the control smoothness in the cost
+      motion_model: "DiffDrive"                 # kinematic model of the robot
+      visualize: true                           # publishes the sampled trajectories
       TrajectoryVisualizer:
-        trajectory_step: 1000
-        time_step: 1
-      reset_period: 1.0
-      regenerate_noises: false
-      retry_attempt_limit: 1
-      enforce_path_inversion: false
-      critics: ["ConstraintCritic", "CostCritic", "GoalCritic", "GoalAngleCritic", "PathAlignCritic", "PathFollowCritic", "PathAngleCritic", "PreferForwardCritic", "DetourCritic", "SpatioTemporalCritic"]
+        trajectory_step: 1000                   # one trajectory out of this many is drawn
+        time_step: 1                            # one point out of this many is drawn
+      reset_period: 1.0                         # time without commands after which the optimizer restarts [s]
+      regenerate_noises: false                  # samples new noise in a background thread
+      retry_attempt_limit: 1                    # retries when no trajectory is valid
+      enforce_path_inversion: false             # stops at path inversions
+      critics: ["ConstraintCritic", "CostCritic", "GoalCritic", "GoalAngleCritic", "PathAlignCritic", "PathFollowCritic", "PathAngleCritic", "PreferForwardCritic", "DetourCritic", "SpatioTemporalCritic"] # critics that score each trajectory, configured below
       ConstraintCritic:
-        enabled: true
-        cost_power: 1
-        cost_weight: 4.0
+        enabled: true                           # turns this element on or off
+        cost_power: 1                           # power applied to the cost
+        cost_weight: 4.0                        # penalizes speeds outside the limits
       GoalCritic:
-        enabled: true
-        cost_power: 1
-        cost_weight: 5.0
-        threshold_to_consider: 1.4
+        enabled: true                           # turns this element on or off
+        cost_power: 1                           # power applied to the cost
+        cost_weight: 5.0                        # pulls trajectories towards the goal
+        threshold_to_consider: 1.4              # active only within this distance of the goal [m]
       GoalAngleCritic:
-        enabled: true
-        cost_power: 1
-        cost_weight: 3.0
-        threshold_to_consider: 0.5
+        enabled: true                           # turns this element on or off
+        cost_power: 1                           # power applied to the cost
+        cost_weight: 3.0                        # aligns the robot with the goal heading
+        threshold_to_consider: 0.5              # active only within this distance of the goal [m]
       PreferForwardCritic:
-        enabled: true
-        cost_power: 1
-        cost_weight: 5.0
-        threshold_to_consider: 0.5
+        enabled: true                           # turns this element on or off
+        cost_power: 1                           # power applied to the cost
+        cost_weight: 5.0                        # penalizes reversing
+        threshold_to_consider: 0.5              # inactive within this distance of the goal [m]
       CostCritic:
-        enabled: true
-        cost_power: 1
-        cost_weight: 25.0
-        critical_cost: 300.0
-        consider_footprint: true
-        collision_cost: 1000000.0
-        near_goal_distance: 1.0
-        trajectory_point_step: 2
+        enabled: true                           # turns this element on or off
+        cost_power: 1                           # power applied to the cost
+        cost_weight: 25.0                       # how strongly trajectories avoid cost, including the confinement
+        critical_cost: 300.0                    # cost above which a trajectory is penalized strongly
+        consider_footprint: true                # checks the whole footprint, not only the centre
+        collision_cost: 1000000.0               # cost of a trajectory that collides
+        near_goal_distance: 1.0                 # distance from the goal where the cost is relaxed [m]
+        trajectory_point_step: 2                # one point out of this many is checked
       PathAlignCritic:
-        enabled: true
-        cost_power: 1
-        cost_weight: 6.0
-        max_path_occupancy_ratio: 0.05
-        trajectory_point_step: 4
-        threshold_to_consider: 0.5
-        offset_from_furthest: 20
-        use_path_orientations: false
+        enabled: true                           # turns this element on or off
+        cost_power: 1                           # power applied to the cost
+        cost_weight: 6.0                        # keeps trajectories close to the global path
+        max_path_occupancy_ratio: 0.05          # inactive when this share of the path is blocked
+        trajectory_point_step: 4                # one point out of this many is checked
+        threshold_to_consider: 0.5              # inactive within this distance of the goal [m]
+        offset_from_furthest: 20                # path points ahead of the furthest reached point that are used
+        use_path_orientations: false            # ignores the orientation of the path points
       PathFollowCritic:
-        enabled: true
-        cost_power: 1
-        cost_weight: 5.0
-        offset_from_furthest: 5
-        threshold_to_consider: 1.4
+        enabled: true                           # turns this element on or off
+        cost_power: 1                           # power applied to the cost
+        cost_weight: 5.0                        # pulls trajectories along the global path
+        offset_from_furthest: 5                 # path points ahead of the furthest reached point that are used
+        threshold_to_consider: 1.4              # inactive within this distance of the goal [m]
       PathAngleCritic:
-        enabled: true
-        cost_power: 1
-        cost_weight: 2.0
-        offset_from_furthest: 4
-        threshold_to_consider: 0.5
-        max_angle_to_furthest: 1.0
-        mode: 0
-      SideChoiceCritic:
-        enabled: true
-        cost_weight: 10.0
-        forward_weight: 10.0
-        min_rotation_speed: 0.20
-        time_window: 1.0
-        check_distance: 2.0
-        min_distance: 0.5
-        block_cost: 253
-        free_cost: 128
-        max_offset: 2.0
-        min_gap: 0.7
-        width_cap: 2.0
-        path_half_length: 0.4
-        space_weight: 1.0
-        path_weight: 1.0
-        activation_angle_deg: 20.0
-        deactivation_angle_deg: 8.0
-        release_time: 2.0
+        enabled: true                           # turns this element on or off
+        cost_power: 1                           # power applied to the cost
+        cost_weight: 2.0                        # turns the robot towards the path
+        offset_from_furthest: 4                 # path points ahead of the furthest reached point that are used
+        threshold_to_consider: 0.5              # inactive within this distance of the goal [m]
+        max_angle_to_furthest: 1.0              # active above this heading error [rad]
+        mode: 0                                 # forward motion only
       DetourCritic:
-        enabled: true
-        cost_weight: 5.0
-        pre_wp1_gain: 4.0
-        rotation_weight: 10.0
-        forward_weight: 10.0
-        min_rotation_speed: 0.25
-        stuck_time: 1.2
-        progress_distance: 0.15
-        near_clearance: 0.25
-        ignore_moving_tracks: true
-        check_distance: 2.0
-        corridor_half_width: 0.20
-        block_cost: 254
-        max_offset: 1.2
-        min_gap: 0.8
-        release_time: 1.5
-        goal_distance: 1.0
+        enabled: true                           # turns this element on or off
+        cost_weight: 5.0                        # pull towards the detour waypoints
+        pre_wp1_gain: 4.0                       # extra pull before the first waypoint
+        rotation_weight: 10.0                   # penalizes slow rotation while the robot turns towards the waypoint
+        forward_weight: 10.0                    # penalizes forward motion while the robot turns towards the waypoint
+        min_rotation_speed: 0.25                # rotation speed expected while turning [rad/s]
+        stuck_time: 1.2                         # the detour starts when the robot makes no progress for this long [s]
+        progress_distance: 0.15                 # motion that counts as progress [m]
+        near_clearance: 0.25                    # the detour also starts when an obstacle is closer than this to the footprint [m]
+        ignore_moving_tracks: true              # obstacles of moving tracks are left to SpatioTemporalCritic
+        check_distance: 2.0                     # the path is checked for obstacles up to this distance [m]
+        corridor_half_width: 0.20               # half width of the path corridor that is checked [m]
+        block_cost: 254                         # cost that blocks the path
+        max_offset: 1.2                         # farthest lateral offset of a detour [m]
+        min_gap: 0.8                            # narrowest gap accepted beside the obstacle [m]
+        release_time: 1.5                       # the detour ends this long after the path is free [s]
+        goal_distance: 1.0                      # no detour within this distance of the goal [m]
       SpatioTemporalCritic:
-        enabled: true
-        prediction_horizon_s: 6.0
-        line_weight: 0.0
-        tracks_topic: /dynamic_tracks_state
-        use_footprint: true
-        collision_radius: 0.35
-        max_track_age_s: 1.0
-        publish_predictions: true
-        publish_robot_trajectory: false
+        enabled: true                           # turns this element on or off
+        prediction_horizon_s: 6.0               # how far ahead people are predicted [s]
+        tracks_topic: /dynamic_tracks_state     # tracks from tracker_3d
+        collision_radius: 0.35                  # base radius around a person [m]
+        max_track_age_s: 1.0                    # older track messages are ignored [s]
+        publish_predictions: true               # publishes the predicted positions for display
 
 local_costmap:
   local_costmap:
     ros__parameters:
-      use_sim_time: false
-      update_frequency: 5.0
-      publish_frequency: 2.0
-      global_frame: odom
-      robot_base_frame: base_footprint
-      rolling_window: true
-      width: 8
-      height: 8
-      resolution: 0.05
-      transform_tolerance: 0.5
-      footprint: "[[0.45, 0.33], [0.45, -0.33], [-0.45, -0.33], [-0.45, 0.33]]"
-      plugins: ["obstacle_layer", "semantic_layer", "inflation_layer"]
+      use_sim_time: false                       # true when replaying a bag with --clock
+      update_frequency: 5.0                     # update rate [Hz]
+      publish_frequency: 2.0                    # publication rate [Hz]
+      global_frame: odom                        # the local costmap moves with the odometry
+      robot_base_frame: base_footprint          # robot frame
+      rolling_window: true                      # the costmap follows the robot
+      width: 8                                  # size [m]
+      height: 8                                 # size [m]
+      resolution: 0.05                          # cell size [m]
+      transform_tolerance: 0.5                  # largest accepted age of a transform [s]
+      footprint: "[[0.45, 0.33], [0.45, -0.33], [-0.45, -0.33], [-0.45, 0.33]]" # robot outline, set by the launch file from a100_dimensions.yaml
+      plugins: ["obstacle_layer", "semantic_layer", "inflation_layer"] # layers, configured below
       obstacle_layer:
-        plugin: "nav2_costmap_2d::ObstacleLayer"
-        enabled: true
-        footprint_clearing_enabled: true
-        observation_sources: lidar
+        plugin: "nav2_costmap_2d::ObstacleLayer" # obstacles seen by the LiDAR
+        enabled: true                           # turns this element on or off
+        footprint_clearing_enabled: true        # clears the cells under the robot
+        observation_sources: lidar              # sensors, configured below
         lidar:
-          topic: /velodyne_points
-          data_type: "PointCloud2"
-          marking: true
-          clearing: true
-          min_obstacle_height: 0.25
-          max_obstacle_height: 1.0
-          obstacle_max_range: 6.0
-          obstacle_min_range: 0.0
-          raytrace_max_range: 7.0
-          raytrace_min_range: 0.0
-          expected_update_rate: 0.0
+          topic: /velodyne_points               # point cloud
+          data_type: "PointCloud2"              # message type
+          marking: true                         # marks obstacles
+          clearing: true                        # clears free space along the rays
+          min_obstacle_height: 0.25             # lower points are ignored [m]
+          max_obstacle_height: 1.0              # higher points are ignored [m]
+          obstacle_max_range: 6.0               # obstacles are marked up to this range [m]
+          obstacle_min_range: 0.0               # closer points are ignored [m]
+          raytrace_max_range: 7.0               # free space is cleared up to this range [m]
+          raytrace_min_range: 0.0               # free space is cleared from this range [m]
+          expected_update_rate: 0.0             # no check on the sensor rate
       semantic_layer:
-        plugin: "dynamic_costmap_layer/SemanticLayer"
-        enabled: true
-        map_topic: /ssrl_costmap
-        libera_impronta: false
-        margine_impronta: 0.05
-        libera_impronta_ostacoli: false
+        plugin: "dynamic_costmap_layer/SemanticLayer" # injects the fused map, see dynamic_costmap_layer
+        enabled: true                           # turns this element on or off
+        map_topic: /ssrl_costmap                # fused map
+        clear_footprint: false                  # set by the launch file: ignores lethal map cells under the robot footprint
+        footprint_margin: 0.05                  # margin around the footprint for clear_footprint [m]
       inflation_layer:
-        plugin: "nav2_costmap_2d::InflationLayer"
-        inflation_radius: 0.56
-        cost_scaling_factor: 10.0
-      always_send_full_costmap: true
+        plugin: "nav2_costmap_2d::InflationLayer" # cost decaying around lethal cells
+        inflation_radius: 0.56                  # distance over which the cost decays [m]
+        cost_scaling_factor: 10.0               # decay rate of the inflated cost
+      always_send_full_costmap: true            # publishes the whole costmap each time
 
 global_costmap:
   global_costmap:
     ros__parameters:
-      use_sim_time: false
-      update_frequency: 1.0
-      publish_frequency: 1.0
-      global_frame: map
-      robot_base_frame: base_footprint
-      transform_tolerance: 0.5
-      footprint: "[[0.45, 0.33], [0.45, -0.33], [-0.45, -0.33], [-0.45, 0.33]]"
-      resolution: 0.05
-      track_unknown_space: true
-      trinary_costmap: false
-      plugins: ["static_layer", "inflation_layer"]
+      use_sim_time: false                       # true when replaying a bag with --clock
+      update_frequency: 1.0                     # update rate [Hz]
+      publish_frequency: 1.0                    # publication rate [Hz]
+      global_frame: map                         # the global costmap is fixed on the map
+      robot_base_frame: base_footprint          # robot frame
+      transform_tolerance: 0.5                  # largest accepted age of a transform [s]
+      footprint: "[[0.45, 0.33], [0.45, -0.33], [-0.45, -0.33], [-0.45, 0.33]]" # robot outline, set by the launch file from a100_dimensions.yaml
+      resolution: 0.05                          # cell size [m]
+      track_unknown_space: true                 # keeps unknown cells as unknown
+      trinary_costmap: false                    # keeps the full 0-100 cost of the map
+      plugins: ["static_layer", "inflation_layer"] # layers, configured below
       static_layer:
-        plugin: "nav2_costmap_2d::StaticLayer"
-        map_topic: /ssrl_costmap
-        map_subscribe_transient_local: false
-        trinary_costmap: false
-        subscribe_to_updates: false
+        plugin: "nav2_costmap_2d::StaticLayer"  # layer that reads a map topic
+        map_topic: /ssrl_costmap                # fused map
+        map_subscribe_transient_local: false    # subscribes without transient local durability
+        trinary_costmap: false                  # keeps the full 0-100 cost of the map
+        subscribe_to_updates: false             # reads only full map messages
       inflation_layer:
-        plugin: "nav2_costmap_2d::InflationLayer"
-        inflation_radius: 0.56
-        cost_scaling_factor: 10.0
-      always_send_full_costmap: true
+        plugin: "nav2_costmap_2d::InflationLayer" # cost decaying around lethal cells
+        inflation_radius: 0.56                  # distance over which the cost decays [m]
+        cost_scaling_factor: 10.0               # decay rate of the inflated cost
+      always_send_full_costmap: true            # publishes the whole costmap each time
 
 planner_server:
   ros__parameters:
-    use_sim_time: false
-    expected_planner_frequency: 1.0
-    planner_plugins: ["GridBased"]
+    use_sim_time: false                         # true when replaying a bag with --clock
+    expected_planner_frequency: 1.0             # expected rate of the planner [Hz]
+    planner_plugins: ["GridBased"]              # planner name, configured below
     GridBased:
-      plugin: "nav2_smac_planner/SmacPlanner2D"
-      tolerance: 0.5
-      downsample_costmap: false
-      downsampling_factor: 1
-      allow_unknown: true
-      max_iterations: 1000000
-      max_on_approach_iterations: 1000
-      max_planning_time: 2.0
-      cost_travel_multiplier: 2.0
-      use_final_approach_orientation: false
+      plugin: "nav2_smac_planner/SmacPlanner2D" # 2D A* planner on the costmap
+      tolerance: 0.5                            # distance from the goal accepted if the goal is blocked [m]
+      downsample_costmap: false                 # plans at full resolution
+      downsampling_factor: 1                    # unused without downsampling
+      allow_unknown: true                       # plans through unknown cells
+      max_iterations: 1000000                   # search iterations before giving up
+      max_on_approach_iterations: 1000          # iterations allowed near the goal
+      max_planning_time: 2.0                    # longest planning time [s]
+      cost_travel_multiplier: 2.0               # weight of the cost against the path length
+      use_final_approach_orientation: false     # ignores the goal heading when planning
       smoother:
-        max_iterations: 1000
-        w_smooth: 0.3
-        w_data: 0.2
-        tolerance: 1.0e-10
+        max_iterations: 1000                    # search iterations before giving up
+        w_smooth: 0.3                           # smoothing weight
+        w_data: 0.2                             # weight that keeps the smoothed path close to the original
+        tolerance: 1.0e-10                      # distance from the goal accepted if the goal is blocked [m]
 
 smoother_server:
   ros__parameters:
-    use_sim_time: false
-    smoother_plugins: ["simple_smoother"]
+    use_sim_time: false                         # true when replaying a bag with --clock
+    smoother_plugins: ["simple_smoother"]       # smoother name, configured below
     simple_smoother:
-      plugin: "nav2_smoother::SimpleSmoother"
-      tolerance: 1.0e-10
-      max_its: 1000
-      do_refinement: true
+      plugin: "nav2_smoother::SimpleSmoother"   # path smoother
+      tolerance: 1.0e-10                        # distance from the goal accepted if the goal is blocked [m]
+      max_its: 1000                             # smoothing iterations
+      do_refinement: true                       # refines the smoothed path
 
 behavior_server:
   ros__parameters:
-    use_sim_time: false
-    costmap_topic: local_costmap/costmap_raw
-    footprint_topic: local_costmap/published_footprint
-    cycle_frequency: 10.0
-    behavior_plugins: ["spin", "backup", "drive_on_heading", "assisted_teleop", "wait"]
+    use_sim_time: false                         # true when replaying a bag with --clock
+    costmap_topic: local_costmap/costmap_raw    # costmap used by the behaviors
+    footprint_topic: local_costmap/published_footprint # footprint used by the behaviors
+    cycle_frequency: 10.0                       # rate of the behaviors [Hz]
+    behavior_plugins: ["spin", "backup", "drive_on_heading", "assisted_teleop", "wait"] # available behaviors, configured below
     spin:
-      plugin: "nav2_behaviors/Spin"
+      plugin: "nav2_behaviors/Spin"             # plugin type
     backup:
-      plugin: "nav2_behaviors/BackUp"
+      plugin: "nav2_behaviors/BackUp"           # plugin type
     drive_on_heading:
-      plugin: "nav2_behaviors/DriveOnHeading"
+      plugin: "nav2_behaviors/DriveOnHeading"   # plugin type
     wait:
-      plugin: "nav2_behaviors/Wait"
+      plugin: "nav2_behaviors/Wait"             # plugin type
     assisted_teleop:
-      plugin: "nav2_behaviors/AssistedTeleop"
-    global_frame: odom
-    robot_base_frame: base_footprint
-    transform_tolerance: 0.5
-    simulate_ahead_time: 2.0
-    max_rotational_vel: 0.20
-    min_rotational_vel: 0.10
-    rotational_acc_lim: 0.3
+      plugin: "nav2_behaviors/AssistedTeleop"   # plugin type
+    global_frame: odom                          # frame of the behaviors
+    robot_base_frame: base_footprint            # robot frame
+    transform_tolerance: 0.5                    # largest accepted age of a transform [s]
+    simulate_ahead_time: 2.0                    # time a behavior checks ahead for collisions [s]
+    max_rotational_vel: 0.20                    # highest rotation speed of the behaviors [rad/s]
+    min_rotational_vel: 0.10                    # lowest rotation speed of the behaviors [rad/s]
+    rotational_acc_lim: 0.3                     # rotation acceleration of the behaviors [rad/s^2]
 
 waypoint_follower:
   ros__parameters:
-    use_sim_time: false
-    loop_rate: 20
-    stop_on_failure: false
-    waypoint_task_executor_plugin: "wait_at_waypoint"
+    use_sim_time: false                         # true when replaying a bag with --clock
+    loop_rate: 20                               # rate of the waypoint follower [Hz]
+    stop_on_failure: false                      # continues to the next waypoint after a failure
+    waypoint_task_executor_plugin: "wait_at_waypoint" # task run at each waypoint
     wait_at_waypoint:
-      plugin: "nav2_waypoint_follower::WaitAtWaypoint"
-      enabled: true
-      waypoint_pause_duration: 200
+      plugin: "nav2_waypoint_follower::WaitAtWaypoint" # plugin type
+      enabled: true                             # turns this element on or off
+      waypoint_pause_duration: 200              # pause at each waypoint [ms]
 
 velocity_smoother:
   ros__parameters:
-    use_sim_time: false
-    smoothing_frequency: 20.0
-    scale_velocities: false
-    feedback: "OPEN_LOOP"
-    max_velocity: [0.30, 0.0, 0.25]
-    min_velocity: [-0.15, 0.0, -0.25]
-    max_accel: [0.4, 0.0, 0.3]
-    max_decel: [-0.6, 0.0, -0.3]
-    odom_topic: /odometry/local
-    odom_duration: 0.1
-    deadband_velocity: [0.0, 0.0, 0.0]
-    velocity_timeout: 1.0
+    use_sim_time: false                         # true when replaying a bag with --clock
+    smoothing_frequency: 20.0                   # output rate [Hz]
+    scale_velocities: false                     # does not rescale the axes together
+    feedback: "OPEN_LOOP"                       # no odometry feedback
+    max_velocity: [0.30, 0.0, 0.25]             # highest vx, vy, wz
+    min_velocity: [-0.15, 0.0, -0.25]           # lowest vx, vy, wz
+    max_accel: [0.4, 0.0, 0.3]                  # highest acceleration of vx, vy, wz
+    max_decel: [-0.6, 0.0, -0.3]                # highest deceleration of vx, vy, wz
+    odom_topic: /odometry/local                 # odometry (unused in open loop)
+    odom_duration: 0.1                          # odometry averaging window [s]
+    deadband_velocity: [0.0, 0.0, 0.0]          # no dead band
+    velocity_timeout: 1.0                       # stops when no command arrives for this long [s]
 
-collision_monitor:
+cmd_vel_bridge:
   ros__parameters:
-    use_sim_time: false
-    base_frame_id: "base_footprint"
-    odom_frame_id: "odom"
-    cmd_vel_in_topic: "cmd_vel"
-    cmd_vel_out_topic: "cmd_vel_safe"
-    transform_tolerance: 0.3
-    source_timeout: 1.0
-    base_shift_correction: true
-    stop_pub_timeout: 2.0
-    polygons: ["PolygonVicino"]
-    PolygonVicino:
-      type: "polygon"
-      action_type: "approach"
-      footprint_topic: "/impronta_sicurezza"
-      time_before_collision: 1.5
-      simulation_time_step: 0.1
-      max_points: 10
-      visualize: true
-      polygon_pub_topic: "polygon_vicino"
-      enabled: false
-    observation_sources: ["lidar"]
-    lidar:
-      type: "pointcloud"
-      topic: "/velodyne_points"
-      min_height: 0.20
-      max_height: 1.0
-      enabled: true
-
-cmd_vel_ponte:
-  ros__parameters:
-    use_sim_time: false
-    in_topic: cmd_vel_safe
-    out_topic: /a200_0000/cmd_vel
-    frame_id: base_link
-    max_lineare: 0.35
-    max_angolare: 0.35
-    rotazione_minima: 0.0
+    use_sim_time: false                         # true when replaying a bag with --clock
+    in_topic: cmd_vel                           # velocity commands from Nav2
+    out_topic: /a200_0000/cmd_vel               # commands for the Clearpath driver on the Raspberry Pi
+    frame_id: base_link                         # frame of the stamped commands
+    max_linear: 0.35                            # last limit on the forward speed [m/s]
+    max_angular: 0.35                           # last limit on the rotation speed [rad/s]
+    stop_pub_timeout: 2.0                       # after this long with zero commands, stops forwarding them, as the Nav2 collision monitor does [s]
 

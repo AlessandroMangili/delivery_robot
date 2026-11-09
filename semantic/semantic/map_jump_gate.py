@@ -73,7 +73,7 @@ def matrix_to_transform(M, stamp, parent, child):
 def lookup_via_odom(buf, target, odom, frame, stamp, timeout_s):
     import rclpy.time
     from rclpy.duration import Duration
-    when = rclpy.time.Time.from_msg(stamp) if stamp is not None else rclpy.time.Time()
+    when = rclpy.time.Time.from_msg(stamp)
     T_of = buf.lookup_transform(odom, frame, when, timeout=Duration(seconds=timeout_s))
     T_mo = buf.lookup_transform(target, odom, rclpy.time.Time())
     return matrix_to_transform(tf_matrix(T_mo) @ tf_matrix(T_of), T_of.header.stamp, target, frame)

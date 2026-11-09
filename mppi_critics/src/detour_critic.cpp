@@ -36,11 +36,6 @@ void DetourCritic::initialize()
   getParam(free_cost_, "free_cost", 128);
   getParam(max_offset_, "max_offset", 1.2f);
   getParam(min_gap_, "min_gap", 0.8f);
-  getParam(width_cap_, "width_cap", 2.0f);
-  getParam(path_half_length_, "path_half_length", 0.4f);
-  getParam(space_weight_, "space_weight", 1.0f);
-  getParam(deviation_weight_, "deviation_weight", 1.0f);
-  getParam(switch_margin_, "switch_margin", 0.5f);
   getParam(progress_distance_, "progress_distance", 0.15f);
   getParam(stuck_turn_deg_, "stuck_turn_deg", 20.0f);
   getParam(stuck_time_, "stuck_time", 1.2f);
@@ -57,21 +52,13 @@ void DetourCritic::initialize()
   getParam(side_memory_time_, "side_memory_time", 30.0f);
   getParam(side_memory_distance_, "side_memory_distance", 1.0f);
   getParam(score_alpha_, "score_alpha", 0.3f);
-  getParam(heading_weight_, "heading_weight", 0.5f);
-  getParam(reach_penalty_, "reach_penalty", 1.0f);
-  getParam(lateral_margin_, "lateral_margin", 0.15f);
-  getParam(waypoint_ahead_, "waypoint_ahead", 0.3f);
-  getParam(station_step_, "station_step", 0.2f);
   getParam(obstacle_max_length_, "obstacle_max_length", 2.0f);
   getParam(free_length_, "free_length", 0.3f);
-  getParam(bend_weight_, "bend_weight", 0.5f);
-  getParam(bend_lookahead_, "bend_lookahead", 1.5f);
   getParam(ignore_movers_, "ignore_moving_tracks", true);
   getParam(mover_speed_, "moving_speed", 0.3f);
   getParam(mover_radius_, "moving_radius", 0.7f);
   getParam(max_track_age_s_, "max_track_age_s", 1.0f);
   getParam(tracks_topic_, "tracks_topic", std::string("/dynamic_tracks_state"));
-  getParam(use_routes_, "use_routes", true);
   getParam(route_cost_weight_, "route_cost_weight", 10.0f);
   getParam(route_switch_ratio_, "route_switch_ratio", 0.8f);
   getParam(route_mean_cost_, "route_mean_cost", 128.0f);
@@ -83,19 +70,9 @@ void DetourCritic::initialize()
   getParam(reach_radius_, "reach_radius", 0.35f);
   getParam(passive_gain_, "passive_gain", 0.5f);
   getParam(pre_wp1_gain_, "pre_wp1_gain", 1.0f);
-  getParam(straight_segments_, "straight_segments", false);
-  getParam(segment_margin_, "segment_margin", 0.10f);
-  getParam(turn_margin_, "turn_margin", 0.05f);
-  getParam(align_exit_deg_, "align_exit_deg", -1.0f);
   getParam(passive_align_deg_, "passive_align_deg", 60.0f);
   getParam(pass_margin_, "pass_margin", 0.2f);
-  getParam(debug_, "debug_topics", false);
 
-  if (debug_) {
-    auto node = parent_.lock();
-    debug_pub_ = node->create_publisher<visualization_msgs::msg::MarkerArray>("detour_debug", 10);
-    frame_ = costmap_ros_->getGlobalFrameID();
-  }
   if (ignore_movers_) {
     auto node = parent_.lock();
     tracks_sub_ = node->create_subscription<dynamic_tracker_msgs::msg::TrackArray>(
@@ -106,10 +83,9 @@ void DetourCritic::initialize()
     logger_,
     "\033[38;5;208mDetourCritic: on when path blocked within %.1f m and (progress < %.2f m in %.1f s or "
     "clearance < %.2f m or reversing) | ramp in %.1f s out %.1f s | side hold %.1f s | "
-    "ignore moving tracks %s | sides from %s\033[0m",
+    "ignore moving tracks %s | sides from left/right routes with waypoints\033[0m",
     check_distance_, progress_distance_, stuck_time_, near_clearance_, ramp_time_, ramp_out_time_,
-    side_hold_time_, ignore_movers_ ? "yes" : "no",
-    use_routes_ ? "left/right routes with waypoints" : "lateral scan");
+    side_hold_time_, ignore_movers_ ? "yes" : "no");
 }
 
 void DetourCritic::tracksCallback(const dynamic_tracker_msgs::msg::TrackArray::SharedPtr msg)
@@ -225,7 +201,6 @@ void DetourCritic::score(CriticData & data)
         side_ = 0.0f;
         have_scores_ = false;
         have_wp_ = false;
-        have_exit_ = false;
         have_block_ = false;
         passive_ = false;
         wps_.clear();
@@ -258,7 +233,6 @@ void DetourCritic::score(CriticData & data)
     releasing_ = false;
     side_ = 0.0f;
     have_wp_ = false;
-    have_exit_ = false;
     have_scores_ = false;
     have_block_ = false;
     passive_ = false;
@@ -268,7 +242,7 @@ void DetourCritic::score(CriticData & data)
     return;
   }
 
-  if (active_ && use_routes_ && (is_blocked || (have_block_ && routeBlockedAhead(rx, ry)))) {
+  if (active_ && (is_blocked || (have_block_ && routeBlockedAhead(rx, ry)))) {
     size_t bi = blocked;
     double btx = tx, bty = ty;
     if (!is_blocked) {
@@ -373,110 +347,6 @@ void DetourCritic::score(CriticData & data)
       have_wp_ = false;
       wps_.clear();
     }
-    if (debug_ && !have_wp_) {
-      publishDebug(now, rx, ry, false, 0, true, 0.0, 0.0, level(now));
-    }
-  } else if (active_ && is_blocked && !use_routes_) {
-    const double nx = -ty;
-    const double ny = tx;
-    const double bx = path.x(blocked);
-    const double by = path.y(blocked);
-    const double length = obstacleLength(bx, by, tx, ty, nx, ny, movers);
-    float lo, lw, ro, rw;
-    const bool lok = sideGap(bx, by, tx, ty, nx, ny, 1.0, length, lo, lw);
-    const bool rok = sideGap(bx, by, tx, ty, nx, ny, -1.0, length, ro, rw);
-    const double along = 0.5 * length + waypoint_ahead_;
-    const double ax = bx + along * tx;
-    const double ay = by + along * ty;
-    const double l_lat = lo + std::min(lateral_margin_, 0.5f * lw);
-    const double r_lat = ro + std::min(lateral_margin_, 0.5f * rw);
-    const double lwx = ax + l_lat * nx, lwy = ay + l_lat * ny;
-    const double rwx = ax - r_lat * nx, rwy = ay - r_lat * ny;
-    const double facing = std::sin(yaw - std::atan2(ty, tx));
-    const double bend = pathBend(data, blocked, length, nx, ny);
-    float ls = space_weight_ * std::min(lw, width_cap_) - deviation_weight_ * lo +
-      heading_weight_ * static_cast<float>(facing) + bend_weight_ * static_cast<float>(bend);
-    float rs = space_weight_ * std::min(rw, width_cap_) - deviation_weight_ * ro -
-      heading_weight_ * static_cast<float>(facing) - bend_weight_ * static_cast<float>(bend);
-    if (lok && !segmentFree(rx, ry, lwx, lwy)) {
-      ls -= reach_penalty_;
-    }
-    if (rok && !segmentFree(rx, ry, rwx, rwy)) {
-      rs -= reach_penalty_;
-    }
-    if (!have_scores_) {
-      left_score_ = ls;
-      right_score_ = rs;
-      have_scores_ = true;
-    } else {
-      if (lok) {
-        left_score_ += score_alpha_ * (ls - left_score_);
-      }
-      if (rok) {
-        right_score_ += score_alpha_ * (rs - right_score_);
-      }
-    }
-
-    float chosen = side_;
-    const char * reason = "";
-    if (side_ == 0.0f) {
-      const bool remembered = memory_side_ != 0.0f && now - memory_time_ < side_memory_time_ &&
-        std::hypot(bx - memory_x_, by - memory_y_) < side_memory_distance_ &&
-        (memory_side_ > 0.0f ? lok : rok);
-      if (fresh && remembered) {
-        chosen = memory_side_;
-        reason = "remembered";
-      } else if (lok || rok) {
-        chosen = (lok && (!rok || left_score_ >= right_score_)) ? 1.0f : -1.0f;
-        reason = "best score";
-      }
-    } else {
-      const bool mine_ok = side_ > 0.0f ? lok : rok;
-      const bool other_ok = side_ > 0.0f ? rok : lok;
-      if (mine_ok) {
-        side_ok_time_ = now;
-      }
-      const float mine = side_ > 0.0f ? left_score_ : right_score_;
-      const float other = side_ > 0.0f ? right_score_ : left_score_;
-      if (other_ok && now - side_ok_time_ > side_lost_time_) {
-        chosen = -side_;
-        reason = "gap lost";
-      } else if (other_ok && now - side_time_ > side_hold_time_ && other > mine + switch_margin_) {
-        chosen = -side_;
-        reason = "clearly better";
-      }
-    }
-    if (chosen != side_) {
-      RCLCPP_INFO(
-        logger_,
-        "\033[38;5;208mDetourCritic side %s (%s) | obstacle %.2f m, path bend %+.2f | left offset %.2f width %.2f "
-        "score %.2f | right offset %.2f width %.2f score %.2f\033[0m",
-        chosen > 0.0f ? "left" : (chosen < 0.0f ? "right" : "none"), reason, length, bend, lo, lw,
-        left_score_, ro, rw, right_score_);
-      side_ = chosen;
-      side_time_ = now;
-      side_ok_time_ = now;
-      have_wp_ = false;
-    }
-    if (side_ != 0.0f) {
-      memory_x_ = bx;
-      memory_y_ = by;
-      const bool ok = side_ > 0.0f ? lok : rok;
-      if (ok) {
-        const double wx = side_ > 0.0f ? lwx : rwx;
-        const double wy = side_ > 0.0f ? lwy : rwy;
-        if (!have_wp_ || std::hypot(wx - wp_x_, wy - wp_y_) > refresh_distance_) {
-          wp_x_ = wx;
-          wp_y_ = wy;
-          have_wp_ = true;
-        }
-        const double lat = side_ > 0.0f ? l_lat : -r_lat;
-        const double robot_lat = (rx - bx) * nx + (ry - by) * ny;
-        exit_x_ = rx + (lat - robot_lat) * nx;
-        exit_y_ = ry + (lat - robot_lat) * ny;
-        have_exit_ = true;
-      }
-    }
   }
   if (!have_wp_) {
     return;
@@ -490,100 +360,79 @@ void DetourCritic::score(CriticData & data)
   float gx = 0.0f, gy = 0.0f;
   float gain = 1.0f;
   float align = align_deg_;
-  if (use_routes_) {
-    if (wps_.empty()) {
-      return;
+  if (wps_.empty()) {
+    return;
+  }
+  gain = pre_wp1_gain_;
+  const double rst = (rx - block_x_) * block_tx_ + (ry - block_y_) * block_ty_;
+  const double w1x = wps_[0][0];
+  const double w1y = wps_[0][1];
+  const double w1s = wps_[0][2];
+  const bool reached = rst >= w1s - reach_ahead_ ||
+    std::hypot(rx - w1x, ry - w1y) < reach_radius_;
+  if (reached && !passive_) {
+    RCLCPP_INFO(logger_, "\033[38;5;208mDetourCritic first waypoint reached: passive\033[0m");
+    passive_ = true;
+  }
+  size_t idx = wps_.size() - 1;
+  for (size_t k = 0; k < wps_.size(); ++k) {
+    if (wps_[k][2] > rst + reach_ahead_ &&
+      std::hypot(rx - wps_[k][0], ry - wps_[k][1]) > reach_radius_)
+    {
+      idx = k;
+      break;
     }
-    gain = pre_wp1_gain_;
-    const double rst = (rx - block_x_) * block_tx_ + (ry - block_y_) * block_ty_;
-    const double w1x = straight_segments_ ? wp1_x_ : wps_[0][0];
-    const double w1y = straight_segments_ ? wp1_y_ : wps_[0][1];
-    const double w1s = straight_segments_ ? wp1_st_ : wps_[0][2];
-    const bool reached = rst >= w1s - reach_ahead_ ||
-      std::hypot(rx - w1x, ry - w1y) < reach_radius_;
-    if (reached && !passive_) {
-      RCLCPP_INFO(logger_, "\033[38;5;208mDetourCritic first waypoint reached: passive\033[0m");
-      passive_ = true;
+  }
+  double tgx = wps_[idx][0], tgy = wps_[idx][1];
+  direct = segmentFree(rx, ry, tgx, tgy);
+  if (!direct && route_used_.size() > 1) {
+    size_t jr = 0, jt = 0;
+    double br = 1e18, bt = 1e18;
+    for (size_t j = 0; j < route_used_.size(); ++j) {
+      const double dr = std::hypot(route_used_[j].first - rx, route_used_[j].second - ry);
+      const double dt = std::hypot(route_used_[j].first - tgx, route_used_[j].second - tgy);
+      if (dr < br) {
+        br = dr;
+        jr = j;
+      }
+      if (dt < bt) {
+        bt = dt;
+        jt = j;
+      }
     }
-    size_t idx = wps_.size() - 1;
-    for (size_t k = 0; k < wps_.size(); ++k) {
-      if ((straight_segments_ || wps_[k][2] > rst + reach_ahead_) &&
-        std::hypot(rx - wps_[k][0], ry - wps_[k][1]) > reach_radius_)
-      {
-        idx = k;
+    size_t pick = std::min(jr + 4, route_used_.size() - 1);
+    for (size_t j = jt; j > jr; --j) {
+      if (segmentFree(rx, ry, route_used_[j].first, route_used_[j].second)) {
+        pick = j;
         break;
       }
     }
-    double tgx = wps_[idx][0], tgy = wps_[idx][1];
-    direct = segmentFree(rx, ry, tgx, tgy);
-    if (!direct && route_used_.size() > 1) {
-      size_t jr = 0, jt = 0;
-      double br = 1e18, bt = 1e18;
-      for (size_t j = 0; j < route_used_.size(); ++j) {
-        const double dr = std::hypot(route_used_[j].first - rx, route_used_[j].second - ry);
-        const double dt = std::hypot(route_used_[j].first - tgx, route_used_[j].second - tgy);
-        if (dr < br) {
-          br = dr;
-          jr = j;
-        }
-        if (dt < bt) {
-          bt = dt;
-          jt = j;
-        }
-      }
-      size_t pick = std::min(jr + 4, route_used_.size() - 1);
-      for (size_t j = jt; j > jr; --j) {
-        if (segmentFree(rx, ry, route_used_[j].first, route_used_[j].second)) {
-          pick = j;
-          break;
-        }
-      }
-      tgx = route_used_[pick].first;
-      tgy = route_used_[pick].second;
-    }
-    if (idx != last_target_ || direct != last_direct_) {
-      RCLCPP_INFO(
-        logger_, "\033[38;5;208mDetourCritic waypoint %zu/%zu (%s)%s\033[0m", idx + 1, wps_.size(),
-        passive_ ? "passive" : "active", direct ? "" : " via route point, line blocked");
-      last_target_ = idx;
-      last_direct_ = direct;
-    }
-    gx = static_cast<float>(tgx);
-    gy = static_cast<float>(tgy);
-    if (debug_) {
-      publishDebug(now, rx, ry, true, idx, direct, tgx, tgy, k);
-    }
-    if (passive_) {
-      gain = passive_gain_;
-      align = passive_align_deg_;
-      direct = true;
-    }
-  } else {
-    direct = !have_exit_ || segmentFree(rx, ry, wp_x_, wp_y_);
-    gx = static_cast<float>(direct ? wp_x_ : exit_x_);
-    gy = static_cast<float>(direct ? wp_y_ : exit_y_);
-    if (direct != last_direct_) {
-      RCLCPP_INFO(
-        logger_, "\033[38;5;208mDetourCritic target %s\033[0m", direct ? "waypoint" : "side step (line to waypoint blocked)");
-      last_direct_ = direct;
-    }
+    tgx = route_used_[pick].first;
+    tgy = route_used_[pick].second;
+  }
+  if (idx != last_target_ || direct != last_direct_) {
+    RCLCPP_INFO(
+      logger_, "\033[38;5;208mDetourCritic waypoint %zu/%zu (%s)%s\033[0m", idx + 1, wps_.size(),
+      passive_ ? "passive" : "active", direct ? "" : " via route point, line blocked");
+    last_target_ = idx;
+    last_direct_ = direct;
+  }
+  gx = static_cast<float>(tgx);
+  gy = static_cast<float>(tgy);
+  if (passive_) {
+    gain = passive_gain_;
+    align = passive_align_deg_;
+    direct = true;
   }
   const double bearing = std::atan2(gy - ry, gx - rx);
   const double err = std::atan2(std::sin(bearing - yaw), std::cos(bearing - yaw));
   const float dir = err > 0.0 ? 1.0f : -1.0f;
-  const float exit_deg = (!passive_ && align_exit_deg_ >= 0.0f) ? std::min(align_exit_deg_, align) : align;
   const double err_deg = std::fabs(err) * 180.0 / M_PI;
-  if (exit_deg >= align) {
-    turning_ = err_deg > align;
-  } else if (!turning_ && err_deg > align) {
-    turning_ = true;
-  } else if (turning_ && err_deg < exit_deg) {
-    turning_ = false;
-  }
+  turning_ = err_deg > align;
   const bool turn_first = !direct || turning_;
   const size_t window = std::min(
     steps, std::max<size_t>(1, static_cast<size_t>(std::lround(horizon_s_ / data.model_dt))));
-  const float tol = (turning_ ? exit_deg : align) * static_cast<float>(M_PI) / 180.0f;
+  const float tol = align * static_cast<float>(M_PI) / 180.0f;
   for (size_t i = 0; i < batch; ++i) {
     float dmin = 1e9f;
     for (size_t t = 0; t < steps; ++t) {
@@ -621,7 +470,6 @@ void DetourCritic::deactivate(const char * why, double now, double, double)
   active_ = false;
   side_ = 0.0f;
   have_wp_ = false;
-  have_exit_ = false;
   have_scores_ = false;
   have_block_ = false;
   passive_ = false;
@@ -754,88 +602,6 @@ double DetourCritic::obstacleLength(
   }
   return last;
 }
-
-bool DetourCritic::sideGap(
-  double bx, double by, double tx, double ty, double nx, double ny, double side, double length,
-  float & offset, float & width) const
-{
-  offset = 0.0f;
-  width = 1e9f;
-  const int stations = std::max(1, static_cast<int>(std::ceil(length / station_step_)) + 1);
-  for (int k = 0; k < stations; ++k) {
-    const double s = std::min(length, k * static_cast<double>(station_step_));
-    float o, w;
-    findGap(bx + s * tx, by + s * ty, tx, ty, nx, ny, side, o, w);
-    if (o < 0.0f) {
-      offset = -1.0f;
-      width = 0.0f;
-      return false;
-    }
-    offset = std::max(offset, o);
-    width = std::min(width, w);
-  }
-  return true;
-}
-
-double DetourCritic::pathBend(CriticData & data, size_t blocked, double length, double nx, double ny) const
-{
-  const auto & path = data.path;
-  const size_t n = path.x.shape(0);
-  const double target = length + bend_lookahead_;
-  double s = 0.0;
-  size_t i = blocked;
-  while (i + 1 < n && s < target) {
-    s += std::hypot(path.x(i + 1) - path.x(i), path.y(i + 1) - path.y(i));
-    ++i;
-  }
-  if (s < 1e-3) {
-    return 0.0;
-  }
-  const double lat = (path.x(i) - path.x(blocked)) * nx + (path.y(i) - path.y(blocked)) * ny;
-  return std::clamp(lat / s, -1.0, 1.0);
-}
-
-void DetourCritic::findGap(
-  double bx, double by, double tx, double ty, double nx, double ny, double side,
-  float & offset, float & width) const
-{
-  offset = -1.0f;
-  width = 0.0f;
-  const double step = 0.05;
-  double start = -1.0;
-  for (double d = 0.0; d <= max_offset_ + width_cap_; d += step) {
-    bool free = true;
-    for (double u : {-static_cast<double>(path_half_length_), 0.0, static_cast<double>(path_half_length_)}) {
-      const int c = cost(bx + u * tx + side * d * nx, by + u * ty + side * d * ny);
-      if (c >= free_cost_) {
-        free = false;
-        break;
-      }
-    }
-    if (free) {
-      if (start < 0.0) {
-        if (d > max_offset_) {
-          break;
-        }
-        start = d;
-      }
-      width = static_cast<float>(d - start + step);
-    } else if (start >= 0.0) {
-      if (width >= min_gap_) {
-        offset = static_cast<float>(start);
-        return;
-      }
-      start = -1.0;
-      width = 0.0f;
-    }
-  }
-  if (start >= 0.0 && width >= min_gap_) {
-    offset = static_cast<float>(start);
-  } else {
-    width = 0.0f;
-  }
-}
-
 
 bool DetourCritic::route(
   double rx, double ry, double gx, double gy, double bx, double by, double tx, double ty,
@@ -982,52 +748,6 @@ void DetourCritic::routeSides(
   route_okr_ = route(rx, ry, gx, gy, bx, by, tx, ty, nx, ny, length, -1.0, route_r_, route_cr_, route_mr_);
 }
 
-bool DetourCritic::corridorFree(
-  double x0, double y0, double x1, double y1, double half_width, double skip,
-  int threshold) const
-{
-  const double len = std::hypot(x1 - x0, y1 - y0);
-  if (len < 1e-6) {
-    return true;
-  }
-  const double tx = (x1 - x0) / len, ty = (y1 - y0) / len;
-  const double step = costmap_->getResolution();
-  const int n = std::max(1, static_cast<int>(std::ceil(len / step)));
-  const int m = static_cast<int>(std::ceil(half_width / step));
-  for (int k = 0; k <= n; ++k) {
-    const double f = len * k / n;
-    if (f < skip) {
-      continue;
-    }
-    for (int w = -m; w <= m; ++w) {
-      const double o = std::max(-half_width, std::min(half_width, w * step));
-      const int c = cost(x0 + f * tx - o * ty, y0 + f * ty + o * tx);
-      if (c >= threshold && c != nav2_costmap_2d::NO_INFORMATION) {
-        return false;
-      }
-    }
-  }
-  return true;
-}
-
-bool DetourCritic::turnFree(double x, double y) const
-{
-  const double rad = std::hypot(half_length_, half_width_) + turn_margin_;
-  const double step = costmap_->getResolution();
-  const int m = static_cast<int>(std::ceil(rad / step));
-  for (int i = -m; i <= m; ++i) {
-    for (int j = -m; j <= m; ++j) {
-      if (std::hypot(i * step, j * step) > rad) {
-        continue;
-      }
-      if (cost(x + i * step, y + j * step) == nav2_costmap_2d::LETHAL_OBSTACLE) {
-        return false;
-      }
-    }
-  }
-  return true;
-}
-
 void DetourCritic::buildWaypoints(const std::vector<std::pair<double, double>> & r)
 {
   wps_.clear();
@@ -1044,48 +764,6 @@ void DetourCritic::buildWaypoints(const std::vector<std::pair<double, double>> &
       j1 = j;
       break;
     }
-  }
-  if (straight_segments_) {
-    wp1_x_ = r[j1].first;
-    wp1_y_ = r[j1].second;
-    wp1_st_ = station(r[j1]);
-    const double hw = half_width_ + segment_margin_;
-    size_t a = 0;
-    while (a + 1 < r.size()) {
-      const double skip = a == 0 ? half_length_ : 0.0;
-      size_t best = a + 1;
-      for (size_t j = a + 2; j < r.size(); ++j) {
-        if (!corridorFree(
-            r[a].first, r[a].second, r[j].first, r[j].second, hw, skip,
-            nav2_costmap_2d::LETHAL_OBSTACLE))
-        {
-          break;
-        }
-        best = j;
-      }
-      if (best == a + 1) {
-        for (size_t j = a + 2; j < r.size(); ++j) {
-          if (!corridorFree(
-              r[a].first, r[a].second, r[j].first, r[j].second, 0.0, skip,
-              nav2_costmap_2d::INSCRIBED_INFLATED_OBSTACLE))
-          {
-            break;
-          }
-          best = j;
-        }
-      }
-      if (best + 1 < r.size()) {
-        for (size_t j = best; j > a + 1; --j) {
-          if (turnFree(r[j].first, r[j].second)) {
-            best = j;
-            break;
-          }
-        }
-      }
-      wps_.push_back({r[best].first, r[best].second, station(r[best])});
-      a = best;
-    }
-    return;
   }
   wps_.push_back({r[j1].first, r[j1].second, station(r[j1])});
   double acc = 0.0;
@@ -1143,77 +821,9 @@ bool DetourCritic::routeBlockedAhead(double rx, double ry) const
   return false;
 }
 
-void DetourCritic::publishDebug(
-  double now, double rx, double ry, bool target, size_t idx, bool direct, double tgx, double tgy,
-  float k)
-{
-  if (!debug_pub_ || now - debug_time_ < 0.2) {
-    return;
-  }
-  debug_time_ = now;
-  visualization_msgs::msg::MarkerArray arr;
-  const auto stamp = parent_.lock()->now();
-  const auto line = [&](const std::string & ns, const std::vector<std::pair<double, double>> & r,
-      float red, float green, float blue) {
-      visualization_msgs::msg::Marker m;
-      m.header.frame_id = frame_;
-      m.header.stamp = stamp;
-      m.ns = ns;
-      m.id = 0;
-      m.type = visualization_msgs::msg::Marker::LINE_STRIP;
-      m.action = visualization_msgs::msg::Marker::ADD;
-      m.scale.x = 0.04;
-      m.color.r = red;
-      m.color.g = green;
-      m.color.b = blue;
-      m.color.a = 1.0;
-      m.pose.orientation.w = 1.0;
-      for (const auto & p : r) {
-        geometry_msgs::msg::Point q;
-        q.x = p.first;
-        q.y = p.second;
-        m.points.push_back(q);
-      }
-      arr.markers.push_back(m);
-    };
-  line("route_left", route_okl_ ? route_l_ : std::vector<std::pair<double, double>>{}, 0.1f, 0.4f, 1.0f);
-  line("route_right", route_okr_ ? route_r_ : std::vector<std::pair<double, double>>{}, 1.0f, 0.5f, 0.0f);
-  std::vector<std::pair<double, double>> w;
-  for (const auto & p : wps_) {
-    w.push_back({p[0], p[1]});
-  }
-  line("waypoints", w, 0.0f, 0.7f, 0.0f);
-  visualization_msgs::msg::Marker s;
-  s.header.frame_id = frame_;
-  s.header.stamp = stamp;
-  s.ns = "state";
-  s.id = 0;
-  s.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
-  s.action = visualization_msgs::msg::Marker::ADD;
-  s.pose.position.x = rx;
-  s.pose.position.y = ry + 1.0;
-  s.pose.orientation.w = 1.0;
-  s.scale.z = 0.2;
-  s.color.a = 1.0;
-  s.color.r = s.color.g = s.color.b = 1.0f;
-  char buf[512];
-  std::snprintf(
-    buf, sizeof(buf),
-    "{\"side\": %.0f, \"passive\": %d, \"target\": %d, \"idx\": %zu, \"n\": %zu, \"direct\": %d, "
-    "\"tx\": %.3f, \"ty\": %.3f, \"level\": %.2f, \"bx\": %.3f, \"by\": %.3f, \"btx\": %.3f, "
-    "\"bty\": %.3f, \"len\": %.2f, \"okl\": %d, \"okr\": %d, \"cl\": %.1f, \"cr\": %.1f, "
-    "\"ml\": %.0f, \"mr\": %.0f}",
-    side_, passive_ ? 1 : 0, target ? 1 : 0, idx, wps_.size(), direct ? 1 : 0, tgx, tgy, k,
-    block_x_, block_y_, block_tx_, block_ty_, block_len_, route_okl_ ? 1 : 0, route_okr_ ? 1 : 0,
-    route_okl_ ? route_cl_ : -1.0, route_okr_ ? route_cr_ : -1.0, route_ml_, route_mr_);
-  s.text = buf;
-  arr.markers.push_back(s);
-  debug_pub_->publish(arr);
-}
-
 bool DetourCritic::passedBlock(double rx, double ry) const
 {
-  if (!use_routes_ || !have_block_) {
+  if (!have_block_) {
     return true;
   }
   const double rst = (rx - block_x_) * block_tx_ + (ry - block_y_) * block_ty_;

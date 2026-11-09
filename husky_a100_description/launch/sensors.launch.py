@@ -11,7 +11,7 @@ from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 C920_DEVICE = '/dev/v4l/by-id/usb-046d_HD_Pro_Webcam_C920_979BF06F-video-index0'
-C920_CALIBRATION = os.path.expanduser('~/.ros/camera_info/camera2.yaml')
+C920_CALIBRATION = os.path.expanduser('~/.ros/camera_info/camera_calibration.yaml')
 
 
 def is_running(cmdline_pattern):
@@ -26,7 +26,7 @@ def lidar_actions(context):
     if not is_true(context, 'lidar'):
         return []
     if is_running('^[^ ]*/lib/velodyne_driver/velodyne_driver_node( |$)'):
-        return [LogInfo(msg='[sensors] driver Velodyne gia\' in esecuzione: non lo rilancio')]
+        return [LogInfo(msg='[sensors] Velodyne driver already running: not started again')]
     driver_params = os.path.join(get_package_share_directory('velodyne_driver'),
                                  'config', 'VLP16-velodyne_driver_node-params.yaml')
     convert_share = get_package_share_directory('velodyne_pointcloud')
@@ -50,9 +50,9 @@ def camera_actions(context):
     if not is_true(context, 'c920'):
         return []
     if is_running('^[^ ]*/v4l2_camera_node .*__ns:=/c920( |$)'):
-        return [LogInfo(msg='[sensors] camera /c920 gia\' in esecuzione: non la rilancio')]
+        return [LogInfo(msg='[sensors] camera /c920 already running: not started again')]
     if not os.path.exists(C920_DEVICE):
-        return [LogInfo(msg=f'[sensors] camera /c920 non collegata ({C920_DEVICE})')]
+        return [LogInfo(msg=f'[sensors] camera /c920 not connected ({C920_DEVICE})')]
     device = os.path.realpath(C920_DEVICE)
     camera = Node(package='v4l2_camera', executable='v4l2_camera_node', namespace='c920', output='screen',
                   parameters=[{'video_device': device, 'pixel_format': 'YUYV', 'output_encoding': 'rgb8',
@@ -68,15 +68,15 @@ def imu_actions(context):
     if not is_true(context, 'imu'):
         return []
     if is_running('^[^ ]*/lib/mavros/mavros_node( |$)'):
-        return [LogInfo(msg='[sensors] MAVROS gia\' in esecuzione: non la rilancio')]
+        return [LogInfo(msg='[sensors] MAVROS already running: not started again')]
     try:
         mavros_share = get_package_share_directory('mavros')
     except PackageNotFoundError:
-        return [LogInfo(msg='[sensors] MAVROS non trovata: source ~/mavros_ws/install/setup.bash')]
+        return [LogInfo(msg='[sensors] MAVROS not found: install ros-humble-mavros')]
     fcu_url = LaunchConfiguration('fcu_url').perform(context)
     port = fcu_url.split(':')[0]
     if port.startswith('/dev/') and not os.path.exists(port):
-        return [LogInfo(msg=f'[sensors] Pixhawk non collegata ({port}): MAVROS non avviata')]
+        return [LogInfo(msg=f'[sensors] Pixhawk not connected ({port}): MAVROS not started')]
 
     rate = LaunchConfiguration('stream_rate').perform(context)
     request = ['ros2', 'service', 'call', '/mavros/set_stream_rate', 'mavros_msgs/srv/StreamRate',
@@ -91,19 +91,19 @@ def imu_actions(context):
         }.items())
     return [mavros] + [
         TimerAction(period=t, actions=[
-            LogInfo(msg=f'[sensors] richiesta stream a {rate} Hz alla Pixhawk'),
+            LogInfo(msg=f'[sensors] asking the Pixhawk for a {rate} Hz stream'),
             ExecuteProcess(cmd=request, output='log')])
         for t in (8.0, 20.0)]
 
 
 def generate_launch_description():
     return LaunchDescription([
-        DeclareLaunchArgument('lidar', default_value='true', description='driver VLP-16'),
-        DeclareLaunchArgument('c920', default_value='true', description='camera C920 (v4l2_camera)'),
-        DeclareLaunchArgument('imu', default_value='true', description='MAVROS: IMU, GPS, bussola della Pixhawk'),
+        DeclareLaunchArgument('lidar', default_value='true', description='starts the VLP-16 driver'),
+        DeclareLaunchArgument('c920', default_value='true', description='starts the C920 camera driver'),
+        DeclareLaunchArgument('imu', default_value='true', description='starts MAVROS for the Pixhawk IMU and GPS'),
         DeclareLaunchArgument('fcu_url', default_value='/dev/ttyACM0:57600',
-                              description='porta della Pixhawk (USB: il baud e\' ignorato)'),
-        DeclareLaunchArgument('stream_rate', default_value='50', description='Hz richiesti alla Pixhawk'),
+                              description='Pixhawk port; over USB the baud rate is ignored'),
+        DeclareLaunchArgument('stream_rate', default_value='50', description='IMU rate asked to the Pixhawk [Hz]'),
         OpaqueFunction(function=lidar_actions),
         OpaqueFunction(function=camera_actions),
         OpaqueFunction(function=imu_actions),

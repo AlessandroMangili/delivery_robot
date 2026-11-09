@@ -20,7 +20,7 @@ setup(
     zip_safe=True,
     maintainer='alessandro',
     maintainer_email='alessandro.mangili1@studenti.unimi.it',
-    description='TODO: Package description',
+    description='People detection from camera and LiDAR, and tracking',
     license='TODO: License declaration',
     extras_require={
         'test': [
@@ -30,7 +30,7 @@ setup(
     entry_points={
         'console_scripts': [
             'pointcloud_detector = dynamic_layer.pointcloud_detector:main',
-            'lidar3d_tracker = dynamic_layer.lidar3d_tracker:main',
+            'tracker_3d = dynamic_layer.tracker_3d:main',
             'camera_detector = dynamic_layer.camera_detector:main',
         ],
     },

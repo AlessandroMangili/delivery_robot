@@ -353,7 +353,7 @@ Visualization Manager:
       Value: true
     - Class: rviz_default_plugins/MarkerArray
       Enabled: true
-      Name: tracce
+      Name: tracks
       Namespaces:
         {}
       Topic:

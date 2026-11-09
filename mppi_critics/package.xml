@@ -3,12 +3,8 @@
 <package format="3">
   <name>mppi_critics</name>
   <version>0.2.0</version>
-  <description>
-    Additional critics for the Nav2 MPPI controller: spatio-temporal pedestrian avoidance (time to collision and
-    closeness against tracked pedestrians), detour around blocking obstacles, rotate-first, rotation dead zone,
-    side choice, clearance and heading.
-  </description>
-  <maintainer email="alessandro@example.com">alessandro</maintainer>
+  <description>Additional critics for the Nav2 MPPI controller: anticipation of moving people (closeness and time to collision) and detour around obstacles that block the path.</description>
+  <maintainer email="alessandro.mangili1@studenti.unimi.it">alessandro</maintainer>
   <license>MIT</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>

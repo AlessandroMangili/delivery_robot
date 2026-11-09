@@ -3,7 +3,7 @@
 <package format="3">
   <name>semantic</name>
   <version>0.0.0</version>
-  <description>TODO: Package description</description>
+  <description>Semantic and elevation maps of the ground, fused into one costmap</description>
   <maintainer email="alessandro.mangili1@studenti.unimi.it">alessandro</maintainer>
   <license>MIT</license>
 

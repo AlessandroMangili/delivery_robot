@@ -22,17 +22,13 @@ import tf2_ros
 from tf2_ros import TransformException
 
 
-# ---------------------------------------------------------------------------
-# Funzioni geometriche pure (testabili in isolamento, senza ROS)
-# ---------------------------------------------------------------------------
 def cloud_to_xyz(msg):
-    """PointCloud2 -> ndarray (N,3) float64. Robusto tra versioni di sensor_msgs_py."""
-    campi = {f.name: f for f in msg.fields}
-    if (all(k in campi and campi[k].datatype == 7 for k in 'xyz') and not msg.is_bigendian
+    fields = {f.name: f for f in msg.fields}
+    if (all(k in fields and fields[k].datatype == 7 for k in 'xyz') and not msg.is_bigendian
             and msg.point_step > 0 and len(msg.data) >= msg.point_step):
         n = msg.width * msg.height
         raw = np.frombuffer(msg.data, dtype=np.uint8, count=n * msg.point_step).reshape(n, msg.point_step)
-        xyz = np.stack([raw[:, campi[k].offset:campi[k].offset + 4].copy().view(np.float32).ravel()
+        xyz = np.stack([raw[:, fields[k].offset:fields[k].offset + 4].copy().view(np.float32).ravel()
                         for k in 'xyz'], axis=1).astype(np.float64)
         return xyz[np.isfinite(xyz).all(axis=1)]
     try:
@@ -94,8 +90,6 @@ def fit_ground_plane(xyz, dist_thresh, max_iter, normal_z_min, seed=0, sample=30
 
 
 def euclidean_cluster(xyz, tol, min_pts, max_pts):
-    """Estrazione cluster euclidei (algoritmo PCL) via cKDTree.
-    Ritorna lista di array di indici in xyz."""
     from scipy.spatial import cKDTree
     from scipy.sparse import coo_matrix
     from scipy.sparse.csgraph import connected_components
@@ -207,7 +201,7 @@ def load_pcd_xyz(path):
             off += nb
         xyz = np.stack([col[k].astype(np.float64) for k in 'xyz'], axis=1)
     else:
-        raise ValueError(f'formato PCD non gestito: {mode}')
+        raise ValueError(f'unsupported PCD format: {mode}')
     return xyz[np.isfinite(xyz).all(axis=1)]
 
 
@@ -222,9 +216,6 @@ def quat_to_rot(x, y, z, w):
         [s * (x * z - y * w), s * (y * z + x * w), 1 - s * (x * x + y * y)]])
 
 
-# ---------------------------------------------------------------------------
-# Nodo ROS2
-# ---------------------------------------------------------------------------
 def camera_rescue(rejected, accepted_c, boxes, K, wh, R_cv, t_cv, min_pts,
                   min_height, max_height, max_footprint, depth_band):
     if len(boxes) == 0 or len(rejected) == 0:
@@ -273,39 +264,31 @@ class PointCloudDetector(Node):
     def __init__(self):
         super().__init__('pointcloud_detector')
 
-        # --- parametri (dichiarati, poi letti) ---
         p = self.declare_parameter
         p('input_topic', '/velodyne_points')
         p('detections_topic', '/detections')
         p('markers_topic', '/detections/markers')
 
-        # crop
-        p('min_range', 0.30)        # scarta il corpo del robot / punti troppo vicini
-        p('max_range', 12.0)        # oltre, il LiDAR è rado/rumoroso
-        p('crop_min_z', -1.0)       # box in z, frame sensore
+        p('min_range', 0.30)
+        p('max_range', 12.0)
+        p('crop_min_z', -1.0)
         p('crop_max_z', 2.5)
 
-        # downsample
         p('voxel_size', 0.05)
 
-        # ground removal (RANSAC)
         p('ground_dist_thresh', 0.08)
         p('ground_max_iter', 60)
-        p('ground_normal_z_min', 0.85)   # |n_z| min per considerare il piano orizzontale
+        p('ground_normal_z_min', 0.85)
         p('remove_below_ground', True)
         p('ground_fit_range', 0.0)
 
-        # clustering
         p('cluster_tolerance', 0.30)
         p('cluster_min_points', 6)
         p('cluster_max_points', 800)
 
-        # merge in world-space: unisce cluster vicini (cura la frammentazione:
-        # le gambe di una persona spezzate in 2 cluster tornano una detection sola)
         p('merge_enabled', True)
-        p('merge_dist', 0.45)       # < distanza tra 2 persone, > tra le gambe di una
+        p('merge_dist', 0.45)
 
-        # filtro geometrico "persona" (permissivo: la camera rifinisce a valle in Step 3)
         p('min_height', 0.20)
         p('max_height', 2.20)
         p('max_footprint', 1.00)
@@ -329,10 +312,9 @@ class PointCloudDetector(Node):
         p('rescue_depth_band', 0.40)
         p('rescue_max_footprint', 1.0)
 
-        # diagnostica / debug
-        p('debug_show_rejected', True)   # mostra in rosso i cluster scartati (per tarare)
+        p('debug_show_rejected', True)
         p('diag_period_frames', 20)
-        p('coda_nuvole', 5)
+        p('cloud_queue_depth', 5)
 
         g = lambda k: self.get_parameter(k).value
         self.input_topic = g('input_topic')
@@ -358,7 +340,7 @@ class PointCloudDetector(Node):
         self.max_footprint = float(g('max_footprint'))
         self.debug_show_rejected = bool(g('debug_show_rejected'))
         self.diag_period_frames = int(g('diag_period_frames'))
-        self.coda_nuvole = max(1, int(g('coda_nuvole')))
+        self.cloud_queue_depth = max(1, int(g('cloud_queue_depth')))
 
         self.map_tree = None
         self.map_filter_dist = float(g('map_filter_dist'))
@@ -378,13 +360,14 @@ class PointCloudDetector(Node):
             from scipy.spatial import cKDTree
             from ament_index_python.packages import get_package_share_directory
             path = g('map_pcd') or os.path.join(
-                get_package_share_directory('localization'), 'maps', 'mappa.pcd')
+                get_package_share_directory('localization'), 'maps', 'map.pcd')
             xyz_map = load_pcd_xyz(path)
             self.map_tree = cKDTree(xyz_map)
             self.get_logger().info(
-                f"filtro mappa: {len(xyz_map)} punti da {path}, scarto i cluster con almeno il "
-                f"{100 * self.map_filter_frac:.0f}% dei punti entro {self.map_filter_dist:.2f} m "
-                f"dalla mappa (frame {self.map_frame}) oltre {self.map_filter_min_dist:.1f} m dal LiDAR")
+                f"map filter: {len(xyz_map)} points from {path}, clusters with at least "
+                f"{100 * self.map_filter_frac:.0f}% of their points within {self.map_filter_dist:.2f} m "
+                f"of the map (frame {self.map_frame}) farther than {self.map_filter_min_dist:.1f} m "
+                f"from the LiDAR are dropped")
 
         self.camera_frame = g('camera_frame')
         self.rescue_classes = set(str(c) for c in g('rescue_classes'))
@@ -405,11 +388,10 @@ class PointCloudDetector(Node):
             self.sub_info = self.create_subscription(
                 CameraInfo, g('camera_info_topic'), self.on_caminfo, 1)
             self.get_logger().info(
-                f"recupero con la camera: cluster scartati dentro i riquadri "
-                f"{sorted(self.rescue_classes)} di {g('yolo_topic')}")
+                f"camera rescue: rejected clusters inside the "
+                f"{sorted(self.rescue_classes)} boxes of {g('yolo_topic')} are kept")
 
-        # QoS Best Effort: i cloud dal bridge sono Best Effort
-        qos = QoSProfile(depth=self.coda_nuvole,
+        qos = QoSProfile(depth=self.cloud_queue_depth,
                          reliability=ReliabilityPolicy.BEST_EFFORT,
                          history=HistoryPolicy.KEEP_LAST,
                          durability=DurabilityPolicy.VOLATILE)
@@ -421,10 +403,8 @@ class PointCloudDetector(Node):
 
         self._frame = 0
         self.get_logger().info(
-            f"pointcloud_detector avviato: input={self.input_topic} "
-            f"-> {self.detections_topic}")
+            f"Point cloud detector ready: {self.input_topic} -> {self.detections_topic}")
 
-    # -----------------------------------------------------------------------
     def on_cloud(self, msg):
         self._frame += 1
         xyz = cloud_to_xyz(msg)
@@ -432,7 +412,6 @@ class PointCloudDetector(Node):
         if n_in == 0:
             return
 
-        # crop radiale + box in z
         r = np.hypot(xyz[:, 0], xyz[:, 1])
         m = ((r >= self.min_range) & (r <= self.max_range) &
              (xyz[:, 2] >= self.crop_min_z) & (xyz[:, 2] <= self.crop_max_z))
@@ -441,41 +420,36 @@ class PointCloudDetector(Node):
         if n_crop == 0:
             return
 
-        # downsample
         xyz = voxel_downsample(xyz, self.voxel_size)
 
-        # rimozione piano di terra
         plane, ground = fit_ground_plane(
             xyz, self.ground_dist_thresh, self.ground_max_iter,
             self.ground_normal_z_min, fit_range=self.ground_fit_range)
         if plane is None:
             self.get_logger().warn(
-                "RANSAC: nessun piano di terra trovato, uso tutti i punti")
+                "RANSAC found no ground plane: all points are kept")
             nonground = xyz
         else:
             n, d = plane
             keep = ~ground
             if self.remove_below_ground:
                 signed = xyz.dot(n) + d
-                if n[2] < 0:               # orienta la normale verso l'alto
+                if n[2] < 0:
                     signed = -signed
                 keep = keep & (signed > -self.ground_dist_thresh)
             nonground = xyz[keep]
         n_ng = len(nonground)
 
-        # clustering
         clusters = euclidean_cluster(
             nonground, self.cluster_tolerance,
             self.cluster_min_points, self.cluster_max_points)
 
-        # merge in world-space: riunisce cluster frammentati (gambe di una persona)
         cluster_pts = [nonground[idx] for idx in clusters]
         n_pre = len(cluster_pts)
         if self.merge_enabled and len(cluster_pts) > 1:
             cluster_pts = merge_clusters(cluster_pts, self.merge_dist)
 
-        # feature per cluster + filtro geometrico
-        results = []   # (centroid(3,), size(3,), ok, rescued)
+        results = []
         rejected = []
         tf_map = self._map_tf(msg.header) if self.map_tree is not None else None
         n_map = 0
@@ -505,11 +479,11 @@ class PointCloudDetector(Node):
         if self.diag_period_frames > 0 and self._frame % self.diag_period_frames == 0:
             self.get_logger().info(
                 f"[det] in={n_in} crop={n_crop} nonground={n_ng} "
-                f"cluster={n_pre}->{len(cluster_pts)} persone={n_ok}"
-                + (f" scartati_mappa={self._n_map_removed} senza_tf={self._n_map_no_tf}"
+                f"clusters={n_pre}->{len(cluster_pts)} people={n_ok}"
+                + (f" map_removed={self._n_map_removed} no_tf={self._n_map_no_tf}"
                    if self.map_tree is not None else '')
-                + (f" salvati_camera={self._n_rescued} senza_riquadri={self._n_rescue_no_box} "
-                   f"senza_tf_camera={self._n_rescue_no_tf}" if self.camera_rescue else ''))
+                + (f" camera_rescued={self._n_rescued} no_boxes={self._n_rescue_no_box} "
+                   f"no_camera_tf={self._n_rescue_no_tf}" if self.camera_rescue else ''))
 
     def _map_tf(self, header):
         stamp = rclpy.time.Time.from_msg(header.stamp)
@@ -525,8 +499,8 @@ class PointCloudDetector(Node):
                 self.odom_frame, header.frame_id, stamp, timeout=Duration(seconds=self.map_tf_timeout)))
         except TransformException as e:
             self._n_map_no_tf += 1
-            self.get_logger().warn(f'TF {self.map_frame} <- {header.frame_id} non disponibile, '
-                                   f'cluster non filtrati ({e})', throttle_duration_sec=5.0)
+            self.get_logger().warn(f'Transform {self.map_frame} <- {header.frame_id} not available, '
+                                   f'clusters not filtered ({e})', throttle_duration_sec=5.0)
             return None
         return R1 @ R2, R1 @ t2 + t1
 
@@ -565,8 +539,8 @@ class PointCloudDetector(Node):
                 self.odom_frame, timeout=Duration(seconds=0.05))
         except TransformException as e:
             self._n_rescue_no_tf += 1
-            self.get_logger().warn(f'TF {self.camera_frame} <- {header.frame_id} non disponibile, '
-                                   f'nessun recupero ({e})', throttle_duration_sec=5.0)
+            self.get_logger().warn(f'Transform {self.camera_frame} <- {header.frame_id} not available, '
+                                   f'no camera rescue ({e})', throttle_duration_sec=5.0)
             return []
         R, t = self._rt(tf)
         return camera_rescue(rejected, accepted_c, boxes, self.K, self.cam_wh, R, t,
@@ -584,9 +558,7 @@ class PointCloudDetector(Node):
         d, _ = self.map_tree.query(pts @ R.T + t, distance_upper_bound=self.map_filter_dist)
         return float(np.isfinite(d).mean())
 
-    # -----------------------------------------------------------------------
     def publish(self, header, results):
-        # PoseArray dei centroidi accettati (interfaccia verso Step 2)
         pa = PoseArray()
         pa.header = header
         for c, _size, ok, _rescued in results:
@@ -600,7 +572,6 @@ class PointCloudDetector(Node):
             pa.poses.append(ps)
         self.pub_det.publish(pa)
 
-        # MarkerArray per RViz (verde = persona, rosso = scartato)
         ma = MarkerArray()
         clear = Marker()
         clear.header = header

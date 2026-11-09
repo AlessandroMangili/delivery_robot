@@ -35,12 +35,10 @@ class SemanticOverlayNode(Node):
                          history=HistoryPolicy.KEEP_LAST, depth=1)
         rgb = message_filters.Subscriber(self, Image, rgb_topic, qos_profile=qos)
         seg = message_filters.Subscriber(self, Image, seg_topic, qos_profile=qos)
-        # i due topic possono avere rate/stamp leggermente diversi -> slop generoso
         self.sync = message_filters.ApproximateTimeSynchronizer(
             [rgb, seg], queue_size=5, slop=0.2)
         self.sync.registerCallback(self.cb)
 
-        # pubblica RELIABLE: RViz lo vede senza cambiare nulla
         self.pub = self.create_publisher(Image, out_topic, 10)
         self.get_logger().info(f'Overlay RGB+seg -> {out_topic}')
 
@@ -51,7 +49,7 @@ class SemanticOverlayNode(Node):
             seg = cv2.resize(seg, (rgb.shape[1], rgb.shape[0]),
                              interpolation=cv2.INTER_NEAREST)
         color = CITYSCAPES_PALETTE[np.clip(seg, 0, 18)]
-        color[seg > 18] = 0                      # sfondo/ignora -> nero
+        color[seg > 18] = 0
         out = (rgb * 0.55 + color * 0.45).astype(np.uint8)
         msg = self.bridge.cv2_to_imgmsg(out, 'rgb8')
         msg.header = rgb_msg.header

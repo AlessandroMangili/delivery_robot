@@ -34,27 +34,27 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument(
             'model', default_value=os.path.join(pkg, 'urdf', 'husky_a100.urdf.xacro'),
-            description='File xacro del robot'),
+            description='Robot xacro file'),
         DeclareLaunchArgument(
             'dimensions_file', default_value=os.path.join(pkg, 'config', 'a100_dimensions.yaml'),
-            description='File YAML con le dimensioni'),
+            description='YAML file with the robot dimensions'),
         DeclareLaunchArgument(
             'urdf_extras', default_value=os.path.join(pkg, 'urdf', 'sensors.urdf.xacro'),
-            description='File xacro aggiuntivo con i sensori (vuoto = nessuno)'),
+            description='Extra xacro file with the sensors (empty for none)'),
         DeclareLaunchArgument(
             'rviz_config', default_value=os.path.join(pkg, 'rviz', 'a100.rviz'),
-            description='Configurazione di RViz2'),
+            description='RViz configuration'),
         DeclareLaunchArgument(
             'replay', default_value='false',
-            description='true = rivedere una registrazione (ros2 bag play --clock): tempo simulato, niente sensori'),
+            description='true when replaying a bag with ros2 bag play --clock: simulated time, no drivers'),
         DeclareLaunchArgument(
             'sensors', default_value='true',
-            description='true = avvia anche i driver di LiDAR, camera e Pixhawk (sensors.launch.py)'),
+            description='true also starts the LiDAR, camera and Pixhawk drivers (sensors.launch.py)'),
 
         Node(package='robot_state_publisher', executable='robot_state_publisher',
              parameters=[{'robot_description': robot_description, 'use_sim_time': sim_time}],
              remappings=[('joint_states', '/a200_0000/platform/joint_states')], output='screen'),
-        DeclareLaunchArgument('rviz', default_value='true'),
+        DeclareLaunchArgument('rviz', default_value='true', description='true opens RViz'),
         Node(package='rviz2', executable='rviz2', arguments=['-d', rviz_config], output='screen',
              parameters=[{'use_sim_time': sim_time}], condition=IfCondition(rviz)),
         IncludeLaunchDescription(

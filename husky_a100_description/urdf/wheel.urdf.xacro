@@ -1,22 +1,5 @@
 <?xml version="1.0"?>
-<!--
-  Macro ruota per l'Husky A100.
-  Derivata da husky/husky_description (branch noetic-devel, wheel.urdf.xacro, macro husky_wheel),
-  Copyright (c) 2015, Clearpath Robotics, Inc. Licenza BSD (vedi meshes/LICENSE.husky_description).
-
-  Differenze rispetto all'originale A200:
-    - dimensioni e massa dal file YAML (non valori fissi);
-    - mesh della ruota A200 scalata in modo non uniforme alle dimensioni A100;
-    - nomi dei joint "<prefix>_wheel_joint", uguali a quelli pubblicati dallo stack Clearpath
-      del container (front_left_wheel_joint, ...), così le ruote girano anche in visualizzazione;
-    - parametro opzionale "mimic": le ruote centrali copiano quelle anteriori
-      (le tre ruote di ogni lato sono accoppiate meccanicamente, manuale §2.3);
-    - rimossa la <transmission> ROS 1.
-
-  Formule:
-    scala mesh:  s_r = 2 r / D_mesh   (radiale, assi X e Z)    s_w = w / W_mesh   (assiale, asse Y)
-    inerzia cilindro con asse Y:  Ixx = Izz = m (3 r^2 + w^2) / 12,   Iyy = m r^2 / 2
--->
+<!-- Derived from husky/husky_description (noetic-devel), Copyright (c) 2015 Clearpath Robotics, Inc., BSD license: see meshes/LICENSE.husky_description -->
 <robot xmlns:xacro="http://ros.org/wiki/xacro">
 
   <xacro:macro name="a100_wheel" params="prefix x y radius width mass mesh_file mesh_d mesh_w mimic:=''">

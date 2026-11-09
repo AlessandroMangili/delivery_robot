@@ -1,47 +1,27 @@
 #!/usr/bin/env python3
 
+import array
+import collections
+import math
 import os
 import signal
 import time
-import array
-import numpy as np
+
 import cv2
-
+import numpy as np
 import rclpy
-from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
-from rclpy.duration import Duration
-
-from sensor_msgs.msg import PointCloud2, Image, CameraInfo, Imu
-from rclpy.qos import qos_profile_sensor_data
-from sensor_msgs_py import point_cloud2 as pc2
-from nav_msgs.msg import OccupancyGrid, Odometry
-from geometry_msgs.msg import PoseWithCovarianceStamped, Point
-from visualization_msgs.msg import Marker
-import collections
-import math
-from cv_bridge import CvBridge
 import tf2_ros
+from geometry_msgs.msg import Point
+from nav_msgs.msg import OccupancyGrid
+from rclpy.duration import Duration
+from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
+from sensor_msgs.msg import Imu, PointCloud2
+from sensor_msgs_py import point_cloud2 as pc2
 from std_srvs.srv import Trigger
+from visualization_msgs.msg import Marker
 
 from semantic.map_jump_gate import MapJumpGate, lookup_via_odom
-
-
-DEFAULT_DYNAMIC = [11, 12, 13, 14, 15, 16, 17, 18]   # classi dinamiche Cityscapes
-PARAMETRI_MODO = {
-    'write_outside_camera': (True, False),
-    'use_segmentation': (False, True),
-    'confirm_s': (2.5, 0.0),
-    'process_var_rate': (0.0, 0.005),
-    'tilt_compensation': (True, False),
-    'raycast_every_n': (10, 5),
-    'raycast_stride': (4, 2),
-}
-
-
-# ============================================================================
-#  FUNZIONI PURE (testabili in isolamento, senza ROS)
-# ============================================================================
 
 
 def ray_samples(origin, ends, step, start, end_margin, max_range):
@@ -72,7 +52,6 @@ def samples_to_cells(P, gox, goy, res, gnx, gny):
     return gj * gnx + gi, inside
 
 def transform_to_matrix(t):
-    """geometry_msgs TransformStamped -> 4x4 omogenea."""
     q = t.transform.rotation
     tr = t.transform.translation
     x, y, z, w = q.x, q.y, q.z, q.w
@@ -86,36 +65,11 @@ def transform_to_matrix(t):
 
 
 def transform_points(pts, M):
-    """Applica la 4x4 M a punti Nx3 (p' = R p + t). Ritorna Nx3."""
     pts = np.asarray(pts, dtype=np.float64)
     return pts @ M[:3, :3].T + M[:3, 3][None, :]
 
 
-def project_to_pixel(pts_cam, K, width, height):
-    """Punti nel frame OTTICO camera -> (u,v) interi + maschera valida
-    (davanti alla camera E dentro l'immagine). Identica al nodo semantico:
-    e' cosi' che ogni punto sa su quale pixel (e quindi classe) cade."""
-    pts_cam = np.asarray(pts_cam, dtype=np.float64)
-    x, y, z = pts_cam[:, 0], pts_cam[:, 1], pts_cam[:, 2]
-    fx, fy = K[0, 0], K[1, 1]
-    cx, cy = K[0, 2], K[1, 2]
-    in_front = z > 1e-6
-    zz = np.where(in_front, z, 1.0)
-    u = np.round(fx * (x / zz) + cx).astype(np.int64)
-    v = np.round(fy * (y / zz) + cy).astype(np.int64)
-    valid = in_front & (u >= 0) & (u < width) & (v >= 0) & (v < height)
-    u = np.where(valid, u, 0)
-    v = np.where(valid, v, 0)
-    return u, v, valid
-
-
 def sensor_variance(ranges, var_base, var_dist):
-    """Modello di rumore di MISURA dell'altezza per punto [m^2].
-    Cresce con la distanza: un punto lontano ha altezza meno affidabile
-    (raggio radente, footprint del beam piu' grande). Modello quadratico:
-        var_meas = var_base + var_dist * range^2
-    range = distanza 3D dal sensore [m]. Fedele allo spirito del modello
-    sensoriale di Fankhauser (var che sale con la distanza)."""
     ranges = np.asarray(ranges, dtype=np.float64)
     return var_base + var_dist * ranges * ranges
 
@@ -134,8 +88,6 @@ def high_group_mask(inv, ncells, heights, var_pts, k_sigma):
 
 
 def kalman_fuse(h, var, h_meas, var_meas):
-    """Aggiornamento di misura (fusione di due gaussiane). In-place safe:
-    ritorna (h_new, var_new). Applicare solo su celle gia' inizializzate."""
     K = var / (var + var_meas)
     h_new = h + K * (h_meas - h)
     var_new = (1.0 - K) * var
@@ -143,14 +95,6 @@ def kalman_fuse(h, var, h_meas, var_meas):
 
 
 def median_smooth_masked(h, known, ksize=3):
-    """Smoothing MEDIANO di h sulle celle note, PRIMA di derivare slope/rough/step.
-    Perche' serve: slope/roughness/step sono DERIVATE spaziali di h, e le derivate
-    AMPLIFICANO il rumore. Anche 1-2 cm di rumore residuo in h (normale dopo la
-    fusione, e rimescolato ad ogni ri-osservazione per il micro-offset di posa)
-    diventano roughness/step visibili -> aloni grigi sul terreno piatto.
-    Il filtro MEDIANO e' edge-preserving: uccide il rumore isolato cella-a-cella
-    ma PRESERVA i salti reali (un cordolo resta un cordolo). Le celle ignote sono
-    riempite temporaneamente con la media locale nota, per non creare falsi bordi."""
     if ksize < 3:
         return h
     h = h.astype(np.float32)
@@ -164,29 +108,21 @@ def median_smooth_masked(h, known, ksize=3):
 
 
 def derive_slope_roughness(h, known, res, rough_win, min_known):
-    """Da campo altezza h (float32) + maschera known -> (slope, roughness, valid).
-    slope     = |grad h| [m/m] (adimensionale; tan della pendenza).
-    roughness = std locale di h in finestra rough_win x rough_win [m].
-    valid     = celle con abbastanza vicini noti da fidarsi.
-    Le celle ignote vengono riempite con la media locale nota (box filter mascherato)
-    per non introdurre gradienti finti ai bordi dell'ignoto."""
     k = int(rough_win)
     knownf = known.astype(np.float32)
     h0 = np.where(known, h, 0.0).astype(np.float32)
 
-    # box filter NON normalizzato = somme locali; conto dei noti nella finestra
     cnt = cv2.boxFilter(knownf, -1, (k, k), normalize=False, borderType=cv2.BORDER_REPLICATE)
     s = cv2.boxFilter(h0, -1, (k, k), normalize=False, borderType=cv2.BORDER_REPLICATE)
     ss = cv2.boxFilter(h0 * h0, -1, (k, k), normalize=False, borderType=cv2.BORDER_REPLICATE)
 
     valid = cnt >= float(min_known)
     safe_cnt = np.where(cnt > 0, cnt, 1.0)
-    mean = s / safe_cnt                       # altezza locale liscia (definita dove cnt>0)
+    mean = s / safe_cnt
     var_local = np.maximum(ss / safe_cnt - mean * mean, 0.0)
     roughness = np.sqrt(var_local)
 
-    # slope come gradiente spaziale della MEDIA liscia (robusto all'ignoto)
-    gy, gx = np.gradient(mean, res)           # d/dy, d/dx
+    gy, gx = np.gradient(mean, res)
     slope = np.sqrt(gx * gx + gy * gy).astype(np.float32)
 
     slope = np.where(valid, slope, 0.0).astype(np.float32)
@@ -197,18 +133,6 @@ def derive_slope_roughness(h, known, res, rough_win, min_known):
 def elevation_cost(slope, roughness, step, valid,
                    slope_crit, rough_crit, step_crit,
                    slope_dead=0.0, rough_dead=0.0, step_dead=0.0, step_lethal=0.0, step_for_lethal=None):
-    """f(M): combina i pericoli geometrici in un costo 0..100.
-      - scoscese : slope alto        -> cost_slope
-      - accidentato: roughness alta  -> cost_rough
-      - buche/gradini: step alto     -> cost_step
-    Ognuno satura al proprio critico; si combina con MAX (il pericolo peggiore
-    domina) e si satura a 100. Celle non valide -> -1 (ignoto: il robot le esplora,
-    coerente con include_unknown_as_edge:false della confinement)."""
-    # DEAD-ZONE: sotto la soglia di rumore il contributo e' ESATTAMENTE 0 (non
-    # 'poco'). La normalizzazione lineare da 0 dava un filo di costo anche a 1.5cm
-    # di roughness (rumore) -> grigio. Con la dead-zone, sotto *_dead = 0 netto;
-    # sopra sale linearmente da *_dead a *_crit. Uccide il residuo che sopravvive
-    # al mediano, senza toccare i pericoli veri (che stanno sopra *_dead).
     def _band(x, dead, crit):
         return np.clip((x - dead) / max(crit - dead, 1e-6), 0.0, 1.0)
     cs = _band(slope, slope_dead, slope_crit)
@@ -291,12 +215,11 @@ def derive_cost(h, known, res, median_ksize, rough_win, rough_min_known,
 
 class ElevationGrid:
     def __init__(self, res, size_m, grow_margin, var_init, var_max, process_var_rate,
-                 maha_thresh, min_var_for_valid, hybrid_k_sigma, cost_params,
+                 min_var_for_valid, hybrid_k_sigma, cost_params,
                  ray_start, ray_end_margin, ray_max_range, ray_sigma_k, ray_protect_s,
-                 confirm_s=0.0, change_min_m=0.08, change_k=2.0, change_max_m=0.25, max_gap_s=3.0,
-                 min_hits=3, tilt_comp=False, tilt_min_points=300, tilt_max_offset_m=0.10,
-                 tilt_max_deg=1.5, tilt_cell_var=0.0025, tilt_min_obs=5,
-                 free_space_filter=False, free_margin_m=0.10, tilt_reject_deg=0.0):
+                 confirm_s=2.5, change_min_m=0.08, change_k=2.0, change_max_m=0.25, max_gap_s=3.0,
+                 min_hits=3, tilt_min_points=300, tilt_cell_var=0.0025, tilt_min_obs=5,
+                 tilt_reject_deg=0.0):
         self.res = res
         self.confirm_s = float(confirm_s)
         self.change_min_m = float(change_min_m)
@@ -304,24 +227,15 @@ class ElevationGrid:
         self.change_max_m = float(change_max_m)
         self.max_gap_s = float(max_gap_s)
         self.min_hits = int(min_hits)
-        self.tilt_comp = bool(tilt_comp)
         self.tilt_min_points = int(tilt_min_points)
-        self.tilt_max_offset_m = float(tilt_max_offset_m)
-        self.tilt_max = math.tan(math.radians(float(tilt_max_deg)))
         self.tilt_cell_var = float(tilt_cell_var)
         self.tilt_min_obs = int(tilt_min_obs)
-        self.tilt_stats = [0, 0]
         self.tilt_reject = math.tan(math.radians(float(tilt_reject_deg))) if tilt_reject_deg > 0.0 else 0.0
         self.reject_stats = [0, 0, 0]
-        self.free_space_filter = bool(free_space_filter)
-        self.free_margin_m = float(free_margin_m)
-        self.n_dynamic = 0
-        self.last_tilt = (0.0, 0.0, 0.0)
         self.grow_margin = grow_margin
         self.var_init = var_init
         self.var_max = var_max
         self.rate = process_var_rate
-        self.maha_thresh = maha_thresh
         self.min_var_for_valid = min_var_for_valid
         self.hybrid_k_sigma = hybrid_k_sigma
         self.cost_params = dict(cost_params)
@@ -350,7 +264,6 @@ class ElevationGrid:
         self.tc0 = np.full((n, n), -np.inf, np.float64)
         self.tcl = np.full((n, n), -np.inf, np.float64)
         self.hits = np.zeros((n, n), np.uint16)
-        self.free_floor = np.full((n, n), np.inf, np.float32)
         self.t_ref = None
         self.last_pred = None
         self.tv_pending = False
@@ -432,7 +345,6 @@ class ElevationGrid:
         self.tc0 = grown(self.tc0, -np.inf)
         self.tcl = grown(self.tcl, -np.inf)
         self.hits = grown(self.hits, 0)
-        self.free_floor = grown(self.free_floor, np.inf)
         if self.dirty is not None:
             d = self.dirty
             self.dirty = [d[0] + pl, d[1] + pl, d[2] + pb, d[3] + pb]
@@ -449,8 +361,6 @@ class ElevationGrid:
             return 0
         flat, inside = samples_to_cells(P, self.gox, self.goy, self.res, self.gnx, self.gny)
         flat = flat[inside]
-        if self.free_space_filter:
-            np.minimum.at(self.free_floor.reshape(-1), flat, P[inside, 2])
         Hs = self.h.reshape(-1)
         Ns = self.n.reshape(-1)
         Vmin = self.var_min.reshape(-1)
@@ -470,33 +380,6 @@ class ElevationGrid:
         self.hits.reshape(-1)[cells] = 0
         self.mark_dirty(cells)
         return cells.size
-
-    def tilt_correction(self, flat, X, Y, Z, var_pts, base_xy):
-        self.tilt_stats[0] += 1
-        Hs = self.h.reshape(-1)
-        conf = ((self.n.reshape(-1)[flat] >= self.tilt_min_obs)
-                & (self.var_min.reshape(-1)[flat] < self.tilt_cell_var))
-        r = Z - Hs[flat]
-        sel = conf & (np.abs(r) < 0.3)
-        if sel.sum() < self.tilt_min_points:
-            return Z
-        dx = X[sel] - base_xy[0]
-        dy = Y[sel] - base_xy[1]
-        w = 1.0 / np.maximum(var_pts[sel], 1e-6)
-        rs = r[sel]
-        coef = None
-        keep = np.ones(dx.size, bool)
-        for _ in range(2):
-            coef = weighted_plane_fit(dx[keep], dy[keep], rs[keep], w[keep])
-            keep = np.abs(rs - (coef[0] + coef[1] * dx + coef[2] * dy)) < 0.08
-            if keep.sum() < self.tilt_min_points:
-                return Z
-        a = float(np.clip(coef[0], -self.tilt_max_offset_m, self.tilt_max_offset_m))
-        b = float(np.clip(coef[1], -self.tilt_max, self.tilt_max))
-        c = float(np.clip(coef[2], -self.tilt_max, self.tilt_max))
-        self.tilt_stats[1] += 1
-        self.last_tilt = (a, b, c)
-        return Z - (a + b * (X - base_xy[0]) + c * (Y - base_xy[1]))
 
     def scan_tilt(self, flat, X, Y, Z, var_pts, base_xy):
         Hs = self.h.reshape(-1)
@@ -529,8 +412,6 @@ class ElevationGrid:
         flat = gj[inside] * self.gnx + gi[inside]
         Z = Z[inside]
         var_pts = var_pts[inside]
-        if self.tilt_comp and base_xy is not None:
-            Z = self.tilt_correction(flat, X[inside], Y[inside], Z, var_pts, base_xy)
         if self.tilt_reject > 0.0 and base_xy is not None:
             self.reject_stats[0] += 1
             sl = self.scan_tilt(flat, X[inside], Y[inside], Z, var_pts, base_xy)
@@ -538,15 +419,6 @@ class ElevationGrid:
                 self.reject_stats[1] += 1
                 if sl > self.tilt_reject:
                     self.reject_stats[2] += 1
-                    return 0
-        if self.free_space_filter:
-            static = Z <= self.free_floor.reshape(-1)[flat] + self.free_margin_m
-            self.n_dynamic += int(static.size - np.count_nonzero(static))
-            if not np.all(static):
-                flat = flat[static]
-                Z = Z[static]
-                var_pts = var_pts[static]
-                if flat.size == 0:
                     return 0
         self.last_pred = t_rel
         cells, inv = np.unique(flat, return_inverse=True)
@@ -556,42 +428,7 @@ class ElevationGrid:
             Z = Z[high]
             var_pts = var_pts[high]
         h_meas, var_meas = aggregate_cells(inv, cells.size, Z, var_pts)
-        if self.confirm_s > 0.0:
-            return self.integrate_confirmed(cells, h_meas, var_meas, t_rel)
-
-        Hs = self.h.reshape(-1)
-        Vs = self.var.reshape(-1)
-        Ns = self.n.reshape(-1)
-        Vmin = self.var_min.reshape(-1)
-        first = Ns[cells] == 0
-        prev = ~first
-        h_old = Hs[cells].astype(np.float64)
-        v_now = self.var_now(cells, t_rel)
-        denom = np.sqrt(v_now + var_meas)
-        maha = np.zeros(cells.size)
-        good = prev & (denom > 0)
-        maha[good] = np.abs(h_meas[good] - h_old[good]) / denom[good]
-        fuse = prev & ~(maha > self.maha_thresh)
-
-        h_new = h_old.copy()
-        v_new = v_now.copy()
-        h_new[first] = h_meas[first]
-        v_new[first] = var_meas[first]
-        if np.any(fuse):
-            h_new[fuse], v_new[fuse] = kalman_fuse(h_old[fuse], v_now[fuse],
-                                                   h_meas[fuse], var_meas[fuse])
-        touched = first | fuse
-        tc = cells[touched]
-        Hs[tc] = h_new[touched]
-        Vs[tc] = v_new[touched]
-        self.tv.reshape(-1)[tc] = t_rel
-        Vmin[tc] = np.minimum(Vmin[tc], Vs[tc])
-        self.t_upd.reshape(-1)[tc] = t_rel
-        Ns[cells[first]] = 1
-        fc = cells[fuse]
-        Ns[fc] = np.minimum(Ns[fc].astype(np.int64) + 1, 65535)
-        self.mark_dirty(tc)
-        return int(tc.size)
+        return self.integrate_confirmed(cells, h_meas, var_meas, t_rel)
 
     def integrate_confirmed(self, cells, h_meas, var_meas, t_rel):
         Hs = self.h.reshape(-1)
@@ -690,7 +527,6 @@ class ElevationGrid:
         self.tc0 = np.full(self.h.shape, -np.inf, np.float64)
         self.tcl = np.full(self.h.shape, -np.inf, np.float64)
         self.hits = np.zeros(self.h.shape, np.uint16)
-        self.free_floor = np.full(self.h.shape, np.inf, np.float32)
         self.cost = self.full_cost()
         self.dirty = None
 
@@ -701,223 +537,145 @@ class ElevationGrid:
                     gnx=self.gnx, gny=self.gny, res=self.res, gox=self.gox, goy=self.goy)
 
 
-# ============================================================================
-#  NODO
-# ============================================================================
-
 class ElevationCostmapNode(Node):
     def __init__(self):
         super().__init__('elevation_costmap_node')
 
-        # --- Frames ---
         self.declare_parameter('target_frame', 'map')
+        self.declare_parameter('odom_frame', 'odom')
         self.declare_parameter('base_frame', 'base_footprint')
         self.declare_parameter('lidar_frame', 'base_scan')
+        self.declare_parameter('lidar_topic', '/scan/points')
+        self.declare_parameter('attitude_imu_topic', '')
+        self.declare_parameter('out_topic', '/traversability_cost')
+        self.declare_parameter('map_name', '')
+        self.declare_parameter('update', True)
+        self.declare_parameter('publish_period_s', 1.0)
+        self.declare_parameter('frozen_publish_period_s', 5.0)
+        self.declare_parameter('tf_timeout_s', 0.1)
 
-        # --- Grid ---
         self.declare_parameter('resolution', 0.05)
         self.declare_parameter('initial_size_m', 10.0)
         self.declare_parameter('grow_margin_m', 3.0)
 
-        # --- LiDAR ---
-        self.declare_parameter('lidar_topic', '/scan/points')
-        self.declare_parameter('lidar_max_age_s', 0.3)
         self.declare_parameter('lidar_min_range', 0.4)
         self.declare_parameter('map_write_max_range', 5.0)
-        # banda di quota (rel. al robot) per accettare un punto come TERRENO:
-        self.declare_parameter('elev_min_rel', -1.0)   # sotto = buco molto profondo (scartato)
-        self.declare_parameter('elev_max_rel', 1.0)    # sopra = overhead (chiome/insegne)
+        self.declare_parameter('elev_min_rel', -1.0)
+        self.declare_parameter('elev_max_rel', 1.0)
 
-        # --- Camera + segmentazione (co-registrazione col layer semantico) ---
-        # I punti LiDAR sono proiettati nel FOV camera e SCARTATI se cadono su un
-        # pixel di classe DINAMICA: cosi' i pedoni non lasciano scie nella mappa
-        # di elevazione. Copertura = FOV camera (non piu' 360 LiDAR).
-        self.declare_parameter('camera_optical_frame', 'camera_rgb_optical_frame')
-        self.declare_parameter('seg_topic', '/semantic/segmentation')
-        self.declare_parameter('camera_info_topic', '/camera/camera_info')
-        self.declare_parameter('seg_max_age_s', 0.3)
-        self.declare_parameter('dynamic_classes', DEFAULT_DYNAMIC)
-        self.declare_parameter('dyn_dilate_px', 6)     # alone attorno ai dinamici (bordi seg.)
+        self.declare_parameter('sensor_var_base', 0.0009)
+        self.declare_parameter('sensor_var_dist', 0.0004)
+        self.declare_parameter('var_init', 1.0)
+        self.declare_parameter('var_max', 1.0)
+        self.declare_parameter('process_var_rate', 0.0)
+        self.declare_parameter('min_var_for_valid', 0.25)
+        self.declare_parameter('hybrid_k_sigma', 2.5)
+        self.declare_parameter('confirm_s', 2.5)
+        self.declare_parameter('change_min_m', 0.08)
+        self.declare_parameter('change_k', 2.0)
+        self.declare_parameter('change_max_m', 0.25)
+        self.declare_parameter('max_gap_s', 3.0)
+        self.declare_parameter('min_hits', 3)
 
-        # --- Modello di misura Kalman ---
-        self.declare_parameter('sensor_var_base', 0.0009)   # (0.03 m)^2 rumore base
-        self.declare_parameter('sensor_var_dist', 0.0004)   # coeff. * range^2
-        self.declare_parameter('var_init', 1.0)             # varianza cella mai vista
-        self.declare_parameter('var_max', 1.0)              # tetto varianza (inflazione)
-        self.declare_parameter('maha_thresh', 3.0)          # gate outlier (rumore residuo)
-        self.declare_parameter('min_var_for_valid', 0.25)   # var oltre = cella non affidabile
-
-        # --- Derivazione costo (f(M)) ---
-        self.declare_parameter('rough_win', 5)              # finestra roughness [celle]
-        self.declare_parameter('rough_min_known', 6)        # min vicini noti per validita'
-        self.declare_parameter('slope_crit', 0.35)          # [m/m] ~19 deg -> costo max
-        self.declare_parameter('rough_crit', 0.06)          # [m] std locale -> costo max
-        self.declare_parameter('step_crit', 0.06)           # [m] salto -> costo max (cordolo)
-        # smoothing mediano di h prima di derivare (5 = pulisce bene il rumore 1cm;
-        # 3 = piu' leggero; 0/1 = off). Con ksize 5 la soglia step affidabile e' ~5cm.
         self.declare_parameter('median_ksize', 5)
-        # dead-zone / soglia minima: sotto = rumore (0), sopra sale verso *_crit
-        self.declare_parameter('slope_dead', 0.08)          # [m/m] sotto = piatto
-        self.declare_parameter('rough_dead', 0.025)         # [m] sotto = liscio (rumore)
-        self.declare_parameter('step_dead', 0.02)           # [m] step_min: sotto = rumore
+        self.declare_parameter('rough_win', 5)
+        self.declare_parameter('rough_min_known', 6)
+        self.declare_parameter('slope_crit', 0.35)
+        self.declare_parameter('rough_crit', 0.06)
+        self.declare_parameter('step_crit', 0.06)
+        self.declare_parameter('slope_dead', 0.08)
+        self.declare_parameter('rough_dead', 0.025)
+        self.declare_parameter('step_dead', 0.02)
         self.declare_parameter('step_drop_radius_m', 0.0)
         self.declare_parameter('step_rise_radius_m', 0.0)
         self.declare_parameter('step_slope_allow', 0.05)
         self.declare_parameter('step_lethal_m', 0.0)
         self.declare_parameter('step_lethal_radius_m', 0.0)
 
-        self.declare_parameter('raycast_enable', True)
+        self.declare_parameter('raycast_every_n', 10)
+        self.declare_parameter('raycast_stride', 4)
         self.declare_parameter('raycast_end_margin', 0.25)
         self.declare_parameter('raycast_sigma_k', 3.0)
         self.declare_parameter('raycast_protect_s', 1.0)
-        self.declare_parameter('attitude_topic', '')
-        self.declare_parameter('attitude_fallback_topic', '')
+
         self.declare_parameter('attitude_max_age_s', 0.3)
-        self.declare_parameter('attitude_imu_topic', '')
         self.declare_parameter('imu_roll_offset_deg', 0.0)
         self.declare_parameter('imu_pitch_offset_deg', 0.0)
-        self.declare_parameter('z_from_imu', False)
+        self.declare_parameter('tilt_min_points', 300)
+        self.declare_parameter('tilt_reject_deg', 0.0)
+
         self.declare_parameter('z_align_tau_s', 3.0)
         self.declare_parameter('z_align_min_age_s', 10.0)
         self.declare_parameter('z_align_max_diff_m', 1.5)
         self.declare_parameter('z_align_min_points', 200)
         self.declare_parameter('z_align_max_rel_m', 0.3)
         self.declare_parameter('z_max_step_m', 1.0)
-        self.declare_parameter('fermo_min_spostamento_m', 0.0)
-        self.declare_parameter('fermo_min_rotazione_deg', 0.0)
-        self.declare_parameter('fermo_periodo_s', 0.0)
-        self.declare_parameter('z_start_anchor', True)
         self.declare_parameter('z_start_range_m', 6.0)
         self.declare_parameter('z_start_max_diff_m', 6.0)
         self.declare_parameter('z_start_min_points', 300)
         self.declare_parameter('z_start_max_wait_s', 10.0)
-        self.declare_parameter('change_min_m', 0.08)
-        self.declare_parameter('change_k', 2.0)
-        self.declare_parameter('change_max_m', 0.25)
-        self.declare_parameter('max_gap_s', 3.0)
-        self.declare_parameter('min_hits', 3)
-        self.declare_parameter('tilt_min_points', 300)
-        self.declare_parameter('tilt_max_offset_m', 0.10)
-        self.declare_parameter('tilt_max_deg', 1.5)
-        self.declare_parameter('tilt_reject_deg', 0.0)
-        self.declare_parameter('free_space_filter', False)
-        self.declare_parameter('free_margin_m', 0.10)
-        self.declare_parameter('hybrid_k_sigma', 2.5)
-        self.declare_parameter('tf_timeout_s', 0.1)
-        self.declare_parameter('odom_frame', 'odom')
+
+        self.declare_parameter('still_min_motion_m', 0.0)
+        self.declare_parameter('still_min_rotation_deg', 0.0)
+        self.declare_parameter('still_period_s', 0.0)
+
         self.declare_parameter('map_jump_gate_m', 0.25)
         self.declare_parameter('map_jump_gate_deg', 2.0)
         self.declare_parameter('map_jump_hold_s', 1.0)
 
-        # --- Publishing ---
-        self.declare_parameter('publish_period_s', 1.0)
-        self.declare_parameter('out_topic', '/traversability_cost')
-
-        # --- Gate di localizzazione (stesso schema del semantico) ---
-        self.declare_parameter('use_loc_quality_gate', True)
-        self.declare_parameter('loc_pose_topic', '/odometry/global')
-        self.declare_parameter('loc_std_suspend_m', 1.0)
-        self.declare_parameter('loc_std_resume_m', 0.5)
-        self.declare_parameter('loc_cov_ema', 0.4)
-
-        # --- Persistenza ---
-        self.declare_parameter('map_name', '')
-
         gp = self.get_parameter
-        self.declare_parameter('elevazione_360', True)
-        modo = 'modo_360' if gp('elevazione_360').value else 'modo_camera'
-        for nome, (v360, vcam) in PARAMETRI_MODO.items():
-            self.declare_parameter(f'modo_360.{nome}', v360)
-            self.declare_parameter(f'modo_camera.{nome}', vcam)
-
-        def gm(nome):
-            return gp(f'{modo}.{nome}')
 
         self.target = gp('target_frame').value
+        self.odom_frame = gp('odom_frame').value
         self.base_frame = gp('base_frame').value
         self.lidar_frame = gp('lidar_frame').value
         self.res = float(gp('resolution').value)
-        self.initial_size_m = float(gp('initial_size_m').value)
-        self.grow_margin = float(gp('grow_margin_m').value)
+        self.tf_timeout = float(gp('tf_timeout_s').value)
+        self.update = bool(gp('update').value)
+        self.publish_period = float(gp('publish_period_s').value)
 
-        self.lidar_max_age = float(gp('lidar_max_age_s').value)
         self.lidar_min_range = float(gp('lidar_min_range').value)
         self.map_write_max_range = float(gp('map_write_max_range').value)
         self.elev_min_rel = float(gp('elev_min_rel').value)
         self.elev_max_rel = float(gp('elev_max_rel').value)
-
-        self.cam_frame = gp('camera_optical_frame').value
-        self.seg_max_age = float(gp('seg_max_age_s').value)
-        self.dyn_dilate_px = int(gp('dyn_dilate_px').value)
-        self.dyn_lut = np.zeros(256, dtype=bool)
-        for c in gp('dynamic_classes').value:
-            self.dyn_lut[int(c)] = True
-
         self.sensor_var_base = float(gp('sensor_var_base').value)
         self.sensor_var_dist = float(gp('sensor_var_dist').value)
-        self.var_init = float(gp('var_init').value)
-        self.var_max = float(gp('var_max').value)
-        self.process_var_rate = float(gm('process_var_rate').value)
-        self.maha_thresh = float(gp('maha_thresh').value)
-        self.min_var_for_valid = float(gp('min_var_for_valid').value)
 
-        self.rough_win = int(gp('rough_win').value)
-        self.rough_min_known = int(gp('rough_min_known').value)
-        self.slope_crit = float(gp('slope_crit').value)
-        self.rough_crit = float(gp('rough_crit').value)
-        self.step_crit = float(gp('step_crit').value)
-        self.median_ksize = int(gp('median_ksize').value)
-        self.slope_dead = float(gp('slope_dead').value)
-        self.rough_dead = float(gp('rough_dead').value)
-        self.step_dead = float(gp('step_dead').value)
-
-        self.raycast_enable = bool(gp('raycast_enable').value)
-        self.raycast_every_n = max(1, int(gm('raycast_every_n').value))
-        self.raycast_stride = max(1, int(gm('raycast_stride').value))
-        self.raycast_end_margin = float(gp('raycast_end_margin').value)
+        self.raycast_every_n = max(1, int(gp('raycast_every_n').value))
+        self.raycast_stride = max(1, int(gp('raycast_stride').value))
         self.raycast_sigma_k = float(gp('raycast_sigma_k').value)
-        self.raycast_protect_s = float(gp('raycast_protect_s').value)
-        self.write_outside_camera = bool(gm('write_outside_camera').value)
-        self.use_segmentation = bool(gm('use_segmentation').value)
-        self.hybrid_k_sigma = float(gp('hybrid_k_sigma').value)
-        self.tf_timeout = float(gp('tf_timeout_s').value)
-        self.odom_frame = gp('odom_frame').value
+
         self.jump_gate = (MapJumpGate(gp('map_jump_gate_m').value, gp('map_jump_gate_deg').value,
                                       gp('map_jump_hold_s').value)
                           if self.target != self.odom_frame else None)
+
+        self.grid = ElevationGrid(
+            self.res, float(gp('initial_size_m').value), float(gp('grow_margin_m').value),
+            float(gp('var_init').value), float(gp('var_max').value),
+            float(gp('process_var_rate').value), float(gp('min_var_for_valid').value),
+            float(gp('hybrid_k_sigma').value),
+            dict(median_ksize=int(gp('median_ksize').value), rough_win=int(gp('rough_win').value),
+                 rough_min_known=int(gp('rough_min_known').value),
+                 slope_crit=float(gp('slope_crit').value), rough_crit=float(gp('rough_crit').value),
+                 step_crit=float(gp('step_crit').value), slope_dead=float(gp('slope_dead').value),
+                 rough_dead=float(gp('rough_dead').value), step_dead=float(gp('step_dead').value),
+                 step_drop_r=float(gp('step_drop_radius_m').value),
+                 step_rise_r=float(gp('step_rise_radius_m').value),
+                 step_allow=float(gp('step_slope_allow').value),
+                 step_lethal=float(gp('step_lethal_m').value),
+                 step_lethal_r=float(gp('step_lethal_radius_m').value)),
+            self.lidar_min_range, float(gp('raycast_end_margin').value), self.map_write_max_range,
+            self.raycast_sigma_k, float(gp('raycast_protect_s').value),
+            confirm_s=gp('confirm_s').value, change_min_m=gp('change_min_m').value,
+            change_k=gp('change_k').value, change_max_m=gp('change_max_m').value,
+            max_gap_s=gp('max_gap_s').value, min_hits=gp('min_hits').value,
+            tilt_min_points=gp('tilt_min_points').value,
+            tilt_reject_deg=float(gp('tilt_reject_deg').value))
+
         self._ray_calls = 0
         self._ray_cleared = 0
         self._ray_time = 0.0
         self._ray_runs = 0
-
-        self.publish_period = float(gp('publish_period_s').value)
-
-        self.use_loc_gate = bool(gp('use_loc_quality_gate').value)
-        self.loc_std_suspend = float(gp('loc_std_suspend_m').value)
-        self.loc_std_resume = float(gp('loc_std_resume_m').value)
-        self.loc_cov_ema = float(gp('loc_cov_ema').value)
-        self.loc_std_smooth = 0.0
-        self.loc_ok = True
-
-        self.grid = ElevationGrid(
-            self.res, self.initial_size_m, self.grow_margin, self.var_init, self.var_max,
-            self.process_var_rate, self.maha_thresh, self.min_var_for_valid, self.hybrid_k_sigma,
-            dict(median_ksize=self.median_ksize, rough_win=self.rough_win,
-                 rough_min_known=self.rough_min_known, slope_crit=self.slope_crit,
-                 rough_crit=self.rough_crit, step_crit=self.step_crit,
-                 slope_dead=self.slope_dead, rough_dead=self.rough_dead, step_dead=self.step_dead,
-                 step_drop_r=float(gp('step_drop_radius_m').value), step_rise_r=float(gp('step_rise_radius_m').value),
-                 step_allow=float(gp('step_slope_allow').value), step_lethal=float(gp('step_lethal_m').value),
-                 step_lethal_r=float(gp('step_lethal_radius_m').value)),
-            self.lidar_min_range, self.raycast_end_margin, self.map_write_max_range,
-            self.raycast_sigma_k, self.raycast_protect_s,
-            confirm_s=gm('confirm_s').value, change_min_m=gp('change_min_m').value,
-            change_k=gp('change_k').value, change_max_m=gp('change_max_m').value,
-            max_gap_s=gp('max_gap_s').value, min_hits=gp('min_hits').value,
-            tilt_comp=gm('tilt_compensation').value, tilt_min_points=gp('tilt_min_points').value,
-            tilt_max_offset_m=gp('tilt_max_offset_m').value, tilt_max_deg=gp('tilt_max_deg').value,
-            tilt_reject_deg=float(gp('tilt_reject_deg').value),
-            free_space_filter=gp('free_space_filter').value, free_margin_m=gp('free_margin_m').value)
         self._n_clouds = 0
         self._n_skipped = 0
         self._n_integrated = 0
@@ -928,42 +686,23 @@ class ElevationCostmapNode(Node):
         self._last_cloud_t = None
         self._last_stats = time.monotonic()
 
-        # --- Cache nuvola LiDAR (PULITA una volta sola, come nel semantico) ---
         self.cloud = None
         self.cloud_t = -1e9
         self.cloud_stamp = None
 
-        # --- Cache segmentazione + intrinseci camera (per escludere i dinamici) ---
-        self.bridge = CvBridge()
-        self.K = None
-        self.seg = None
-        self.seg_t = -1e9
-        self.seg_stamp = None
-
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, None, spin_thread=True)
 
-        self.declare_parameter('aggiorna', True)
-        self.declare_parameter('publish_period_ferma_s', 5.0)
-        self.aggiorna = bool(self.get_parameter('aggiorna').value)
-        if self.aggiorna:
+        if self.update:
             cloud_qos = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT,
                                    history=HistoryPolicy.KEEP_LAST, depth=1)
-            self.create_subscription(PointCloud2, gp('lidar_topic').value,
-                                     self.cloud_cb, cloud_qos)
-            self.create_subscription(CameraInfo, gp('camera_info_topic').value,
-                                     self.info_cb, 1)
-            seg_qos = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT,
-                                 history=HistoryPolicy.KEEP_LAST, depth=1)
-            self.create_subscription(Image, gp('seg_topic').value, self.seg_cb, seg_qos)
+            self.create_subscription(PointCloud2, gp('lidar_topic').value, self.cloud_cb, cloud_qos)
 
         self.att = collections.deque(maxlen=200)
-        self.att_fb = collections.deque(maxlen=200)
         self.att_max_age = float(gp('attitude_max_age_s').value)
-        self.n_att = [0, 0, 0]
+        self.n_att = [0, 0]
         self.imu_off = (math.radians(float(gp('imu_roll_offset_deg').value)),
                         math.radians(float(gp('imu_pitch_offset_deg').value)))
-        self.z_from_imu = bool(gp('z_from_imu').value)
         self.z_align_tau = float(gp('z_align_tau_s').value)
         self.z_align_min_age = float(gp('z_align_min_age_s').value)
         self.z_align_max_diff = float(gp('z_align_max_diff_m').value)
@@ -973,30 +712,20 @@ class ElevationCostmapNode(Node):
         self.z_max_step = float(gp('z_max_step_m').value)
         self.zi = None
         self.n_anchor = 0
-        self.z_start_anchor = bool(gp('z_start_anchor').value)
         self.z_start_range = float(gp('z_start_range_m').value)
         self.z_start_max_diff = float(gp('z_start_max_diff_m').value)
         self.z_start_min_points = int(gp('z_start_min_points').value)
         self.z_start_max_wait = float(gp('z_start_max_wait_s').value)
         self.z_anchored = True
         self.z_anchor_t0 = None
-        self.fermo_min_m = float(gp('fermo_min_spostamento_m').value)
-        self.fermo_min_deg = float(gp('fermo_min_rotazione_deg').value)
-        self.fermo_periodo = float(gp('fermo_periodo_s').value)
-        self.ultima_integrata = None
-        self.n_fermo = 0
+        self.still_min_m = float(gp('still_min_motion_m').value)
+        self.still_min_deg = float(gp('still_min_rotation_deg').value)
+        self.still_period = float(gp('still_period_s').value)
+        self.last_integrated = None
+        self.n_still = 0
         if gp('attitude_imu_topic').value:
             self.create_subscription(Imu, gp('attitude_imu_topic').value, self.imu_cb,
                                      qos_profile_sensor_data)
-        elif gp('attitude_topic').value:
-            self.create_subscription(PoseWithCovarianceStamped, gp('attitude_topic').value,
-                                     lambda m: self.att_cb(self.att, m.header, m.pose.pose.orientation), 10)
-        if gp('attitude_fallback_topic').value:
-            self.create_subscription(Odometry, gp('attitude_fallback_topic').value,
-                                     lambda m: self.att_cb(self.att_fb, m.header, m.pose.pose.orientation), 10)
-        if self.use_loc_gate:
-            self.create_subscription(Odometry, gp('loc_pose_topic').value,
-                                     self.loc_cb, 10)
 
         latched_qos = QoSProfile(reliability=ReliabilityPolicy.RELIABLE,
                                  durability=DurabilityPolicy.TRANSIENT_LOCAL,
@@ -1005,43 +734,37 @@ class ElevationCostmapNode(Node):
         self.pub_range = self.create_publisher(Marker, '/elevation_map_range', 1)
         self.range_pose = None
 
-        self._last_pred_t = None
-
-        # --- Persistenza ---
         self.maps_dir = self.resolve_maps_dir()
         map_name = gp('map_name').value
-        load_name = save_name = f'elevazione_{map_name}' if map_name else ''
-        self.map_save_path = os.path.join(self.maps_dir, save_name) if save_name else ''
-        if load_name:
-            p = os.path.join(self.maps_dir, load_name)
+        file_name = f'elevation_{map_name}' if map_name else ''
+        self.map_save_path = os.path.join(self.maps_dir, file_name) if file_name else ''
+        if file_name:
+            p = os.path.join(self.maps_dir, file_name)
             if not p.endswith('.npz'):
                 p += '.npz'
             if os.path.isfile(p):
                 self.load_map(p)
-                self.z_anchored = not (self.z_from_imu and self.z_start_anchor and bool(self.grid.n.any()))
+                self.z_anchored = not bool(self.grid.n.any())
             else:
                 self.get_logger().warn(f'Elevation map to load not found: {p}')
-        self.autosave = bool(map_name) and self.aggiorna
+        self.autosave = bool(map_name) and self.update
         self.create_service(Trigger, '~/save_map', self.save_map_cb)
 
-        # timer di pubblicazione (deriva costo e pubblica, indipendente dal LiDAR)
-        self.create_timer(self.publish_period if self.aggiorna
-                          else float(self.get_parameter('publish_period_ferma_s').value), self.publish_timer)
-        if not self.aggiorna:
-            self.get_logger().info('Mappa di elevazione FERMA: pubblico solo la mappa caricata, nessun aggiornamento.')
+        self.create_timer(self.publish_period if self.update
+                          else float(gp('frozen_publish_period_s').value), self.publish_timer)
+        if not self.update:
+            self.get_logger().info('Frozen elevation map: publishing the loaded map only, no updates.')
 
         self.get_logger().info(
-            f'Elevation 2.5D (Kalman-per-cella, LiDAR-primary) pronto. frame={self.target}. '
-            f'res={self.res} m. Uscita: {gp("out_topic").value}.')
-        
+            f'Elevation map ready: frame {self.target}, resolution {self.res} m, '
+            f'output {gp("out_topic").value}.')
         save_hint = self.map_save_path or os.path.join(self.maps_dir, 'elevation_map')
         if self.autosave:
-            self.get_logger().info(f'AUTOSAVE alla chiusura (Ctrl-C) -> {self.map_save_path}')
+            self.get_logger().info(f'The map is saved on Ctrl-C to {self.map_save_path}')
         self.get_logger().info(
-            'Salvataggio su richiesta: '
+            'Save on request: '
             f'ros2 service call /elevation_costmap_node/save_map std_srvs/srv/Trigger  ->  {save_hint}')
 
-    # ---------------- persistenza ----------------
     def resolve_maps_dir(self):
         try:
             from ament_index_python.packages import get_package_share_directory
@@ -1057,22 +780,25 @@ class ElevationCostmapNode(Node):
                             os.makedirs(d, exist_ok=True)
                             return d
                     break
-            d = os.path.join(share, 'maps'); os.makedirs(d, exist_ok=True); return d
+            d = os.path.join(share, 'maps')
+            os.makedirs(d, exist_ok=True)
+            return d
         except Exception:
             d = os.path.join(os.path.expanduser('~'), '.semantic_maps')
-            os.makedirs(d, exist_ok=True); return d
+            os.makedirs(d, exist_ok=True)
+            return d
 
     def load_map(self, path):
         try:
             d = np.load(path)
             if float(d['res']) != self.res:
-                self.get_logger().warn('Elevation map con risoluzione diversa: ignorata.')
+                self.get_logger().warn('Elevation map with a different resolution: ignored.')
                 return
             self.grid.load(d)
             self.get_logger().info(
-                f'Elevation map caricata da {path} ({self.grid.gnx}x{self.grid.gny}).')
+                f'Elevation map loaded from {path} ({self.grid.gnx}x{self.grid.gny}).')
         except Exception as e:
-            self.get_logger().warn(f'Load elevation fallito: {e}')
+            self.get_logger().warn(f'Loading the elevation map failed: {e}')
 
     def save_map(self, path):
         try:
@@ -1085,24 +811,18 @@ class ElevationCostmapNode(Node):
                 f.flush()
                 os.fsync(f.fileno())
             os.replace(tmp, path)
-            self.get_logger().info(f'Elevation map salvata in {path}.')
+            self.get_logger().info(f'Elevation map saved to {path}.')
             return path
         except Exception as e:
-            self.get_logger().error(f'Save elevation fallito: {e}')
+            self.get_logger().error(f'Saving the elevation map failed: {e}')
             return None
 
     def save_map_cb(self, request, response):
         path = self.map_save_path or os.path.join(self.maps_dir, 'elevation_map')
         saved = self.save_map(path)
         response.success = saved is not None
-        response.message = f'Salvata in {saved}' if saved else 'Salvataggio fallito'
+        response.message = f'Saved to {saved}' if saved else 'Save failed'
         return response
-
-    # ---------------- callbacks ----------------
-    def att_cb(self, buf, header, q):
-        t = header.stamp.sec + header.stamp.nanosec * 1e-9
-        if t > 0:
-            buf.append((t, *quat_roll_pitch(q)))
 
     def imu_cb(self, m):
         t = m.header.stamp.sec + m.header.stamp.nanosec * 1e-9
@@ -1136,16 +856,16 @@ class ElevationCostmapNode(Node):
             z, px, py, pt, ta = self.zi
             self.zi = (z - off, px, py, pt, ta)
             self.z_anchored = True
-            self.get_logger().info(f'Quota iniziale agganciata alla mappa caricata: correzione {-off:+.3f} m '
-                                   f'({int(g.sum())} punti a terra entro {self.z_start_range:.0f} m).')
+            self.get_logger().info(f'Start height aligned to the loaded map: correction {-off:+.3f} m '
+                                   f'({int(g.sum())} ground points within {self.z_start_range:.0f} m).')
             return off
         if self.cloud_t - self.z_anchor_t0 > self.z_start_max_wait:
             self.z_anchored = True
-            self.get_logger().warn(f'Quota iniziale NON agganciata: dopo {self.z_start_max_wait:.0f} s il robot non vede '
-                                   'celle della mappa caricata. Scrivo con la quota del localizzatore: '
-                                   'parti da un punto già mappato.')
+            self.get_logger().warn(f'Start height NOT aligned: after {self.z_start_max_wait:.0f} s the robot sees '
+                                   'no cell of the loaded map. Writing with the localizer height: '
+                                   'start from an area that is already mapped.')
             return 0.0
-        self.get_logger().info('Aspetto di vedere la mappa caricata per agganciare la quota iniziale...',
+        self.get_logger().info('Waiting to see the loaded map to align the start height...',
                                throttle_duration_sec=2.0)
         return None
 
@@ -1169,36 +889,16 @@ class ElevationCostmapNode(Node):
         return corr
 
     def attitude_at(self, t):
-        for k, buf in enumerate((self.att, self.att_fb)):
-            if buf:
-                ts = np.fromiter((a[0] for a in buf), float, len(buf))
-                i = int(np.argmin(np.abs(ts - t)))
-                if abs(ts[i] - t) <= self.att_max_age:
-                    self.n_att[k] += 1
-                    return buf[i][1], buf[i][2]
-        self.n_att[2] += 1
+        if self.att:
+            ts = np.fromiter((a[0] for a in self.att), float, len(self.att))
+            i = int(np.argmin(np.abs(ts - t)))
+            if abs(ts[i] - t) <= self.att_max_age:
+                self.n_att[0] += 1
+                return self.att[i][1], self.att[i][2]
+        self.n_att[1] += 1
         return None
 
-    def loc_cb(self, msg: Odometry):
-        cov = msg.pose.covariance
-        var_x = max(0.0, float(cov[0])); var_y = max(0.0, float(cov[7]))
-        std_xy = float(np.sqrt(max(var_x, var_y)))
-        a = self.loc_cov_ema
-        self.loc_std_smooth = a * std_xy + (1.0 - a) * self.loc_std_smooth
-        if self.loc_ok and self.loc_std_smooth > self.loc_std_suspend:
-            self.loc_ok = False
-            self.get_logger().warn(
-                f'LOCALIZZAZIONE PERSA (std liscia {self.loc_std_smooth:.2f}m > '
-                f'{self.loc_std_suspend}m) -> MAPPATURA ELEVAZIONE SOSPESA.')
-        elif (not self.loc_ok) and self.loc_std_smooth < self.loc_std_resume:
-            self.loc_ok = True
-            self.get_logger().info(
-                f'Localizzazione RECUPERATA (std liscia {self.loc_std_smooth:.2f}m) -> RIPRESA.')
-
     def cloud_cb(self, msg: PointCloud2):
-        """Nuvola LiDAR (frame base_scan): pulita e messa in cache.
-        Scarta NaN/inf (skip_nans NON toglie gli inf del gpu_lidar) e il rumore
-        entro lidar_min_range (come il 'blind' di FAST-LIO)."""
         try:
             rec = pc2.read_points(msg, field_names=('x', 'y', 'z'), skip_nans=True)
         except Exception:
@@ -1207,7 +907,9 @@ class ElevationCostmapNode(Node):
         if n == 0:
             return
         pts = np.empty((n, 3), dtype=np.float64)
-        pts[:, 0] = rec['x']; pts[:, 1] = rec['y']; pts[:, 2] = rec['z']
+        pts[:, 0] = rec['x']
+        pts[:, 1] = rec['y']
+        pts[:, 2] = rec['z']
         finite = np.isfinite(pts).all(axis=1)
         r2 = pts[:, 0]**2 + pts[:, 1]**2 + pts[:, 2]**2
         keep = finite & (r2 >= self.lidar_min_range ** 2)
@@ -1231,43 +933,26 @@ class ElevationCostmapNode(Node):
             self._t_integrate_max = max(self._t_integrate_max, dt)
         self.log_stats()
 
-    def info_cb(self, msg: CameraInfo):
-        self.K = np.array(msg.k).reshape(3, 3)
-
     def publish_range_marker(self, stamp):
         if self.range_pose is None:
             return
         bx, by, yaw = self.range_pose
         R = self.map_write_max_range
-        if self.write_outside_camera or self.K is None:
-            ang = np.linspace(-math.pi, math.pi, 73)
-            pts = [Point(x=float(bx + R * math.cos(a)), y=float(by + R * math.sin(a)), z=0.05) for a in ang]
-        else:
-            half = float(np.arctan2(self.K[0, 2], self.K[0, 0]))
-            pts = [Point(x=bx, y=by, z=0.05)]
-            pts += [Point(x=float(bx + R * math.cos(yaw + a)), y=float(by + R * math.sin(yaw + a)), z=0.05)
-                    for a in np.linspace(-half, half, 25)]
-            pts.append(Point(x=bx, y=by, z=0.05))
+        ang = np.linspace(-math.pi, math.pi, 73)
         m = Marker()
         m.header.frame_id = self.target
         m.header.stamp = stamp
-        m.ns = 'elevation_range'; m.id = 0
-        m.type = Marker.LINE_STRIP; m.action = Marker.ADD
+        m.ns = 'elevation_range'
+        m.id = 0
+        m.type = Marker.LINE_STRIP
+        m.action = Marker.ADD
         m.scale.x = 0.05
-        m.color.r = 0.1; m.color.g = 0.8; m.color.b = 1.0; m.color.a = 0.9
-        m.points = pts
+        m.color.r = 0.1
+        m.color.g = 0.8
+        m.color.b = 1.0
+        m.color.a = 0.9
+        m.points = [Point(x=float(bx + R * math.cos(a)), y=float(by + R * math.sin(a)), z=0.05) for a in ang]
         self.pub_range.publish(m)
-
-    def seg_cb(self, msg: Image):
-        """Immagine di segmentazione (Cityscapes ID, mono8): messa in cache.
-        Serve solo a sapere quali pixel sono DINAMICI, per escludere i punti
-        LiDAR che ci cadono sopra."""
-        try:
-            self.seg = self.bridge.imgmsg_to_cv2(msg, desired_encoding='mono8')
-        except Exception:
-            return
-        self.seg_t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
-        self.seg_stamp = msg.header.stamp
 
     def lookup(self, frame, stamp):
         try:
@@ -1277,15 +962,12 @@ class ElevationCostmapNode(Node):
                 self.target, frame, rclpy.time.Time.from_msg(stamp),
                 timeout=Duration(seconds=self.tf_timeout))
         except Exception as e:
-            self.get_logger().warn(f'TF non disponibile {frame}->{self.target}: {e}',
+            self.get_logger().warn(f'Transform {frame} -> {self.target} not available: {e}',
                                    throttle_duration_sec=2.0)
             return None
 
-    # ---------------- integrazione (misura Kalman) ----------------
     def integrate(self):
         if self.cloud is None:
-            return False
-        if self.use_loc_gate and not self.loc_ok:
             return False
 
         T_scan = self.lookup(self.lidar_frame, self.cloud_stamp)
@@ -1295,7 +977,7 @@ class ElevationCostmapNode(Node):
 
         M_scan2map = transform_to_matrix(T_scan)
         rp = None
-        if self.att or self.att_fb:
+        if self.att:
             rp = self.attitude_at(self.cloud_t)
             if rp is not None:
                 M_tb = transform_to_matrix(T_base)
@@ -1306,72 +988,50 @@ class ElevationCostmapNode(Node):
         bz_tf = T_base.transform.translation.z
         qr = T_base.transform.rotation
         self.range_pose = (bx, by, math.atan2(2 * (qr.w * qr.z + qr.x * qr.y), 1 - 2 * (qr.y * qr.y + qr.z * qr.z)))
-        if self.fermo_periodo > 0.0 and self.ultima_integrata is not None:
-            lx, ly, lyaw, lt = self.ultima_integrata
+        if self.still_period > 0.0 and self.last_integrated is not None:
+            lx, ly, lyaw, lt = self.last_integrated
             dyaw = abs(math.atan2(math.sin(self.range_pose[2] - lyaw), math.cos(self.range_pose[2] - lyaw)))
-            if (math.hypot(bx - lx, by - ly) < self.fermo_min_m and math.degrees(dyaw) < self.fermo_min_deg
-                    and self.cloud_t - lt < self.fermo_periodo):
-                self.n_fermo += 1
+            if (math.hypot(bx - lx, by - ly) < self.still_min_m and math.degrees(dyaw) < self.still_min_deg
+                    and self.cloud_t - lt < self.still_period):
+                self.n_still += 1
                 return False
-        self.ultima_integrata = (bx, by, self.range_pose[2], self.cloud_t)
+        self.last_integrated = (bx, by, self.range_pose[2], self.cloud_t)
         if not self.map_jump_ok(self.cloud_stamp, self.cloud_t, bx, by, bz_tf):
             return False
         bz = bz_tf
-        if self.z_from_imu and rp is not None:
+        if rp is not None:
             q = T_base.transform.rotation
             yaw = math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z))
             bz = self.robot_z(bx, by, yaw, rp, bz_tf, self.cloud_t)
             M_scan2map[2, 3] += bz - bz_tf
         Pm = transform_points(self.cloud, M_scan2map)
-        if self.z_from_imu and rp is not None and not self.z_anchored:
+        if rp is not None and not self.z_anchored:
             off = self.anchor_start_z(Pm, bx, by, bz)
             if off is None:
                 return False
             Pm[:, 2] -= off
             M_scan2map[2, 3] -= off
             bz -= off
-        if self.z_from_imu and rp is not None:
+        if rp is not None:
             t_ref = self.grid.t_ref if self.grid.t_ref is not None else self.cloud_t
             corr = self.align_z(Pm[:, 0], Pm[:, 1], Pm[:, 2], bz, self.cloud_t, self.cloud_t - t_ref)
             if corr != 0.0:
                 Pm[:, 2] -= corr
                 M_scan2map[2, 3] -= corr
                 bz -= corr
-        X = Pm[:, 0]; Y = Pm[:, 1]; Z = Pm[:, 2]
+        X = Pm[:, 0]
+        Y = Pm[:, 1]
+        Z = Pm[:, 2]
 
         rng = np.sqrt(self.cloud[:, 0]**2 + self.cloud[:, 1]**2 + self.cloud[:, 2]**2)
 
-        n_pts = self.cloud.shape[0]
-        in_img = np.zeros(n_pts, dtype=bool)
-        not_dyn = np.ones(n_pts, dtype=bool)
-        seg_ok = (self.use_segmentation and self.K is not None and self.seg is not None
-                  and (self.cloud_t - self.seg_t) <= self.seg_max_age)
-        T_cam = self.lookup(self.cam_frame, self.seg_stamp) if seg_ok else None
-        if T_cam is not None:
-            M_scan2cam = np.linalg.inv(transform_to_matrix(T_cam)) @ M_scan2map
-            Pc = transform_points(self.cloud, M_scan2cam)
-            seg = self.seg
-            hgt, wid = seg.shape
-            uu, vv, in_img = project_to_pixel(Pc, self.K, wid, hgt)
-            full_dyn = self.dyn_lut[seg].astype(np.uint8)
-            if self.dyn_dilate_px > 0 and full_dyn.any():
-                k = 2 * self.dyn_dilate_px + 1
-                full_dyn = cv2.dilate(full_dyn, np.ones((k, k), np.uint8), iterations=1)
-            not_dyn = ~(full_dyn[vv, uu].astype(bool) & in_img)
-        elif not self.write_outside_camera:
-            self.get_logger().warn('Segmentazione troppo vecchia in questo frame.',
-                                   throttle_duration_sec=10.0)
-            return False
-
         t_rel = self.grid.begin(self.cloud_t)
-        usable = (in_img | self.write_outside_camera) & not_dyn
         finite = np.isfinite(X) & np.isfinite(Y) & np.isfinite(Z)
-        sel = finite & (in_img | self.write_outside_camera)
-        self.raycast_clear(M_scan2map[:3, 3], Pm[sel], rng[sel], t_rel)
+        self.raycast_clear(M_scan2map[:3, 3], Pm[finite], rng[finite], t_rel)
 
         rel = Z - bz
         dist = np.hypot(X - bx, Y - by)
-        ok = (finite & usable
+        ok = (finite
               & (rel >= self.elev_min_rel) & (rel <= self.elev_max_rel)
               & (dist < self.map_write_max_range))
         if not np.any(ok):
@@ -1389,14 +1049,14 @@ class ElevationCostmapNode(Node):
         ok = self.jump_gate.update(transform_to_matrix(T_mo), (bx, by, bz), t)
         if not ok:
             self.get_logger().warn(
-                f'Salto della localizzazione ({self.jump_gate.last_jump_m:.2f} m, '
-                f'{self.jump_gate.last_jump_deg:.1f} gradi): scrittura in mappa sospesa '
-                f'per {self.jump_gate.hold_s:.1f} s ({self.jump_gate.n_jumps} salti finora).',
+                f'Localization jump ({self.jump_gate.last_jump_m:.2f} m, '
+                f'{self.jump_gate.last_jump_deg:.1f} deg): map writing paused '
+                f'for {self.jump_gate.hold_s:.1f} s ({self.jump_gate.n_jumps} jumps so far).',
                 throttle_duration_sec=1.0)
         return ok
 
     def raycast_clear(self, origin, ends, ranges, t_rel):
-        if not self.raycast_enable or ends.shape[0] == 0:
+        if ends.shape[0] == 0:
             return
         self._ray_calls += 1
         if self._ray_calls % self.raycast_every_n:
@@ -1419,29 +1079,28 @@ class ElevationCostmapNode(Node):
         npub = max(self._n_publish, 1)
         nr = max(self._ray_runs, 1)
         self.get_logger().info(
-            f'nuvole ricevute {self._n_clouds}, integrate {self._n_integrated}, '
-            f'saltate {self._n_skipped} | integrazione {1000.0 * self._t_integrate / ni:.1f} ms '
+            f'clouds received {self._n_clouds}, integrated {self._n_integrated}, '
+            f'skipped {self._n_skipped} | integration {1000.0 * self._t_integrate / ni:.1f} ms '
             f'(max {1000.0 * self._t_integrate_max:.1f}) | raycast {1000.0 * self._ray_time / nr:.1f} ms, '
-            f'{self._ray_cleared} celle ripulite | costo e pubblicazione '
-            f'{1000.0 * self._t_publish / npub:.1f} ms | griglia {self.grid.gnx}x{self.grid.gny}'
-            f' | assetto trovato {self.n_att[0]}, mancante {self.n_att[2]}'
-            f' | inclinazione corretta {self.grid.tilt_stats[1]}/{self.grid.tilt_stats[0]}'
-            + (f' | quota IMU {self.zi[0]:+.3f} m, allineamenti {self.n_anchor}, correzione totale {self.z_corr_sum:.2f} m' if self.zi is not None else '')
-            + f' | scansioni saltate da fermo {self.n_fermo}'
-            + f' | inclinazione controllata {self.grid.reject_stats[1]}/{self.grid.reject_stats[0]}, scartate {self.grid.reject_stats[2]}')
+            f'{self._ray_cleared} cells cleared | cost and publishing '
+            f'{1000.0 * self._t_publish / npub:.1f} ms | grid {self.grid.gnx}x{self.grid.gny}'
+            f' | attitude found {self.n_att[0]}, missing {self.n_att[1]}'
+            + (f' | IMU height {self.zi[0]:+.3f} m, alignments {self.n_anchor}, total correction {self.z_corr_sum:.2f} m' if self.zi is not None else '')
+            + f' | scans skipped while still {self.n_still}'
+            + f' | tilt checked {self.grid.reject_stats[1]}/{self.grid.reject_stats[0]}, rejected {self.grid.reject_stats[2]}')
 
-    # ---------------- pubblicazione (deriva costo) ----------------
     def publish_timer(self):
         t0 = time.perf_counter()
         self.grid.update_cost()
-        if self.grid.t_ref is None and self.aggiorna:
+        if self.grid.t_ref is None and self.update:
             return
         g = self.grid
         msg = OccupancyGrid()
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.header.frame_id = self.target
         msg.info.resolution = self.res
-        msg.info.width = g.gnx; msg.info.height = g.gny
+        msg.info.width = g.gnx
+        msg.info.height = g.gny
         msg.info.origin.position.x = float(g.gox)
         msg.info.origin.position.y = float(g.goy)
         msg.info.origin.orientation.w = 1.0
@@ -1452,14 +1111,14 @@ class ElevationCostmapNode(Node):
         self._n_publish += 1
 
 
-def _interrompi(signum, frame):
+def _interrupt(signum, frame):
     raise KeyboardInterrupt
 
 
 def main():
     rclpy.init()
     node = ElevationCostmapNode()
-    signal.signal(signal.SIGHUP, _interrompi)
+    signal.signal(signal.SIGHUP, _interrupt)
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

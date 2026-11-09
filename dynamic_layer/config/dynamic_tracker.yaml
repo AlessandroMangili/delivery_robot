@@ -1,137 +1,119 @@
 pointcloud_detector:
   ros__parameters:
-    use_sim_time: false
-    input_topic: /velodyne_points
-    coda_nuvole: 1
-    detections_topic: /detections
-    markers_topic: /detections/markers
+    input_topic: /velodyne_points           # LiDAR point cloud
+    detections_topic: /detections           # output: centres of the detected objects
+    markers_topic: /detections/markers      # boxes for display
+    cloud_queue_depth: 1                    # clouds kept in the queue: 1 always uses the newest
 
-    # crop
-    min_range: 0.30        # scarta il corpo del robot / punti troppo vicini
-    max_range: 12.0        # oltre, il LiDAR è rado/rumoroso
-    crop_min_z: -1.0       # box in z, frame sensore (base_scan)
-    crop_max_z: 2.5
+    min_range: 0.30                         # closer points are ignored, they hit the robot [m]
+    max_range: 12.0                         # farther points are too sparse to detect people [m]
+    crop_min_z: -1.0                        # lowest point kept, in the LiDAR frame [m]
+    crop_max_z: 2.5                         # highest point kept, in the LiDAR frame [m]
 
-    # downsample
-    voxel_size: 0.10       # alza se il clustering è lento
+    voxel_size: 0.10                        # one point per voxel of this size [m]
 
-    # rimozione piano di terra (RANSAC)
-    ground_dist_thresh: 0.08
-    ground_max_iter: 150
-    ground_fit_range: 6.0
-    ground_normal_z_min: 0.85   # |n_z| min: piano ~orizzontale = terra, non muro
-    remove_below_ground: true
+    ground_dist_thresh: 0.08                # points closer than this to the ground plane are ground [m]
+    ground_max_iter: 150                    # RANSAC iterations
+    ground_fit_range: 6.0                   # the plane is fitted on points within this range [m]
+    ground_normal_z_min: 0.85               # the plane must be close to horizontal
+    remove_below_ground: true               # also drops points below the ground plane
 
-    # clustering euclideo
-    cluster_tolerance: 0.30     # distanza max tra punti dello stesso cluster
-    cluster_min_points: 6
-    cluster_max_points: 800
-    # merge world-space: riunisce cluster frammentati (gambe di una persona)
-    merge_enabled: true
-    merge_dist: 0.45              # < distanza tra 2 persone, > tra le gambe di una
+    cluster_tolerance: 0.30                 # points closer than this belong to the same cluster [m]
+    cluster_min_points: 6                   # smallest cluster
+    cluster_max_points: 800                 # largest cluster
+    merge_enabled: true                     # merges clusters of the same object, such as two legs
+    merge_dist: 0.45                        # clusters with closer centres are merged [m]
 
-    # filtro geometrico "persona" (permissivo: la camera rifinisce in Step 3)
-    min_height: 0.20
-    max_height: 2.20
-    max_footprint: 1.00         # ingombro orizzontale max (muri lunghi cadono qui)
+    min_height: 0.20                        # lowest object that can be a person [m]
+    max_height: 2.20                        # tallest object that can be a person [m]
+    max_footprint: 1.00                     # widest object that can be a person [m]
 
-    # diagnostica / debug
-    debug_show_rejected: true   # cluster scartati in rosso in RViz (per tarare)
-    map_filter: true
-    map_filter_dist: 0.20
-    map_filter_frac: 0.50
-    map_filter_min_dist: 3.0
-    camera_rescue: true
-    yolo_topic: /camera_detections
-    camera_info_topic: /c920/camera_info
-    camera_frame: c920_optical
-    rescue_classes: [person, bicycle, motorcycle]
-    rescue_max_footprint: 2.0
-    rescue_box_margin: 0.10
-    rescue_max_age: 0.25
-    rescue_depth_band: 0.40
-    diag_period_frames: 20
+    map_filter: true                        # drops clusters that lie on the prior LiDAR map
+    map_filter_dist: 0.20                   # distance from the map that counts as on the map [m]
+    map_filter_frac: 0.50                   # share of points on the map that drops a cluster
+    map_filter_min_dist: 3.0                # clusters closer than this are never dropped by the map [m]
 
+    camera_rescue: true                     # keeps rejected clusters that fall inside a YOLO box
+    yolo_topic: /camera_detections          # boxes from camera_detector
+    camera_info_topic: /c920/camera_info    # camera intrinsics
+    camera_frame: c920_optical              # optical frame of the camera
+    rescue_classes: [person, bicycle, motorcycle]   # YOLO classes that can rescue a cluster
+    rescue_max_footprint: 2.0               # widest rescued object [m]
+    rescue_box_margin: 0.10                 # margin added around each box, as a share of its size
+    rescue_max_age: 0.25                    # oldest box used for a scan [s]
+    rescue_depth_band: 0.40                 # depth band behind the nearest points of the box [m]
 
-lidar3d_tracker:
+    debug_show_rejected: true               # also draws the rejected clusters, in red
+    diag_period_frames: 20                  # scans between two diagnostic logs
+
+tracker_3d:
   ros__parameters:
-    use_sim_time: false
-    input_topic: /detections
-    tracking_frame: odom          # frame fisso: NON base_scan (ruota col robot)
-    markers_topic: /tracks/markers
+    input_topic: /detections                # detections from pointcloud_detector
+    tracking_frame: odom                    # fixed frame in which the tracks live
+    markers_topic: /tracks/markers          # tracks for display
+    tracks_topic: /dynamic_tracks_state     # output read by the MPPI critics
 
-    # --- Step 4: uscita verso il critic spazio-temporale MPPI ---
-    tracks_topic: /dynamic_tracks_state   # dynamic_tracker_msgs/TrackArray consumato dal critic
+    accel_std: 0.8                          # acceleration noise of the constant-velocity Kalman filter [m/s^2]
+    meas_std: 0.10                          # noise of a detected position [m]
+    init_pos_std: 0.30                      # position uncertainty of a new track [m]
+    init_vel_std: 2.0                       # velocity uncertainty of a new track [m/s]
 
-    # Kalman (velocità costante)
-    accel_std: 0.8                # tarato: statico fermo resta sotto ~0.12 m/s
-    meas_std: 0.10               # rumore misura di posizione [m]
-    init_pos_std: 0.30
-    init_vel_std: 2.0
+    gating_mahalanobis: 9.21                # association gate, chi-square with 2 degrees of freedom at 99%
+    max_assoc_dist: 1.5                     # farthest detection associated to a track [m]
+    recovery_dist: 1.0                      # second gate for turning targets, 0 turns it off [m]
 
-    # associazione
-    gating_mahalanobis: 9.21     # chi^2, 2 gdl, ~99%
-    max_assoc_dist: 1.5          # gate euclideo di sicurezza [m]
-    recovery_dist: 1.0           # 2° stadio: gate euclideo di recupero [m] per i target
-                                 # in manovra (svolta) rifiutati dal Mahalanobis (0 = off)
-    # ciclo di vita
-    min_hits: 3                  # frame per confermare una traccia
-    max_age: 10                  # frame di coasting (10 = ~1 s a 10 Hz)
-    coast_publish_frames: 3      # frame di coasting per cui la traccia resta PUBBLICATA
-                                 # (fantasma corto; resta viva fino a max_age per ri-associarsi)
-    # conferma dinamico / life-cycle (SimpleTrack: moto coerente + gate SNR)
-    min_speed: 0.30              # [m/s] soglia di "in movimento"
-    snr_min: 1.0                 # velocità >= snr_min * incertezza -> direzione affidabile
-    promote_frames: 4            # frame di moto coerente consecutivi per promuovere
-    demote_frames: 15
-    disp_window: 1.5
-    disp_min: 0.3
-    dup_dist: 1.5
-    dup_vel: 0.8
+    min_hits: 3                             # detections needed to confirm a track
+    max_age: 10                             # frames without detection before a track is deleted
+    coast_publish_frames: 3                 # frames without detection during which a track is still published
 
-    # cross-check con la mappa semantica statica
-    use_static_map_gate: true
-    static_map_topic: /semantic_costmap
-    static_cost_thresh: 99          # 100 = struttura dura mappata (muro/edificio/albero)
-    static_gate_radius_cells: 2     # finestra di celle attorno alla traccia (assorbe il jitter)
-    # gate semantico camera sulle tracce (/semantic/segmentation, ID Cityscapes)
-    use_semantic_gate: true
-    seg_topic: /semantic/segmentation
-    camera_info_topic: /c920/camera_info
-    camera_frame: c920_optical
-    probe_height: 0.9              # [m] quota a cui proiettare la traccia (mezzo busto)
-    probe_patch: 2                # semi-finestra pixel per il voto di maggioranza
-    sem_static_hits: 2            # letture statiche consecutive per scartare la traccia
-    static_seg_classes: [2, 3, 4, 5, 7, 8]              # building/wall/fence/pole/sign/vegetation
-    dynamic_seg_classes: [11, 12, 13, 14, 15, 16, 17, 18]  # person/rider/car/.../bike
+    min_speed: 0.30                         # speed above which a track can be moving [m/s]
+    snr_min: 1.0                            # the speed must also exceed this multiple of its uncertainty
+    promote_frames: 4                       # consecutive moving frames to mark a track as moving
+    demote_frames: 15                       # consecutive still frames to mark it as still again
+    disp_window: 1.5                        # window over which the displacement is checked [s]
+    disp_min: 0.3                           # smallest displacement in that window to count as moving [m]
+    dup_dist: 1.5                           # confirmed tracks closer than this ... [m]
+    dup_vel: 0.8                            # ... and with similar velocity are merged [m/s]
 
-    use_yolo_gate: true
-    yolo_topic: /camera_detections
-    yolo_max_age: 0.5
-    yolo_probe_heights: [0.4, 0.9, 1.4]
-    yolo_box_margin: 0.10
-    yolo_hits: 2
-    yolo_forget: 10
-    publish_yolo_static: true
-    yolo_static_classes: [person]
-    lidar_publish_range: 6.0
+    use_static_map_gate: true               # drops tracks that sit on hard structure of the semantic map
+    static_map_topic: /semantic_costmap     # semantic map
+    static_cost_thresh: 99                  # cost that counts as hard structure
+    static_gate_radius_cells: 2             # cells around the track that are checked
 
-    # visualizzazione
-    marker_z: 0.6
-    arrow_time_scale: 1.0        # lunghezza freccia = velocità * questo [s]
-    publish_static: false        # true = mostra in grigio anche le tracce ferme (debug)
-    diag_period_frames: 20
+    use_semantic_gate: true                 # drops tracks that the camera sees as a static class
+    seg_topic: /semantic/segmentation       # segmentation from seg_infer_node
+    camera_info_topic: /c920/camera_info    # camera intrinsics
+    camera_frame: c920_optical              # optical frame of the camera
+    probe_height: 0.9                       # height at which the track is projected into the image [m]
+    probe_patch: 2                          # half size of the pixel patch that is checked [px]
+    sem_static_hits: 2                      # consecutive static readings that drop a track
+    static_seg_classes: [2, 3, 4, 5, 7, 8]                  # building, wall, fence, pole, sign, vegetation
+    dynamic_seg_classes: [11, 12, 13, 14, 15, 16, 17, 18]   # person, rider and vehicles
 
+    use_yolo_gate: true                     # confirms tracks with the YOLO boxes
+    yolo_topic: /camera_detections          # boxes from camera_detector
+    yolo_max_age: 0.5                       # oldest box used for a frame [s]
+    yolo_probe_heights: [0.4, 0.9, 1.4]     # heights projected into the image to match a box [m]
+    yolo_box_margin: 0.10                   # margin added around each box, as a share of its size
+    yolo_hits: 2                            # matched frames that give a track its YOLO class
+    yolo_forget: 10                         # missed frames that remove it
+    publish_yolo_static: true               # publishes YOLO-confirmed people even when still
+    yolo_static_classes: [person]           # classes published even when still
+    lidar_publish_range: 6.0                # tracks not confirmed by YOLO are published only within this range [m]
+
+    marker_z: 0.6                           # height of the markers [m]
+    arrow_time_scale: 1.0                   # length of the velocity arrow, in seconds of motion [s]
+    publish_static: false                   # also draws still tracks, in grey
+    diag_period_frames: 20                  # frames between two diagnostic logs
 
 camera_detector:
   ros__parameters:
-    use_sim_time: false
-    image_topic: /c920/image_raw
-    detections_topic: /camera_detections
-    model_path: yolo26n.pt
-    device: cuda:0
-    imgsz: 640
-    conf: 0.35
-    classes: [0, 1, 3]
-    max_hz: 10.0
-    log_period_s: 10.0
+    image_topic: /c920/image_raw            # camera images
+    detections_topic: /camera_detections    # output: 2D boxes
+    model_path: detection.pt                # weights in dynamic_layer/models, or an absolute path
+    device: cuda:0                          # GPU used for inference
+    imgsz: 640                              # network input size [px]
+    conf: 0.35                              # confidence threshold
+    classes: [0, 1, 3]                      # COCO classes: person, bicycle, motorcycle
+    max_hz: 10.0                            # highest detection rate [Hz]
+    log_period_s: 10.0                      # period of the rate log [s]

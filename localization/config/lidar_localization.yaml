@@ -1,49 +1,49 @@
 /**:
   ros__parameters:
-    registration_method: NDT_OMP
-    score_threshold: 6.0
-    ndt_resolution: 1.0
-    ndt_step_size: 0.1
-    ndt_num_threads: 4
-    ndt_max_iterations: 35
-    transform_epsilon: 0.01
-    voxel_leaf_size: 0.2
-    enable_scan_voxel_filter: true
-    scan_max_range: 100.0
-    scan_min_range: 1.0
-    scan_period: 0.1
-    use_pcd_map: true
-    set_initial_pose: true
-    initial_pose_qx: 0.0
+    registration_method: NDT_OMP            # scan matching method
+    score_threshold: 6.0                    # worst NDT fitness that is still accepted
+    ndt_resolution: 1.0                     # NDT cell size [m]
+    ndt_step_size: 0.1                      # NDT optimization step [m]
+    ndt_num_threads: 4                      # threads used by NDT
+    ndt_max_iterations: 35                  # NDT iterations per scan
+    transform_epsilon: 0.01                 # convergence threshold of NDT
+    voxel_leaf_size: 0.2                    # scan downsampling [m]
+    enable_scan_voxel_filter: true          # applies voxel_leaf_size to the scan
+    scan_max_range: 100.0                   # farther points are ignored [m]
+    scan_min_range: 1.0                     # closer points are ignored [m]
+    scan_period: 0.1                        # LiDAR period [s]
+    use_pcd_map: true                       # loads the map from map_path
+    set_initial_pose: true                  # set by the launch file from start_mode
+    initial_pose_qx: 0.0                    # start orientation, the yaw comes from the launch file
     initial_pose_qy: 0.0
-    use_odom: false
-    use_twist_prediction: false
-    use_odom_tf_prediction: true
-    constrain_odom_tf_prediction_to_planar: true
-    use_imu: false
-    use_continuous_time_deskew: false
-    enable_reinitialization_request_output: true
-    enable_reinitialization_request_latch: true
-    reinitialization_trigger_threshold: 0.95
-    reinitialization_trigger_gap_scale_sec: 30.0
-    reinitialization_trigger_seed_translation_scale_m: 100.0
-    reinitialization_trigger_reject_streak_scale: 200.0
-    reinitialization_trigger_fitness_explosion_threshold: 1000.0
-    enable_debug: false
-    predict_pose_from_previous_delta: true
-    enable_local_map_crop: false
-    reject_above_score_threshold: true
-    enable_borderline_seed_rejection_gate: true
-    enable_seed_correction_guard: true
-    seed_correction_guard_translation_m: 0.5
-    seed_correction_guard_yaw_deg: 15.0
-    borderline_seed_gate_score_threshold: 5.25
-    borderline_seed_gate_min_seed_translation_m: 1.0
-    enable_map_odom_tf: true
-    map_odom_tf_future_s: 0.5
-    level_map_to_odom: true
+    use_odom: false                         # does not read an odometry topic
+    use_twist_prediction: false             # does not predict from a twist topic
+    use_odom_tf_prediction: true            # predicts each scan from the odom -> base_footprint motion
+    constrain_odom_tf_prediction_to_planar: true   # keeps that prediction planar
+    use_imu: false                          # does not read the IMU
+    use_continuous_time_deskew: false       # does not deskew the scan
+    enable_reinitialization_request_output: true   # asks for a new global search when lost
+    enable_reinitialization_request_latch: true    # keeps that request until it is served
+    reinitialization_trigger_threshold: 0.95       # score that triggers the request
+    reinitialization_trigger_gap_scale_sec: 30.0   # time without good scans in that score [s]
+    reinitialization_trigger_seed_translation_scale_m: 100.0   # seed jump in that score [m]
+    reinitialization_trigger_reject_streak_scale: 200.0        # rejected scans in a row in that score
+    reinitialization_trigger_fitness_explosion_threshold: 1000.0   # fitness that triggers it at once
+    enable_debug: false                     # debug output
+    predict_pose_from_previous_delta: true  # uses the last correction as starting guess
+    enable_local_map_crop: false            # matches against the whole map
+    reject_above_score_threshold: true      # rejects scans above score_threshold
+    enable_borderline_seed_rejection_gate: true   # rejects borderline scans with a large seed jump
+    enable_seed_correction_guard: true      # rejects corrections larger than the guard below
+    seed_correction_guard_translation_m: 0.5     # largest accepted correction [m]
+    seed_correction_guard_yaw_deg: 15.0          # largest accepted correction [deg]
+    borderline_seed_gate_score_threshold: 5.25   # score above which a scan is borderline
+    borderline_seed_gate_min_seed_translation_m: 1.0   # seed jump that rejects a borderline scan [m]
+    enable_map_odom_tf: true                # publishes map -> odom
+    map_odom_tf_future_s: 0.5               # post-dates map -> odom so that Nav2 does not wait for it [s]
+    level_map_to_odom: true                 # keeps map -> odom level
     global_frame_id: map
     odom_frame_id: odom
     base_frame_id: base_footprint
-    enable_timer_publishing: false
-    pose_publish_frequency: 30.0
+    enable_timer_publishing: false          # publishes the pose on each scan, not on a timer
+    pose_publish_frequency: 30.0            # rate used only with timer publishing [Hz]

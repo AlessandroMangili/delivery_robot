@@ -41,19 +41,9 @@ protected:
     CriticData & data, double rx, double ry, const std::vector<Mover> & movers,
     size_t & blocked, double & tx, double & ty) const;
 
-  void findGap(
-    double bx, double by, double tx, double ty, double nx, double ny, double side,
-    float & offset, float & width) const;
-
   double obstacleLength(
     double bx, double by, double tx, double ty, double nx, double ny,
     const std::vector<Mover> & movers) const;
-
-  bool sideGap(
-    double bx, double by, double tx, double ty, double nx, double ny, double side, double length,
-    float & offset, float & width) const;
-
-  double pathBend(CriticData & data, size_t blocked, double length, double nx, double ny) const;
 
   bool route(
     double rx, double ry, double gx, double gy, double bx, double by, double tx, double ty,
@@ -78,21 +68,9 @@ protected:
 
   bool segmentFree(double x0, double y0, double x1, double y1) const;
 
-  bool corridorFree(
-
-    double x0, double y0, double x1, double y1, double half_width, double skip,
-
-    int threshold) const;
-
-  bool turnFree(double x, double y) const;
-
   void tracksCallback(const dynamic_tracker_msgs::msg::TrackArray::SharedPtr msg);
 
   std::vector<Mover> currentMovers(double now) const;
-
-  void publishDebug(
-    double now, double rx, double ry, bool target, size_t idx, bool direct, double tgx, double tgy,
-    float k);
 
   float attraction_weight_{5.0f};
   float rotation_weight_{10.0f};
@@ -107,11 +85,6 @@ protected:
   int free_cost_{128};
   float max_offset_{1.2f};
   float min_gap_{0.8f};
-  float width_cap_{2.0f};
-  float path_half_length_{0.4f};
-  float space_weight_{1.0f};
-  float deviation_weight_{1.0f};
-  float switch_margin_{0.5f};
   float progress_distance_{0.15f};
   float stuck_turn_deg_{20.0f};
   float stuck_time_{1.2f};
@@ -123,22 +96,14 @@ protected:
   float half_width_{0.33f};
   float ramp_time_{1.0f};
   float ramp_out_time_{1.5f};
-  float station_step_{0.2f};
   float obstacle_max_length_{2.0f};
   float free_length_{0.3f};
-  float bend_weight_{0.5f};
-  float bend_lookahead_{1.5f};
   float side_hold_time_{3.0f};
   float side_lost_time_{1.0f};
   float side_memory_time_{8.0f};
   float side_memory_distance_{1.5f};
   float score_alpha_{0.3f};
-  float heading_weight_{0.5f};
-  float reach_penalty_{1.0f};
-  float lateral_margin_{0.15f};
-  float waypoint_ahead_{0.3f};
   bool ignore_movers_{true};
-  bool use_routes_{true};
   float route_cost_weight_{10.0f};
   float route_switch_ratio_{0.8f};
   float route_mean_cost_{128.0f};
@@ -150,14 +115,7 @@ protected:
   float reach_radius_{0.35f};
   float passive_gain_{0.5f};
   float pre_wp1_gain_{1.0f};
-  bool straight_segments_{false};
-  float segment_margin_{0.10f};
-  float turn_margin_{0.05f};
-  float align_exit_deg_{-1.0f};
   bool turning_{false};
-  double wp1_x_{0.0};
-  double wp1_y_{0.0};
-  double wp1_st_{0.0};
   float passive_align_deg_{60.0f};
   float pass_margin_{0.2f};
   float mover_speed_{0.3f};
@@ -171,12 +129,7 @@ protected:
   float release_from_{0.0f};
   float side_{0.0f};
   bool have_wp_{false};
-  bool have_exit_{false};
   bool last_direct_{true};
-  double exit_x_{0.0};
-  double exit_y_{0.0};
-  double wp_x_{0.0};
-  double wp_y_{0.0};
   double last_blocked_{-1e9};
   double on_time_{0.0};
   double side_time_{-1e9};
@@ -212,10 +165,6 @@ protected:
   size_t last_target_{0};
 
   rclcpp::Subscription<dynamic_tracker_msgs::msg::TrackArray>::SharedPtr tracks_sub_;
-  bool debug_{false};
-  double debug_time_{-1e9};
-  std::string frame_{"odom"};
-  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr debug_pub_;
   mutable std::mutex tracks_mutex_;
   std::vector<Mover> movers_;
   double movers_time_{-1e9};

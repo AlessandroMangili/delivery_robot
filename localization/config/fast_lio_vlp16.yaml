@@ -1,48 +1,48 @@
 /**:
     ros__parameters:
-        feature_extract_enable: false
-        point_filter_num: 2
-        max_iteration: 3
-        filter_size_surf: 0.5
-        filter_size_map: 0.5
-        cube_side_length: 1000.0
-        runtime_pos_log_enable: false
-        map_file_path: "./test.pcd"
+        feature_extract_enable: false       # uses all points, no feature extraction
+        point_filter_num: 2                 # keeps one point out of this many
+        max_iteration: 3                    # iterations of the iterated Kalman filter
+        filter_size_surf: 0.5               # downsampling of the scan [m]
+        filter_size_map: 0.5                # downsampling of the local map [m]
+        cube_side_length: 1000.0            # side of the local map kept in memory [m]
+        runtime_pos_log_enable: false       # no runtime log
+        map_file_path: "./test.pcd"         # unused: no map is saved
 
         common:
-            lid_topic:  "/velodyne_points"
-            imu_topic:  "/mavros/imu/data"
-            time_sync_en: false
-            time_offset_lidar_to_imu: 0.0
+            lid_topic:  "/velodyne_points"  # LiDAR point cloud
+            imu_topic:  "/mavros/imu/data"  # Pixhawk IMU
+            time_sync_en: false             # no software time synchronization
+            time_offset_lidar_to_imu: 0.0   # time offset between LiDAR and IMU [s]
 
         preprocess:
-            lidar_type: 2
-            scan_line: 16
-            scan_rate: 10
-            timestamp_unit: 0
-            ignore_point_time: false
-            blind: 0.8
+            lidar_type: 2                   # Velodyne
+            scan_line: 16                   # LiDAR channels
+            scan_rate: 10                   # LiDAR rate [Hz]
+            timestamp_unit: 0               # per-point time in seconds
+            ignore_point_time: false        # uses the per-point time to deskew the scan
+            blind: 0.8                      # closer points are ignored [m]
 
         mapping:
-            acc_cov: 0.1
-            gyr_cov: 0.1
-            b_acc_cov: 0.0001
-            b_gyr_cov: 0.0001
-            fov_degree:    360.0
-            det_range:     100.0
-            extrinsic_est_en:  false
-            extrinsic_T: [ 0.12, 0., 0.185]
+            acc_cov: 0.1                    # accelerometer noise
+            gyr_cov: 0.1                    # gyroscope noise
+            b_acc_cov: 0.0001               # accelerometer bias random walk
+            b_gyr_cov: 0.0001               # gyroscope bias random walk
+            fov_degree:    360.0            # LiDAR field of view [deg]
+            det_range:     100.0            # LiDAR range [m]
+            extrinsic_est_en:  false        # the LiDAR-IMU pose below is fixed
+            extrinsic_T: [ 0.12, 0., 0.185] # LiDAR position relative to the IMU [m]
             extrinsic_R: [ 1., 0., 0.,
                            0., 1., 0.,
-                           0., 0., 1.]
+                           0., 0., 1.]      # LiDAR rotation relative to the IMU
 
         publish:
-            path_en:  false
-            tf_publish_en: false
-            scan_publish_en:  true
-            dense_publish_en: false
-            scan_bodyframe_pub_en: false
+            path_en:  false                 # no path output
+            tf_publish_en: false            # no TF: the EKF owns odom -> base_footprint
+            scan_publish_en:  true          # publishes the registered scan
+            dense_publish_en: false         # publishes the downsampled scan
+            scan_bodyframe_pub_en: false    # no scan in the body frame
 
         pcd_save:
-            pcd_save_en: false
+            pcd_save_en: false              # no map is saved
             interval: -1
